@@ -137,4 +137,43 @@ curl 直接 `-d '{"name":"中文"}'` 报 `JSON parse error: Invalid UTF-8 middle
 前端骨架一次通过，e2e 全链路（Vite proxy → 后端 → MySQL）验证通过。两点观察：① `mvn spring-boot:run` 与 `npm run dev` 的 npm wrapper 被 TaskStop 杀掉后，其派生的 java/node 子进程仍残留占端口，需 `netstat` 查 PID + `taskkill /T /F` 杀进程树——这正是任务 0.6 Electron 壳要解决的「残留进程清理」的真实复现；② create 接口返回的 createdAt/统计列为 null（会话 3 已记录），首页列表用 GET 取全量规避。下次 0.6（Electron 壳）开始进程生命周期管理，是 M0 的难点任务。
 
 ### [next] 17:45 · 下一步
-- [ ] 会话 5：任务 0.6（Electron 壳 + 后端进程生命周期管理）
+- [x] 会话 5：任务 0.6（Electron 壳 + 后端进程生命周期管理）
+
+## 会话 5 · M0 任务 0.6（Electron 壳 + 后端进程生命周期）
+
+### [goal] 17:50 · 目标
+完成 Electron 壳：桌面窗口自动拉起/关闭 Java 后端、端口冲突（残留进程）自动清理、退出无残留 java。表现为：`npm run dev:desktop` 窗口出现→遮罩→后端自动拉起→首页连通；关窗口后端自动退出；双实例不重复拉后端；单测通过。
+
+### [action] 17:52 · 操作
+后端新增 `ShutdownController`（POST /api/v1/shutdown）：先异步返回响应（延迟 300ms 保证送达），再 `System.exit(SpringApplication.exit(...))` 优雅关闭，供 Electron 退出时调用；用 AtomicBoolean 防重复触发。
+
+### [action] 17:55 · 操作
+desktop/ 建 Electron 工程：`main/index.js`（requestSingleInstanceLock 单实例锁、1280×800/min 960×600 窗口、splash「正在启动后端…」遮罩、before-quit→stop）、`main/backend-process.js`（纯 Node 模块：端口探测→决策→spawn java -jar→健康等待→POST /shutdown 优雅关闭 + taskkill 兜底）、`preload/index.js`（预留）。
+
+### [decision] 17:56 · 决策
+backend-process 用纯 Node（CommonJS、零 Electron 依赖），核心逻辑抽成 `decideStart`/`waitForHealth` 纯函数并支持依赖注入——直接用 `node --test` 单测分支逻辑，不为一个模块引入 vitest/tsc 构建链。放弃 docs/10 §9 写的 `.test.ts`：为测一个文件引入 TS 构建链收益不成比例，且 Electron 主进程默认 CJS，全程无需编译。
+
+### [decision] 17:57 · 决策
+端口占用判定用「TCP connect 探测 + netstat -ano 查 PID + PowerShell Get-CimInstance 查命令行」，命令行含 `trailmind` 即判为本应用残留→taskkill /T /F 后重启；否则报「被其他程序占用」。放弃 wmic（Win11 已弃用）；taskkill 必带 /T 杀进程树（对应会话 2 记录的残留教训）。
+
+### [decision] 17:58 · 决策
+「正在启动后端…」遮罩由主进程先 loadURL 一个 data: URL splash，后端健康就绪后再切到前端——不改前端 0.5 的加载/错误态，遮罩自包含在 desktop/。
+
+### [error] 17:58 · 错误
+Electron 二进制下载失败：npm 包已装（electron@43.4.0），但 postinstall 从 GitHub 下载 electron.exe 报 `TypeError: fetch failed`；设 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/` 重试亦超时（curl 探测 github 与 npmmirror 均不可达）。根因：当前网络无法访问 GitHub releases / npmmirror。影响：仅 GUI 窗口渲染无法本地目测，代码逻辑不受影响（已用 node 直跑 backend-process + 真实 jar 验证全链路）。修复：需在有 GitHub 访问的网络或可用镜像下 `npm install` 补下二进制。
+
+### [test] 17:59 · 验证
+- desktop `node --test`：9 个单测通过（decideStart 三分支、waitForHealth 重试/超时、start 的 kill-and-spawn/spawn/error 三分支）。
+- `mvn clean package`（JDK 21 + DB_PASS）：8 个后端测试通过，产出 `target/trailmind-backend-0.0.1.jar`。
+- headless e2e（node 直跑 backend-process）：`start()` spawn→健康等待 healthy=true（约 2.6s）；`stop()` POST /shutdown→java 优雅退出（约 0.36s），端口 17860 无 LISTENING 残留；`queryPortOwner(17860)` 实测识别运行中 trailmind 进程（cmdline 含 trailmind）。
+- 未验证：Electron GUI 窗口渲染（二进制下载受网络阻塞），列为人工验收项。
+
+### [artifact] 18:00 · 产出
+- 提交 `feat(backend)`：优雅关闭接口 POST /api/v1/shutdown
+- 提交 `feat(desktop)`：Electron 壳 + backend-process 进程管理 + 单测 + `dev:desktop` 脚本
+
+### [review] 18:02 · 复盘
+进程生命周期是 M0 难点，本次把关键决策抽成纯函数 + 依赖注入，最难测的「残留进程清理」分支用 node:test 直接覆盖，且 headless e2e 跑通 start→stop 全链路。三点教训：① Electron 二进制下载是「网络/镜像」类外部依赖，应像 MySQL 凭据一样在会话开始就确认可达性，而不是到验证阶段才撞墙；② GUI 窗口这类「不可见验证」必须明确列为人工验收项，不能用「代码写完」冒充「验证通过」；③ 依赖注入让 Electron 主进程逻辑可脱离 Electron 单测，是这类「壳」任务的关键手段。下次 0.7 一键脚本/打包：dev/build/package 脚本 + verify 冒烟 + electron-builder NSIS，需一并解决 Electron 二进制下载问题。
+
+### [next] 18:02 · 下一步
+- [ ] 会话 6：任务 0.7（一键脚本 dev/build/package + verify 冒烟 + electron-builder NSIS 打包）
