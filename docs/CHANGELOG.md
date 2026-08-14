@@ -253,6 +253,15 @@ M0 收尾：8 项验收中 7 项以硬证据勾选（verify 全绿 + 三套单�
 ### [review] 21:30 · 复盘
 「一键可用」验收在真实用户环境复现了缺口：脚本假设 `JAVA_HOME` 已指向 jdk-21，本机默认却是 jdk-25。教训：① 脚本不应假设环境、应自检——把「环境前提」下沉为「脚本自动解析」是「一键」的关键；② 复现要看清 JVM 版本行（`using Java 25`），别被「HealthControllerTest 过了」误导。遗留：Electron 的 backend-process.js 仍按 JAVA_HOME/PATH 找 java，运行时（dev:desktop / 打包后）同样需 JDK 21，待打包能产出后一并处理。
 
+### [error] 00:05 · 错误（纠正 21:20 的误判）
+隔离变量复测：`JAVA_HOME=jdk-25` + `DB_PASS` 注入时 `mvn test` 全绿（44/44、BUILD SUCCESS），**Java 25 并非根因**，「强制 JDK 21」无必要。真正根因是 `application.yml` 的 `spring.sql.init.mode: always` 在上下文启动时执行 schema.sql 需连 MySQL，而 `DB_PASS` 未设 → `Access denied for user 'root'@'localhost' (using password: NO)` → `dataSourceScriptDatabaseInitializer` 失败 → 级联报 `Cannot resolve reference to bean 'sqlSessionTemplate'`（末层 `Caused by` 才是 `SQLException`，`sqlSessionTemplate` 只是链路末端表象）。
+
+### [action] 00:10 · 操作
+回滚 `scripts/java.mjs` 与 `scripts/test/java.test.mjs`（错误诊断的产物）；build.mjs/dev.mjs 改用 Node stdlib `process.loadEnvFile` 从 gitignored 根目录 `.env` 读入 DB_USER/DB_PASS（已设的环境变量优先、不覆盖）；新建 `.env`（.gitignore 已忽略，明文密码不入库）。复测 `unset DB_PASS && node scripts/build.mjs`：Java 25 下 44 测试全过、BUILD SUCCESS，`npm run package` 的 build 阶段零手工环境变量。
+
+### [review] 00:15 · 复盘
+「一键打包」两次失败同一根因（DB_PASS 缺失），却先误判成 JDK 版本。教训：① 报错链的 `Caused by` 末层才是根因——`sqlSessionTemplate` 是 Spring 级联失败里最末暴露的 bean，必须向下挖到 `SQLException` 才算定位；② 隔离变量（25+DB_PASS vs 21+DB_PASS）一次就拆穿「Java 25 不兼容」假说，比看日志猜快；③ 敏感凭据的正确归宿是 gitignored 的 `.env` 由脚本自动加载，而非每次让用户 `export`——「一键」就应零手工环境变量。
+
 ## 会话 8 · M1 任务一（工作区完整 CRUD + 工作区首页）
 
 ### [goal] 22:15 · 目标
