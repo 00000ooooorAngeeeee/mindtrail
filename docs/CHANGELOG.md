@@ -243,3 +243,12 @@ M0 收尾：8 项验收中 7 项以硬证据勾选（verify 全绿 + 三套单�
 ### [next] 21:12 · 下一步
 - [ ] 遗留（人工）：开启 Windows 开发者模式后 `npm run package` 产出 exe + 双击安装启动 ≤3s 计时
 - [ ] M1：工作区 + 树状思维导图（07 §4）
+
+### [error] 21:20 · 错误（会话 7 后续）
+用户裸跑 `npm run package`（PowerShell，未设 JAVA_HOME）在后端测试阶段失败：`Cannot resolve reference to bean 'sqlSessionTemplate'`，日志 `using Java 25`。根因：build/dev 脚本继承 shell 默认 `JAVA_HOME=jdk-25`，而 MyBatis-Plus 在 Java 25 下无法建 SqlSessionFactory（HealthControllerTest 不依赖 MyBatis 故通过，WorkspaceControllerTest 全上下文加载即崩）。
+
+### [action] 21:25 · 操作
+新增 `scripts/java.mjs`：`findJdk21(dirs)` 纯函数扫描常见 JDK 安装目录找 `jdk-21*`（含 bin/java.exe）；`resolveJdk21()` 优先复用已设的 jdk-21，否则扫描 Program Files/Adoptium。build.mjs 与 dev.mjs 启动即注入 `JAVA_HOME`；补 `scripts/test/java.test.mjs` 4 单测。复测 `node scripts/build.mjs`：自动解析 `jdk-21.0.10`，后端 8 测试通过、BUILD SUCCESS。
+
+### [review] 21:30 · 复盘
+「一键可用」验收在真实用户环境复现了缺口：脚本假设 `JAVA_HOME` 已指向 jdk-21，本机默认却是 jdk-25。教训：① 脚本不应假设环境、应自检——把「环境前提」下沉为「脚本自动解析」是「一键」的关键；② 复现要看清 JVM 版本行（`using Java 25`），别被「HealthControllerTest 过了」误导。遗留：Electron 的 backend-process.js 仍按 JAVA_HOME/PATH 找 java，运行时（dev:desktop / 打包后）同样需 JDK 21，待打包能产出后一并处理。
