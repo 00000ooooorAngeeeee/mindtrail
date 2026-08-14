@@ -252,3 +252,40 @@ M0 收尾：8 项验收中 7 项以硬证据勾选（verify 全绿 + 三套单�
 
 ### [review] 21:30 · 复盘
 「一键可用」验收在真实用户环境复现了缺口：脚本假设 `JAVA_HOME` 已指向 jdk-21，本机默认却是 jdk-25。教训：① 脚本不应假设环境、应自检——把「环境前提」下沉为「脚本自动解析」是「一键」的关键；② 复现要看清 JVM 版本行（`using Java 25`），别被「HealthControllerTest 过了」误导。遗留：Electron 的 backend-process.js 仍按 JAVA_HOME/PATH 找 java，运行时（dev:desktop / 打包后）同样需 JDK 21，待打包能产出后一并处理。
+
+## 会话 8 · M1 任务一（工作区完整 CRUD + 工作区首页）
+
+### [goal] 22:15 · 目标
+完成 M1 第一个任务：工作区完整 CRUD（详情/更新/删除）+ 工作区首页。表现为：`GET/PUT/DELETE /api/v1/workspaces/{id}` 按 04 §5 契约可用、删除级联清理导图/会话/条目/标签及其关联、不存在返回 code=404、前端列表支持重命名/删除/进入详情、三套单测全绿、`verify.mjs` 冒烟 ALL PASS。
+
+### [action] 22:20 · 操作
+后端分层补全：新增 `common/NotFoundException`（→code=404）；`WorkspaceMapper` 加 6 个 `@Delete` 级联 SQL（entry_tag/entry_commit/entry/session/mindmap/tag，子先于父）；`WorkspaceService` 加 `get/update/delete`，`delete` 走 `@Transactional` 显式级联；`WorkspaceController` 加 `GET/{id}`、`PUT/{id}`、`DELETE/{id}`。
+
+### [action] 22:25 · 操作
+前端补全：`client.ts` 加 `put/del` 方法；`workspaces.ts` 加 `fetchWorkspace/updateWorkspace/deleteWorkspace`；`useAppStore` 加 `rename/remove` action；`App.tsx` 列表项支持行内重命名、二次确认删除、点击进入详情页（展示统计 + 导图/会话空态）。
+
+### [decision] 22:22 · 决策
+级联删除用 Mapper 上 6 个 `@Delete` 注解方法 + service 顺序调用，而非一条 `;` 分隔的 multi-statement SQL——MyBatis 默认 executor 不允许多语句，拆成单语句最稳；顺序「先清关联表再清业务表最后删 workspace」虽无物理外键约束，但保持语义正确、便于未来加物理 FK。
+
+### [decision] 22:22 · 决策
+新增独立 `NotFoundException`（404）而非复用 `BadRequestException`（400）——「资源不存在」与「参数非法」是两类语义，前端处理方式不同（404 可触发返回列表/刷新，400 提示改输入）。
+
+### [decision] 22:26 · 决策
+工作区首页的「导图/会话列表」本会话只做空态占位，内容归「导图数据层」（M1 任务二）与「会话」（M3）——不为尚不存在的 mindmap/session 列表 API 写死代码（YAGNI）。统计（mindmapCount/sessionCount）已由既有 `listWithCounts` 子查询带出，首页直接复用。
+
+### [test] 22:30 · 验证
+- 后端 `mvn test`（JDK21 + DB_PASS）：19 通过（SchemaSql 1 + Health 1 + WorkspaceController 集成 6 + WorkspaceService 11）。
+- 前端 `npm test`：10 通过（client 4 + App 6，含重命名/删除/详情交互）；`npm run build`（tsc + vite build）通过。
+- 脚本 `node --test scripts/test/verify.test.mjs`：5 通过。
+- live 冒烟：起后端 jar → `node scripts/verify.mjs` 输出 `M0 SMOKE: ALL PASS`（workspace 创建→列表→**DELETE 接口**删除往返）→ `POST /shutdown` 端口 17860 释放。
+
+### [artifact] 22:32 · 产出
+- `d00eb68` feat(backend)：工作区完整 CRUD（详情/更新/级联删除）+ NotFoundException + 单测 + verify 改回 DELETE 接口
+- `7564e06` feat(frontend)：工作区列表重命名/删除与详情页 + 单测
+
+### [review] 22:35 · 复盘
+后端「完整 CRUD + 级联删除」一次通过，级联删除的集成测试直接断言「删 workspace 后 mindmap/session/entry/tag/entry_tag/entry_commit 全为 0」，把最容易漏的关联清理锁死。两点观察：① 文档 04 §5 早已把 workspace 完整契约列全，本会话只是「补齐 M0 0.4 只做了创建/列表」的欠账，说明 M0 的刻意简化（先跑通链路）是合理的；② 07 §4 任务一标题「工作区首页（导图/会话列表、统计）」里的「导图/会话列表」本会话只空态占位，因依赖 mindmap/session 数据层，属合理切分、已记录，非遗漏。下次任务二「导图数据层」：先落 mindmap 表 CRUD + content_json 存取 + search_text/node_count 维护，TDD 先写 content_json 序列化/反序列化纯函数单测（04 §6.4 的树布局算法留到「树状画布」任务再碰）。
+
+### [next] 22:35 · 下一步
+- [ ] M1 任务二：导图数据层（mindmap CRUD + content_json 存取 + search_text/node_count 维护，05 §3/§4）
+- [ ] 遗留：树状画布（节点渲染/增删改/拖拽/折叠/布局/缩放）、撤销重做、整图防抖保存 + 乐观锁
