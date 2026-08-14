@@ -36,7 +36,7 @@
 - `npm run dev` — 前端 dev server + 后端联调
 - `npm run build` / `npm run package` — 构建 / 打包
 - `cd backend && mvn spring-boot:run` — 单独起后端
-- `scripts/verify.sh`（或 .ps1）— 里程碑验收冒烟脚本（M0 实现）
+- `node scripts/verify.mjs` — 里程碑验收冒烟脚本（M0 任务 0.7 实现）
 
 ## 4. 编码规范
 
@@ -123,13 +123,13 @@ feat(session): 实现时间线条目追加与类型选择
 
 ## 9. 给人类用户的会话启动提示词模板
 
-复制以下模板开启一次 vibecoding 会话：
+复制以下模板开启一次 vibecoding 会话。「本次任务」填 [AGENTS.md](../AGENTS.md)「当前进度」里第一个未勾选的任务（当前为 **M0 任务 0.5：前端工程 + 首页连通**）：
 
 ```
 你是思迹 TrailMind 项目的开发 agent。请先阅读项目根目录的 AGENTS.md 与 docs/08-Agent协作手册.md，
 然后按 docs/07-开发路线图与里程碑.md 的里程碑顺序工作。
 
-本次任务：<填写里程碑与验收项，如 "M1：实现树状导图的拖拽改层级功能">
+本次任务：<填 AGENTS.md「当前进度」第一个未勾选项，如 "M0 任务 0.5：前端工程 + 首页连通">
 
 要求：
 1. 先读相关文档再动手；
@@ -137,6 +137,8 @@ feat(session): 实现时间线条目追加与类型选择
 3. 关键逻辑补单测；
 4. 会话结束时按 docs/06-过程记录规范.md 写 review，并把文档变更同步回 docs/。
 ```
+
+> 若「本次任务」留空，agent 应读取 AGENTS.md「当前进度」的第一个未勾选项作为本次任务。每完成一个任务并勾选后，本节的「当前为」示例任务需同步后移（写入该会话的 review 记录里）。
 
 ## 10. 常见陷阱清单（agent 与人类都要看）
 
