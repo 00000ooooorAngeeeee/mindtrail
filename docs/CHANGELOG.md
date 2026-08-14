@@ -70,4 +70,36 @@ README 补充「仓库结构」小节（对应 04 §3）。
 后端底座一次通过。教训：① 验证运行态前先确认端口/进程干净——残留进程会让「成功建表」和「启动失败」同时出现，误导判断；② 框架内建机制（spring.sql.init）优于手工 ApplicationRunner，符合「少写代码」原则。下次 0.4（workspace CRUD）开始引入真实业务逻辑与事务，需按 TDD 补 Service 单测。
 
 ### [next] 16:50 · 下一步
-- [ ] 会话 3：任务 0.4（workspace CRUD 创建/列表 + 落库往返）
+- [x] 会话 3：任务 0.4（workspace CRUD 创建/列表 + 落库往返）
+
+## 会话 3 · M0 任务 0.4（workspace CRUD 创建/列表）
+
+### [goal] 17:00 · 目标
+跑通「后端 → 数据库」第一条真实业务数据链路。表现为：POST /api/v1/workspaces 创建返回 id、GET 列表含统计（导图数/会话数）、空/超长 name 返回 code=400、数据落库可查、单测通过。
+
+### [action] 17:02 · 操作
+分层落地：`entity/Workspace`（@TableId AUTO，含 @TableField(exist=false) 的 mindmapCount/sessionCount 统计列）→ `repository/WorkspaceMapper`（BaseMapper + listWithCounts 子查询）→ `service/WorkspaceService`（create 校验 + list）→ `controller/WorkspaceController`（POST/GET）。新增 `common/BadRequestException`，GlobalExceptionHandler 加 400 分支。
+
+### [decision] 17:04 · 决策
+统计列用一条 SQL 子查询（`(SELECT COUNT(*) FROM mindmap WHERE workspace_id=w.id) AS mindmap_count`）带出，而非逐工作区 N+1 查询——列表 <50 行一次搞定，且走 `map-underscore-to-camel-case` 自动映射到统计字段。
+
+### [decision] 17:04 · 决策
+列表复用 `Workspace` 实体挂统计列（`@TableField(exist=false)`），不另建 VO 类——少一个文件，前端拿到的 JSON 形状不变。
+
+### [decision] 17:05 · 决策
+校验放在 service 手工做（name 非空/≤100、repoPath 存在 .git），用 `BadRequestException` 转 code=400，与 docs/10 §7「service 层校验」描述一致，不引入 jakarta-validation 注解与 DTO。不用 `@Transactional`：0.4 只有单条 insert（已原子），无多语句写。
+
+### [error] 17:06 · 错误
+curl 直接 `-d '{"name":"中文"}'` 报 `JSON parse error: Invalid UTF-8 middle byte`。根因：Windows 终端把命令行中文按 GBK 编码传，非后端 bug（ASCII 的空名/超长名均正确返回 400）。修复：`--data-binary @utf8.json` 传文件体重验通过，中文正常落库。
+
+### [test] 17:07 · 验证
+`mvn test` 8 个通过（Health 1 + WorkspaceController 集成 2 + WorkspaceService 4）；运行时 curl：POST 返回 id、GET 列表含刚创建项且统计=0、空名/超长名 code=400；`mysql SELECT` 可见数据落库。停止时用 `taskkill /T /F` 杀进程树，确认无残留 trailmind java 进程（其余 java 为 Gradle/VSCode 守护，与本应用无关）。
+
+### [artifact] 17:08 · 产出
+- `eb49c01`：工作区创建与列表接口 + 单测
+
+### [review] 17:09 · 复盘
+第一条真实业务链路一次通过。两点观察：① POST 响应的 createdAt/updatedAt/mindmapCount 为 null（insert 只回填自增 id，时间戳与统计需 SELECT 才有）——前端 M0 用 GET 列表取全量即可，后续若有需要再在 create 后回查；② curl 传中文的编码坑与后端无关，验证时用文件体更稳。下次 0.5（前端）开始前后端连通，需按 04 §5 契约封装 API client 并做 CORS/proxy。
+
+### [next] 17:09 · 下一步
+- [ ] 会话 4：任务 0.5（前端工程 + 首页连通，Vite + React + TS + zustand）
