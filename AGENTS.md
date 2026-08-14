@@ -4,7 +4,7 @@
 
 ## 这是什么
 
-**思迹 TrailMind**：Windows 桌面端工具 = 双模式思维导图 + Git 绑定的 vibecoding 过程记录。当前仓库已进入 **M0 里程碑开发**（后端 /health、MySQL 幂等建表、workspace CRUD 已落地），正在推进前端工程（任务 0.5）。
+**思迹 TrailMind**：Windows 桌面端工具 = 双模式思维导图 + Git 绑定的 vibecoding 过程记录。当前仓库已进入 **M0 里程碑开发**（后端 /health、MySQL 幂等建表、workspace CRUD、前端工程已落地），正在推进 Electron 壳（任务 0.6）。
 
 ## 技术栈（一句话）
 
@@ -33,8 +33,8 @@
 
 - [x] v0：文档完备
 - [ ] M0：项目骨架与工程化（进行中）
-  - [x] 0.0 环境准备 ｜ 0.1 仓库初始化 ｜ 0.2 后端骨架 + /health ｜ 0.3 MySQL 连接 + 幂等建表 ｜ 0.4 workspace CRUD
-  - [ ] 0.5 前端工程 + 首页连通 ← **下一个任务** ｜ 0.6 Electron 壳 ｜ 0.7 一键脚本与打包 ｜ 0.8 M0 总验收
+  - [x] 0.0 环境准备 ｜ 0.1 仓库初始化 ｜ 0.2 后端骨架 + /health ｜ 0.3 MySQL 连接 + 幂等建表 ｜ 0.4 workspace CRUD ｜ 0.5 前端工程 + 首页连通
+  - [ ] 0.6 Electron 壳 ← **下一个任务** ｜ 0.7 一键脚本与打包 ｜ 0.8 M0 总验收
 - [ ] M1~M4：见 docs/07
 
 ## 文档索引

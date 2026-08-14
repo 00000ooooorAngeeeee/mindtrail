@@ -102,4 +102,39 @@ curl 直接 `-d '{"name":"中文"}'` 报 `JSON parse error: Invalid UTF-8 middle
 第一条真实业务链路一次通过。两点观察：① POST 响应的 createdAt/updatedAt/mindmapCount 为 null（insert 只回填自增 id，时间戳与统计需 SELECT 才有）——前端 M0 用 GET 列表取全量即可，后续若有需要再在 create 后回查；② curl 传中文的编码坑与后端无关，验证时用文件体更稳。下次 0.5（前端）开始前后端连通，需按 04 §5 契约封装 API client 并做 CORS/proxy。
 
 ### [next] 17:09 · 下一步
-- [ ] 会话 4：任务 0.5（前端工程 + 首页连通，Vite + React + TS + zustand）
+- [x] 会话 4：任务 0.5（前端工程 + 首页连通，Vite + React + TS + zustand）
+
+## 会话 4 · M0 任务 0.5（前端工程 + 首页连通）
+
+### [goal] 17:11 · 目标
+完成前端工程 + 首页连通。表现为：浏览器打开首页显示品牌名「思迹 TrailMind」、后端版本号、工作区列表；点创建按钮列表出现新工作区（刷新不丢）；后端未启动时显示明确错误态而非白屏；单测通过。
+
+### [action] 17:15 · 操作
+手写 Vite + React 18 + TS 工程骨架（package.json / vite.config.ts / tsconfig.json / index.html），未用 `npm create vite` 交互式脚手架——agent 环境下交互提示无法自动化，手写等价且可控。依赖 react/react-dom/zustand；dev 依赖 vite/vitest/@testing-library/ts。
+
+### [action] 17:20 · 操作
+实现 api 层：`client.ts`（原生 fetch，baseURL `/api/v1`，统一解包 `{code,data}`，code≠0 抛 ApiError，网络失败提示「后端未连接」）、`health.ts`、`workspaces.ts`、`types.ts`（Health/Workspace/ApiResponse 类型）。
+
+### [action] 17:23 · 操作
+实现首页 App + zustand store（useAppStore：health/workspaces/loading/error + load/create），品牌名 + 版本号 + 工作区列表 + 创建按钮 + 空态/错误态。
+
+### [decision] 17:21 · 决策
+用原生 fetch 而非 axios——文档允许「axios 或原生 fetch」，原生少一个依赖，封装 40 行内完成，足够 M0/M1 用；放弃 axios 因无额外需求。
+
+### [decision] 17:22 · 决策
+用 Vite dev proxy（`/api` → 127.0.0.1:17860）而非后端加 CORS——文档推荐 proxy，生产 Electron 加载打包产物本就无跨域，后端不暴露 CORS 头，安全边界（N6）更干净。
+
+### [decision] 17:24 · 决策
+样式用普通 CSS（App.css + index.css）而非 CSS Modules——08 §4.3 写「CSS Modules（或约定方案，M0 定）」，M0 首页单组件，普通 CSS 最小；M1 组件增多时再定约定并迁移。
+
+### [test] 17:38 · 验证
+`npm test` 7 个通过（client 4：解包成功 / code≠0 抛错 / 网络异常提示 / body 序列化；App 3：渲染品牌名+版本号 / 空态 / 后端不可用错误态）；`npm run build`（tsc --noEmit + vite build）通过。运行时 e2e：起后端（DB_PASS 注入）→ 起前端 dev server → 经 proxy 调 /health 返回 code=0、POST /workspaces 创建成功（id=3）、GET 列表含新工作区（统计=0），全链路连通。
+
+### [artifact] 17:41 · 产出
+- `4d92215`：前端工程骨架 + 首页连通 + 单测
+
+### [review] 17:45 · 复盘
+前端骨架一次通过，e2e 全链路（Vite proxy → 后端 → MySQL）验证通过。两点观察：① `mvn spring-boot:run` 与 `npm run dev` 的 npm wrapper 被 TaskStop 杀掉后，其派生的 java/node 子进程仍残留占端口，需 `netstat` 查 PID + `taskkill /T /F` 杀进程树——这正是任务 0.6 Electron 壳要解决的「残留进程清理」的真实复现；② create 接口返回的 createdAt/统计列为 null（会话 3 已记录），首页列表用 GET 取全量规避。下次 0.6（Electron 壳）开始进程生命周期管理，是 M0 的难点任务。
+
+### [next] 17:45 · 下一步
+- [ ] 会话 5：任务 0.6（Electron 壳 + 后端进程生命周期管理）
