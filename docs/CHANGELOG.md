@@ -38,3 +38,36 @@ README 补充「仓库结构」小节（对应 04 §3）。
 ### [next] 16:32 · 下一步
 - [x] 提供 MySQL `root` 密码（已验证 `SELECT 1` 通过；密码存本地记忆，经 `DB_USER/DB_PASS` 注入，不入 git）
 - [ ] 会话 2：任务 0.2（后端 Spring Boot 骨架 + `/health`）+ 0.3（MySQL 连接 + 幂等建表）
+
+## 会话 2 · M0 任务 0.2 + 0.3（后端骨架 + 数据库连接）
+
+### [goal] 16:35 · 目标
+完成后端 Spring Boot 骨架（/health 连通）与 MySQL 连接/幂等建表。表现为：`GET /api/v1/health` 返回统一结构、端口仅绑 127.0.0.1、清库后启动自动建 8 表、重启无报错、单测通过。
+
+### [action] 16:38 · 操作
+创建 Spring Boot 3.3.5 工程（Java 21），包结构 controller/common；实现 HealthController、ApiResponse 统一响应、GlobalExceptionHandler 全局异常处理。
+
+### [decision] 16:40 · 决策
+依赖拆分：0.2 仅引 web + test，MySQL/MyBatis-Plus 放到 0.3。因为 0.2 无 datasource 时若提前引入 mybatis-plus（传递 spring-jdbc）会导致启动报「url 未配置」，拆开保证每步自洽。
+
+### [decision] 16:44 · 决策
+建库建表用 Spring 内建 `spring.sql.init` + URL 参数 `createDatabaseIfNotExist=true`，而非 docs/10 描述的「自定义 DatabaseInitializer(ApplicationRunner)」。理由：框架内建方案少 40 行样板、无 DriverManager/语句拆分手工逻辑，且 createDatabaseIfNotExist 让「谁先连接都自动建库」更健壮。放弃自建 Runner 因复杂度无收益。
+
+### [decision] 16:45 · 决策
+排序规则实际为 `utf8mb4_0900_ai_ci`（MySQL 8 默认）而非 docs/05 §3 写的 `utf8mb4_unicode_ci`。字符集 utf8mb4 满足验收；0900_ai_ci 是 MySQL 8 推荐的更准 Unicode 比对。已同步 docs/05 §3 表述。
+
+### [error] 16:47 · 错误
+验证时新实例启动报 `Web server failed to start. Port 17860 was already in use`。根因：上一会话用 TaskStop 停 `mvn spring-boot:run` 未杀到其派生的 java 子进程（PID 17416 残留占 17860）。修复：`taskkill /PID 17416 /T /F` 杀进程树。教训：spring-boot:run 的 java 子进程需 `/T` 杀进程树——正是 docs/10 任务 0.6「残留进程」问题的真实案例。
+
+### [test] 16:48 · 验证
+`mvn test` 2 个单测通过（HealthControllerTest + SchemaSqlTest）；运行时：DROP trailmind 后启动 → 自动建 8 表 → `SHOW CREATE TABLE entry` 含 `FULLTEXT...WITH PARSER ngram` → 表/库字符集均 utf8mb4 → 二次重启无报错。
+
+### [artifact] 16:48 · 产出
+- `bb127e7`：后端骨架 + /health + 单测
+- `ea998fa`：数据库连接 + schema.sql 8 表 + SchemaSqlTest
+
+### [review] 16:50 · 复盘
+后端底座一次通过。教训：① 验证运行态前先确认端口/进程干净——残留进程会让「成功建表」和「启动失败」同时出现，误导判断；② 框架内建机制（spring.sql.init）优于手工 ApplicationRunner，符合「少写代码」原则。下次 0.4（workspace CRUD）开始引入真实业务逻辑与事务，需按 TDD 补 Service 单测。
+
+### [next] 16:50 · 下一步
+- [ ] 会话 3：任务 0.4（workspace CRUD 创建/列表 + 落库往返）
