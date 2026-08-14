@@ -1,0 +1,7 @@
+server:
+  port: 17860
+  address: 127.0.0.1   # 仅回环，安全边界 N6
+
+spring:
+  application:
+    name: trailmind-backend
