@@ -1,19 +1,12 @@
 // 一键开发（docs/10 §10）：并行启动后端（mvn spring-boot:run）与前端（npm run dev），Ctrl+C 整棵树终止。
-// 前置：MySQL 已启动（见 docs/10 任务 0.0/0.3）；JDK 21 自动解析（scripts/java.mjs），无需手动设 JAVA_HOME。
+// 前置：MySQL 已启动（见 docs/10 任务 0.0/0.3）；DB 凭据从根目录 .env（gitignore 已忽略）加载。
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
-import { resolveJdk21 } from './java.mjs'
 import { killProcessTree } from '../desktop/main/backend-process.js'
 
-// 强制用 JDK 21 跑后端：MyBatis-Plus 在 Java 25 下无法建 sqlSessionTemplate。
-const jdk21 = resolveJdk21()
-if (jdk21) {
-  process.env.JAVA_HOME = jdk21
-  console.log(`[dev] 使用 JDK 21：${jdk21}`)
-} else {
-  console.warn('[dev] 警告：未找到 JDK 21，将用当前 java（若为 Java 25 会因 MyBatis 失败）')
-}
+// 本地敏感配置（DB_USER/DB_PASS）不提交，从 .env 读入；shell 已设的环境变量不覆盖。
+try { process.loadEnvFile(new URL('../.env', import.meta.url)) } catch { /* 无 .env 时回落到 shell 环境变量 */ }
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const children = []
