@@ -1,0 +1,12 @@
+{
+  "name": "trailmind",
+  "version": "0.0.1",
+  "private": true,
+  "description": "思迹 TrailMind — 双模式思维导图 + Git 绑定的 vibecoding 过程记录",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs",
+    "package": "node scripts/package.mjs",
+    "verify": "node scripts/verify.mjs"
+  }
+}
