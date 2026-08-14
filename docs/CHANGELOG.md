@@ -216,3 +216,30 @@ verify.mjs 首跑 workspace 往返失败：`Content-Type 'application/octet-stre
 
 ### [next] 18:45 · 下一步
 - [ ] 会话 7：任务 0.8（M0 总验收 + dogfooding 启动记录：勾选 07 §3 全清单、补 M0 过程记录、同步 AGENTS.md 进度至 M1）
+
+## 会话 7 · M0 任务 0.8（M0 总验收 + dogfooding 启动）
+
+### [goal] 18:38 · 目标
+完成 M0 总验收：逐项执行 07 §3 / 10 §12 验收清单，能自动化的以硬证据勾选、GUI/权限项诚实标注；补写 M0 全程过程记录（会话 1-6 已写，本会话收尾）；同步 AGENTS.md 进度至 M1。表现为：`node scripts/verify.mjs` 全绿、三套单测通过、进度文档同步、本会话写 review。
+
+### [action] 18:40 · 操作
+以 JDK 21 + `DB_PASS` 环境变量启动后端 jar（`Started in 2.066 seconds`），跑 `node scripts/verify.mjs` 输出 `M0 SMOKE: ALL PASS`（health code=0、schema 8/8、workspace 创建→列表→清理往返）。
+
+### [test] 18:46 · 验证
+- 后端 `mvn test`：8 通过（SchemaSql 1 + Health 1 + WorkspaceController 2 + WorkspaceService 4）。注意：`@SpringBootTest` 集成测试需注入 `DB_PASS` 才能加载上下文，裸 `mvn test` 报 `ApplicationContext failure`——非缺陷，是集成测试连 MySQL 的前置。
+- 前端 `npm test`：7 通过（client 4 + App 3）。
+- desktop `node --test`：9 通过（backend-process 决策/健康等待/启停分支）。
+- 验收项逐条实测：`GET /api/v1/health` code=0 ✓；端口仅绑 127.0.0.1（N6）✓；workspace 创建/列表/空名 400 ✓；schema 8 表齐全 ✓；优雅关闭 `POST /api/v1/shutdown` 返 code=0、端口释放、无残留 trailmind java ✓；幂等建表（表已存在时重启无错）✓。
+
+### [error] 20:57 · 错误
+`npm run package` 在 electron-builder 解压 winCodeSign 失败：`ERROR: Cannot create symbolic link : 客户端没有所需的特权 : .../darwin/10.12/lib/libcrypto.dylib`。根因：Windows 未开启「开发者模式」，7zip `-snld` 解压软链接需 `SeCreateSymbolicLinkPrivilege` 权限，而 winCodeSign/NSIS 归档内含 macOS dylib 软链接。验证：`7za x -snl-`（关软链接）解压成功（83 文件、Everything is Ok），证明归档与打包代码无误、纯权限前置。修复：设置 → 隐私和安全性 → 开发者选项 → 开启「开发人员模式」（或以管理员运行），重跑 `npm run package`。
+
+### [decision] 21:00 · 决策
+「双击打包 exe 安装、启动 ≤3s」不勾选完成，标注为**环境待办**：① 产 exe 需先开开发者模式；② 安装/启动计时本就是 GUI 人工验收，agent 环境无法 headless 完成。与其用 `-snl-` 手工预解压缓存绕行，不如把前置条件写进文档（已同步 docs/10 常见坑），一次到位、不伪造验证。
+
+### [review] 21:12 · 复盘
+M0 收尾：8 项验收中 7 项以硬证据勾选（verify 全绿 + 三套单测 + 端口/幂等/CRUD/优雅关闭逐条实测），唯一未勾选是「打包安装 ≤3s」，根因是 Windows 开发者模式这一系统级权限前置、与代码无关。三点教训：① 打包这类「网络 + 系统权限」双重外部依赖，应在 0.7 就实测一次而非留到 0.8 才撞权限墙；② `npm install` 被超时中断会留下「包在、bin 链接缺失」的半装态，表现为 `'electron-builder' 不是内部或外部命令`，补救是重跑 `npm install` 补 bin 链接；③ 验收要诚实：能自动化就自动化，GUI/权限项明确标注人工、不冒充。下次 M1（工作区 + 树状导图）进入画布业务，需按 TDD 先补树布局纯函数单测。
+
+### [next] 21:12 · 下一步
+- [ ] 遗留（人工）：开启 Windows 开发者模式后 `npm run package` 产出 exe + 双击安装启动 ≤3s 计时
+- [ ] M1：工作区 + 树状思维导图（07 §4）
