@@ -2,12 +2,14 @@ import { useCallback, useEffect, useState } from 'react'
 import { useAppStore } from './store/useAppStore'
 import { createMindmap, deleteMindmap, listMindmaps } from './api/mindmaps'
 import type { Mindmap, Workspace } from './api/types'
+import { MindMapEditor } from './features/mindmap/MindMapEditor'
 import './App.css'
 
 export default function App() {
   const { health, workspaces, loading, creating, error, load, create, rename, remove } = useAppStore()
   const [name, setName] = useState('')
   const [open, setOpen] = useState<Workspace | null>(null)
+  const [openMindmapId, setOpenMindmapId] = useState<number | null>(null)
 
   useEffect(() => {
     void load()
@@ -40,8 +42,10 @@ export default function App() {
       )}
 
       <main className="content">
-        {open ? (
-          <WorkspaceHome ws={open} onBack={() => setOpen(null)} />
+        {openMindmapId != null ? (
+          <MindMapEditor mindmapId={openMindmapId} onBack={() => setOpenMindmapId(null)} />
+        ) : open ? (
+          <WorkspaceHome ws={open} onBack={() => setOpen(null)} onOpenMindmap={setOpenMindmapId} />
         ) : (
           <section className="workspace-panel">
             <h2>工作区</h2>
@@ -125,7 +129,15 @@ function WorkspaceItem({
   )
 }
 
-function WorkspaceHome({ ws, onBack }: { ws: Workspace; onBack: () => void }) {
+function WorkspaceHome({
+  ws,
+  onBack,
+  onOpenMindmap,
+}: {
+  ws: Workspace
+  onBack: () => void
+  onOpenMindmap: (id: number) => void
+}) {
   const [mindmaps, setMindmaps] = useState<Mindmap[]>([])
   const [name, setName] = useState('')
   const [loading, setLoading] = useState(false)
@@ -193,6 +205,7 @@ function WorkspaceHome({ ws, onBack }: { ws: Workspace; onBack: () => void }) {
                 {m.name}
                 <span className="item-stats">{m.nodeCount ?? 0} 节点</span>
               </span>
+              <button onClick={() => onOpenMindmap(m.id)}>打开</button>
               <button className="danger" onClick={() => void handleDelete(m.id)}>
                 删除
               </button>
