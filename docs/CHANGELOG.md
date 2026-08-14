@@ -328,3 +328,41 @@ content_json 解析用 Jackson tree 模型（JsonNode 遍历）而非定义 POJO
 - [ ] 遗留：撤销/重做 ｜ 整图防抖保存（800ms）+ 乐观锁（后端乐观锁已在任务二完成，剩前端 800ms 防抖与撤销重做）
 - [ ] 遗留：导图重命名（PRD B4，P0）——04 §5 无独立重命名端点，本次按「数据层」边界未做；待画布任务时补 PATCH 或 PUT 携带 name 的端点（重命名需同步更新 search_text 中的 name 部分）
 - [ ] 遗留：verify.mjs 补导图往返冒烟（创建→保存→search_text/node_count 断言→删除），M1 里程碑总验收时收尾
+
+## 会话 10 · M1 任务三（树状模式画布）
+
+### [goal] 23:42 · 目标
+完成 M1 第三个任务：树状模式画布。表现为：从工作区首页打开导图进入树状编辑，可渲染圆角卡片节点、选中浮出工具条（添加/编辑/删除）、双击编辑文本、拖拽改层级（悬停高亮、拖到空白变根分支）、折叠/展开带子节点徽标、自研树布局无重叠、缩放平移/适应视图、双击空白加节点；Ctrl+S/保存按钮可整图落库（乐观锁）；关键纯函数（树布局、content_json 序列化/增删改移）有单测。
+
+### [action] 23:44 · 操作
+前端新增 `features/mindmap/` 目录：`content.ts`（content_json 类型 + 解析/序列化 + 节点增删改移折叠纯函数，parentId 为层级唯一事实源）、`treeLayout.ts`（自研右向树布局：递归子树槽位 → 中序均分 → O(n)）、`MindmapNode.tsx`（React Flow 自定义节点卡片）、`MindMapEditor.tsx`（画布 + 工具栏 + 状态栏 + 快捷键）。`api/mindmaps.ts` 加 `getMindmap/saveMindmap`；`store/useMindmapStore.ts` 加导图状态与 action；`App.tsx` 工作区首页导图「打开」按钮接入编辑器。引入依赖 `@xyflow/react@12`。
+
+### [decision] 23:44 · 决策
+渲染用 React Flow（@xyflow/react），自研只做布局纯函数 `computeTreeLayout`——符合 04 §2 ADR「画布引擎 React Flow，树布局自研」，M2 自由画布可直接复用同一引擎，不重复造拖拽/缩放/平移轮子。
+
+### [decision] 23:44 · 决策
+层级以 `nodes[].parentId` 为唯一事实源，`edges[]` 只保留 free 连线（M2 用），不在树模式同步生成 parent-child 边——后端默认 content_json 本就 `parentId` + 空 edges，避免两份层级状态漂移；渲染时按 parentId 临时派生边。
+
+### [decision] 23:45 · 决策
+本会话只落地「手动保存」（Ctrl+S + 保存按钮，走 PUT 乐观锁），800ms 自动防抖与撤销/重做留到下一验收项——按 AGENTS.md「树状画布」与「撤销重做｜整图防抖保存」的拆项边界，不为下一任务抢跑；手动保存保证数据不丢已足够本项闭环。
+
+### [error] 23:46 · 错误
+树布局初版把「叶子槽位（整数）」与「像素 y（槽位×ROW_GAP）」混用：父节点居中时对子节点已是像素的 y 又乘了一次 ROW_GAP（双重放大），且孤立节点兜底把「折叠隐藏节点」误判为孤儿补回坐标。修复：用独立 `slots` 映射存槽位、最后统一乘 ROW_GAP；兜底前先算「从根可达集合」区分折叠隐藏与真孤立。单测第一时间抓出（「父节点垂直居中」「折叠子树不占位」两条断言失败），印证了纯函数 TDD 的价值。
+
+### [test] 23:50 · 验证
+- 前端 `npm test`：31 通过（client 4 + treeLayout 5 + content 13 + App 9）。
+- `npx tsc --noEmit` + `npm run build`（vite 342KB 产物）通过。
+- 说明：GUI 运行时交互（拖拽/折叠）未在无头环境实机点击验证（无 Playwright），布局与内容纯函数已单测锁死；建议人工打开一次导图目测 20 节点布局 + 拖拽 + 折叠。
+
+### [artifact] 23:52 · 产出
+- `feat(frontend)`：导图 content_json 数据层与自研树布局纯函数（含单测）
+- `feat(frontend)`：树状模式画布（React Flow 渲染/编辑/拖拽改层级/折叠/缩放）+ 手动保存
+
+### [review] 23:54 · 复盘
+画布一次跑通，自研布局 60 行内完成、单测锁死「无重叠 + 折叠收缩 + 父节点居中」，符合 08 §10「树布局不引重型库、自研 200 行内」。两点教训：① 纯函数 TDD 的收益体现在「槽位/像素混用」这类隐式单位 bug 上——布局正确性肉眼难查、断言一跑就现形；② React Flow v12 的类型约束（data 需 `Record<string, unknown>`，故节点 data 用 type 别名而非 interface）是上手时最常见的编译坑，已按官方惯例定型。遗留：撤销/重做、整图 800ms 防抖、导图重命名（PRD B4）、verify.mjs 导图往返冒烟——均归入下几个验收项。
+
+### [next] 23:54 · 下一步
+- [ ] M1 任务四：撤销/重做（导图操作，含删除子树撤销）+ 整图防抖保存（800ms + 乐观锁冲突提示）
+- [ ] 遗留：导图重命名（PRD B4）——补 PUT 携带 name 或独立 PATCH 端点（重命名需同步更新 search_text 的 name 部分）
+- [ ] 遗留：verify.mjs 补导图往返冒烟（创建→保存→search_text/node_count 断言→删除）
+- [ ] 遗留：GUI 人工目测（20 节点布局 + 拖拽 5 次 + 折叠 2 处）
