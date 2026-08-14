@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import App from './App'
 import { fetchHealth } from './api/health'
 import { deleteWorkspace, fetchWorkspaces, updateWorkspace } from './api/workspaces'
+import { createMindmap, deleteMindmap, listMindmaps } from './api/mindmaps'
 
 vi.mock('./api/health', () => ({ fetchHealth: vi.fn() }))
 vi.mock('./api/workspaces', () => ({
@@ -11,11 +12,19 @@ vi.mock('./api/workspaces', () => ({
   updateWorkspace: vi.fn(),
   deleteWorkspace: vi.fn(),
 }))
+vi.mock('./api/mindmaps', () => ({
+  listMindmaps: vi.fn(),
+  createMindmap: vi.fn(),
+  deleteMindmap: vi.fn(),
+}))
 
 const healthMock = vi.mocked(fetchHealth)
 const workspacesMock = vi.mocked(fetchWorkspaces)
 const updateMock = vi.mocked(updateWorkspace)
 const deleteMock = vi.mocked(deleteWorkspace)
+const listMindmapsMock = vi.mocked(listMindmaps)
+const createMindmapMock = vi.mocked(createMindmap)
+const deleteMindmapMock = vi.mocked(deleteMindmap)
 
 const ws = { id: 1, name: '项目A', mindmapCount: 2, sessionCount: 1 }
 
@@ -25,10 +34,16 @@ describe('App 首页', () => {
     workspacesMock.mockReset()
     updateMock.mockReset()
     deleteMock.mockReset()
+    listMindmapsMock.mockReset()
+    createMindmapMock.mockReset()
+    deleteMindmapMock.mockReset()
     healthMock.mockResolvedValue({ status: 'ok', app: 'trailmind', version: '0.0.1' })
     workspacesMock.mockResolvedValue([])
     updateMock.mockResolvedValue({ ...ws })
     deleteMock.mockResolvedValue(undefined)
+    listMindmapsMock.mockResolvedValue([])
+    createMindmapMock.mockResolvedValue({ id: 10, name: '新导图', nodeCount: 1 })
+    deleteMindmapMock.mockResolvedValue(undefined)
   })
 
   it('渲染品牌名与后端版本号', async () => {
@@ -81,7 +96,46 @@ describe('App 首页', () => {
     fireEvent.click(await screen.findByText('项目A'))
 
     expect(screen.getByText('导图 2 · 会话 1')).toBeInTheDocument()
-    expect(screen.getByText(/暂无导图/)).toBeInTheDocument()
+    expect(await screen.findByText(/暂无导图/)).toBeInTheDocument()
     expect(screen.getByText(/暂无会话/)).toBeInTheDocument()
+  })
+
+  it('进入工作区详情显示导图列表', async () => {
+    workspacesMock.mockResolvedValue([ws])
+    listMindmapsMock.mockResolvedValue([{ id: 10, name: '导图A', nodeCount: 3 }])
+    render(<App />)
+
+    fireEvent.click(await screen.findByText('项目A'))
+
+    expect(await screen.findByText('导图A')).toBeInTheDocument()
+    expect(screen.getByText('3 节点')).toBeInTheDocument()
+  })
+
+  it('新建导图调用接口并刷新列表', async () => {
+    workspacesMock.mockResolvedValue([ws])
+    listMindmapsMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([{ id: 11, name: '新导图', nodeCount: 1 }])
+    createMindmapMock.mockResolvedValue({ id: 11, name: '新导图', nodeCount: 1 })
+    render(<App />)
+
+    fireEvent.click(await screen.findByText('项目A'))
+    fireEvent.change(screen.getByPlaceholderText('输入导图名称'), { target: { value: '新导图' } })
+    fireEvent.click(screen.getByText('新建导图'))
+
+    await waitFor(() => expect(createMindmapMock).toHaveBeenCalledWith(1, '新导图'))
+    expect(await screen.findByText('新导图')).toBeInTheDocument()
+  })
+
+  it('删除导图二次确认后调用接口', async () => {
+    workspacesMock.mockResolvedValue([ws])
+    listMindmapsMock.mockResolvedValue([{ id: 10, name: '导图A', nodeCount: 3 }])
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<App />)
+
+    fireEvent.click(await screen.findByText('项目A'))
+    fireEvent.click(await screen.findByText('删除'))
+
+    await waitFor(() => expect(deleteMindmapMock).toHaveBeenCalledWith(10))
   })
 })

@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useAppStore } from './store/useAppStore'
-import type { Workspace } from './api/types'
+import { createMindmap, deleteMindmap, listMindmaps } from './api/mindmaps'
+import type { Mindmap, Workspace } from './api/types'
 import './App.css'
 
 export default function App() {
@@ -125,6 +126,49 @@ function WorkspaceItem({
 }
 
 function WorkspaceHome({ ws, onBack }: { ws: Workspace; onBack: () => void }) {
+  const [mindmaps, setMindmaps] = useState<Mindmap[]>([])
+  const [name, setName] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      setMindmaps(await listMindmaps(ws.id))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '加载导图失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [ws.id])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const handleCreate = async () => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    try {
+      await createMindmap(ws.id, trimmed)
+      setName('')
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '创建导图失败')
+    }
+  }
+
+  const handleDelete = async (id: number) => {
+    if (!confirm('删除该导图？')) return
+    try {
+      await deleteMindmap(id)
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '删除导图失败')
+    }
+  }
+
   return (
     <section className="workspace-panel">
       <button onClick={onBack}>← 返回</button>
@@ -136,7 +180,37 @@ function WorkspaceHome({ ws, onBack }: { ws: Workspace; onBack: () => void }) {
       </p>
 
       <h3>导图</h3>
-      <p className="muted">暂无导图（M1 后续任务实现导图数据层）</p>
+      {error && <p className="error" role="alert">{error}</p>}
+      {loading ? (
+        <p className="muted">加载中…</p>
+      ) : mindmaps.length === 0 ? (
+        <p className="muted">暂无导图</p>
+      ) : (
+        <ul className="workspace-list">
+          {mindmaps.map((m) => (
+            <li key={m.id} className="workspace-item">
+              <span className="item-name">
+                {m.name}
+                <span className="item-stats">{m.nodeCount ?? 0} 节点</span>
+              </span>
+              <button className="danger" onClick={() => void handleDelete(m.id)}>
+                删除
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="create-form">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="输入导图名称"
+        />
+        <button onClick={handleCreate} disabled={!name.trim()}>
+          新建导图
+        </button>
+      </div>
 
       <h3>会话</h3>
       <p className="muted">暂无会话（M3 实现过程记录）</p>

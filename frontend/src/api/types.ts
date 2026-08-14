@@ -21,3 +21,14 @@ export interface Workspace {
   mindmapCount?: number
   sessionCount?: number
 }
+
+export interface Mindmap {
+  id: number
+  workspaceId?: number
+  name: string
+  contentJson?: string | null
+  searchText?: string | null
+  nodeCount?: number
+  createdAt?: string
+  updatedAt?: string
+}
