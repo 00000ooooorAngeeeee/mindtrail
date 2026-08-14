@@ -18,7 +18,7 @@
 > 落地方式：任务 0.2 起 Maven 构建时把 `JAVA_HOME` 指向 `C:\Program Files\Java\jdk-21.0.10`（当前默认指向 jdk-25）。
 
 ### [error] 16:20 · 错误
-MySQL `root` 无密码连接报 `ERROR 1045 (28000): Access denied for user 'root'@'localhost' (using password: NO)`。根因：本机 root 已设密码，密码未提供。修复：暂未阻塞（本会话不涉及 DB），已记录为任务 0.3 前置；需提供 `DB_USER/DB_PASS`。
+MySQL `root` 无密码连接报 `ERROR 1045 (28000): Access denied for user 'root'@'localhost' (using password: NO)`。根因：本机 root 已设密码，密码未提供。修复：已获提供密码（明文不入库，存于本地记忆），验证 `SELECT 1` 返回 1 通过；后续经 `DB_USER/DB_PASS` 环境变量注入。
 
 ### [action] 16:25 · 操作
 `git init` 初始化 trailmind 仓库；建立 `desktop/ frontend/ backend/ scripts/` 目录（`.gitkeep` 占位）；写根 `.gitignore`（node_modules/dist/target/release/out/*.log/.env/*.local/.idea/.vscode）；根 `package.json` 定义 `dev/build/package/verify` 占位脚本（指向 `scripts/*.mjs`，任务 0.7 实现）。
@@ -36,5 +36,5 @@ README 补充「仓库结构」小节（对应 04 §3）。
 骨架阶段顺利，一次提交完成 0.1 全部验收项。教训：① 环境是"最容易被文档假设骗"的一环——文档写 JDK 17，实际只有 21/25，好在 21 可替代；② MySQL 凭据这类"外部秘密"应在会话一开始就向用户索取，而不是等用到时再卡住。下次应先核对真实环境与文档假设的差异。
 
 ### [next] 16:32 · 下一步
-- [ ] 提供 MySQL `root` 密码（任务 0.3 前置，写入 `DB_USER/DB_PASS` 环境变量）
+- [x] 提供 MySQL `root` 密码（已验证 `SELECT 1` 通过；密码存本地记忆，经 `DB_USER/DB_PASS` 注入，不入 git）
 - [ ] 会话 2：任务 0.2（后端 Spring Boot 骨架 + `/health`）+ 0.3（MySQL 连接 + 幂等建表）
