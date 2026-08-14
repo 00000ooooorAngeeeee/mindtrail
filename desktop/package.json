@@ -6,9 +6,11 @@
   "main": "main/index.js",
   "scripts": {
     "start": "electron .",
+    "dist": "electron-builder",
     "test": "node --test"
   },
   "devDependencies": {
-    "electron": "^43.4.0"
+    "electron": "^43.4.0",
+    "electron-builder": "^25.1.8"
   }
 }
