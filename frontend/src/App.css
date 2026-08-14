@@ -1,0 +1,86 @@
+.app {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 32px 20px;
+}
+
+.app-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.version {
+  font-size: 14px;
+  color: var(--brand);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.error {
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #fdecec;
+  color: var(--danger);
+  margin-bottom: 16px;
+}
+
+.workspace-panel {
+  background: var(--card);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.workspace-panel h2 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.workspace-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px;
+}
+
+.workspace-list li {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--bg);
+  margin-bottom: 8px;
+}
+
+.create-form {
+  display: flex;
+  gap: 8px;
+}
+
+.create-form input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #d9dbe2;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.create-form button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.create-form button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
