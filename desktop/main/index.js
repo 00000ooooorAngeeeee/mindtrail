@@ -38,10 +38,19 @@ if (!gotLock) {
 
   function loadFrontend() {
     if (app.isPackaged) {
-      mainWindow.loadFile(path.join(__dirname, '..', '..', 'frontend', 'dist', 'index.html'))
+      mainWindow.loadFile(path.join(__dirname, '..', 'frontend', 'dist', 'index.html'))
     } else {
       mainWindow.loadURL(DEV_SERVER_URL)
     }
+  }
+
+  // 加载本地 DB 凭据（DB_USER/DB_PASS）到 process.env，供后端子进程连 MySQL（已设的环境变量优先）。
+  // dev 从仓库根 .env；打包后从 resources/.env（electron-builder extraResources 携带）。
+  function loadEnv() {
+    const envPath = app.isPackaged
+      ? path.join(process.resourcesPath, '.env')
+      : path.join(__dirname, '..', '..', '.env')
+    try { process.loadEnvFile(envPath) } catch { /* 无 .env 时回落环境变量 */ }
   }
 
   function createWindow() {
@@ -61,6 +70,7 @@ if (!gotLock) {
   }
 
   app.whenReady().then(async () => {
+    loadEnv()
     createWindow()
     try {
       backend = await start({ jarPath: loadBackendJarPath(), port: BACKEND_PORT })

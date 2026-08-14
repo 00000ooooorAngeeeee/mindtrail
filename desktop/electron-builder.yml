@@ -18,6 +18,8 @@ files:
 extraResources:
   - from: ../backend/target/trailmind-backend-0.0.1.jar
     to: backend/trailmind-backend-0.0.1.jar
+  - from: ../.env
+    to: .env
 
 win:
   target:
