@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { fetchHealth } from '../api/health'
-import { fetchWorkspaces, createWorkspace } from '../api/workspaces'
+import { createWorkspace, deleteWorkspace, fetchWorkspaces, updateWorkspace } from '../api/workspaces'
 import type { Health, Workspace } from '../api/types'
 
 interface AppState {
@@ -11,6 +11,8 @@ interface AppState {
   error: string | null
   load: () => Promise<void>
   create: (name: string) => Promise<void>
+  rename: (id: number, name: string) => Promise<void>
+  remove: (id: number) => Promise<void>
 }
 
 export const useAppStore = create<AppState>()((set) => ({
@@ -37,6 +39,26 @@ export const useAppStore = create<AppState>()((set) => ({
       set((s) => ({ workspaces: [...s.workspaces, ws], creating: false }))
     } catch (e) {
       set({ creating: false, error: e instanceof Error ? e.message : '创建失败' })
+    }
+  },
+
+  rename: async (id, name) => {
+    try {
+      const updated = await updateWorkspace(id, { name })
+      set((s) => ({
+        workspaces: s.workspaces.map((w) => (w.id === id ? updated : w)),
+      }))
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : '重命名失败' })
+    }
+  },
+
+  remove: async (id) => {
+    try {
+      await deleteWorkspace(id)
+      set((s) => ({ workspaces: s.workspaces.filter((w) => w.id !== id) }))
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : '删除失败' })
     }
   },
 }))

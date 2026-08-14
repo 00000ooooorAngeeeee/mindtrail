@@ -57,6 +57,51 @@
   margin-bottom: 8px;
 }
 
+.workspace-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workspace-item .item-name {
+  flex: 1;
+  text-align: left;
+  font-size: 14px;
+}
+
+.workspace-item .item-stats {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.workspace-item button {
+  padding: 4px 10px;
+  border: 1px solid #d9dbe2;
+  border-radius: 6px;
+  background: var(--card);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.workspace-item button.danger {
+  color: var(--danger);
+}
+
+.item-edit {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+}
+
+.item-edit input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid #d9dbe2;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
 .create-form {
   display: flex;
   gap: 8px;
@@ -83,4 +128,9 @@
 .create-form button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.workspace-panel h3 {
+  margin: 16px 0 6px;
+  font-size: 14px;
 }

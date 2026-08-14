@@ -1,21 +1,34 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import App from './App'
 import { fetchHealth } from './api/health'
-import { fetchWorkspaces } from './api/workspaces'
+import { deleteWorkspace, fetchWorkspaces, updateWorkspace } from './api/workspaces'
 
 vi.mock('./api/health', () => ({ fetchHealth: vi.fn() }))
-vi.mock('./api/workspaces', () => ({ fetchWorkspaces: vi.fn(), createWorkspace: vi.fn() }))
+vi.mock('./api/workspaces', () => ({
+  fetchWorkspaces: vi.fn(),
+  createWorkspace: vi.fn(),
+  updateWorkspace: vi.fn(),
+  deleteWorkspace: vi.fn(),
+}))
 
 const healthMock = vi.mocked(fetchHealth)
 const workspacesMock = vi.mocked(fetchWorkspaces)
+const updateMock = vi.mocked(updateWorkspace)
+const deleteMock = vi.mocked(deleteWorkspace)
+
+const ws = { id: 1, name: '项目A', mindmapCount: 2, sessionCount: 1 }
 
 describe('App 首页', () => {
   beforeEach(() => {
     healthMock.mockReset()
     workspacesMock.mockReset()
+    updateMock.mockReset()
+    deleteMock.mockReset()
     healthMock.mockResolvedValue({ status: 'ok', app: 'trailmind', version: '0.0.1' })
     workspacesMock.mockResolvedValue([])
+    updateMock.mockResolvedValue({ ...ws })
+    deleteMock.mockResolvedValue(undefined)
   })
 
   it('渲染品牌名与后端版本号', async () => {
@@ -36,5 +49,39 @@ describe('App 首页', () => {
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent('无法连接后端服务'),
     )
+  })
+
+  it('重命名工作区调用更新接口并刷新列表', async () => {
+    workspacesMock.mockResolvedValue([ws])
+    updateMock.mockResolvedValue({ ...ws, name: '项目B' })
+    render(<App />)
+
+    fireEvent.click(await screen.findByText('重命名'))
+    fireEvent.change(screen.getByDisplayValue('项目A'), { target: { value: '项目B' } })
+    fireEvent.click(screen.getByText('保存'))
+
+    await waitFor(() => expect(updateMock).toHaveBeenCalledWith(1, { name: '项目B' }))
+    await waitFor(() => expect(screen.getByText('项目B')).toBeInTheDocument())
+  })
+
+  it('删除工作区二次确认后调用删除接口', async () => {
+    workspacesMock.mockResolvedValue([ws])
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<App />)
+
+    fireEvent.click(await screen.findByText('删除'))
+
+    await waitFor(() => expect(deleteMock).toHaveBeenCalledWith(1))
+  })
+
+  it('点击工作区进入详情页显示统计与空态', async () => {
+    workspacesMock.mockResolvedValue([ws])
+    render(<App />)
+
+    fireEvent.click(await screen.findByText('项目A'))
+
+    expect(screen.getByText('导图 2 · 会话 1')).toBeInTheDocument()
+    expect(screen.getByText(/暂无导图/)).toBeInTheDocument()
+    expect(screen.getByText(/暂无会话/)).toBeInTheDocument()
   })
 })
