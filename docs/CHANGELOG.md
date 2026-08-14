@@ -160,20 +160,24 @@ backend-process 用纯 Node（CommonJS、零 Electron 依赖），核心逻辑�
 「正在启动后端…」遮罩由主进程先 loadURL 一个 data: URL splash，后端健康就绪后再切到前端——不改前端 0.5 的加载/错误态，遮罩自包含在 desktop/。
 
 ### [error] 17:58 · 错误
-Electron 二进制下载失败：npm 包已装（electron@43.4.0），但 postinstall 从 GitHub 下载 electron.exe 报 `TypeError: fetch failed`；设 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/` 重试亦超时（curl 探测 github 与 npmmirror 均不可达）。根因：当前网络无法访问 GitHub releases / npmmirror。影响：仅 GUI 窗口渲染无法本地目测，代码逻辑不受影响（已用 node 直跑 backend-process + 真实 jar 验证全链路）。修复：需在有 GitHub 访问的网络或可用镜像下 `npm install` 补下二进制。
+Electron 二进制下载失败：npm 包已装（electron@43.4.0），但 postinstall 从 GitHub 下载 electron.exe 报 `TypeError: fetch failed`；npmmirror 的 cdn 亦仅 65KB/s（138MB 需约 35 分钟）。根因：GitHub releases 不可达、npmmirror CDN 限速。**已解决**：改用华为云镜像 `ELECTRON_MIRROR=https://repo.huaweicloud.com/electron/`（约 515KB/s，数分钟下载完成，checksum 校验通过）。
+
+### [error] 18:10 · 错误
+GUI 冒烟首次启动报 `TypeError: Cannot read properties of undefined (reading 'requestSingleInstanceLock')`。根因：agent 环境的 bash 里被注入了 `ELECTRON_RUN_AS_NODE=1`（Windows 用户/系统环境变量与 shell 配置均无此项，属 Claude Code 会话环境注入），导致 electron.exe 以纯 Node 模式运行，`require('electron')` 解析不到内置 `app`。修复：启动时 `env -u ELECTRON_RUN_AS_NODE` 解除；非代码缺陷，用户本机终端无此变量、不受影响。
 
 ### [test] 17:59 · 验证
 - desktop `node --test`：9 个单测通过（decideStart 三分支、waitForHealth 重试/超时、start 的 kill-and-spawn/spawn/error 三分支）。
 - `mvn clean package`（JDK 21 + DB_PASS）：8 个后端测试通过，产出 `target/trailmind-backend-0.0.1.jar`。
 - headless e2e（node 直跑 backend-process）：`start()` spawn→健康等待 healthy=true（约 2.6s）；`stop()` POST /shutdown→java 优雅退出（约 0.36s），端口 17860 无 LISTENING 残留；`queryPortOwner(17860)` 实测识别运行中 trailmind 进程（cmdline 含 trailmind）。
-- 未验证：Electron GUI 窗口渲染（二进制下载受网络阻塞），列为人工验收项。
+- GUI 冒烟（华为云镜像补下二进制 + `env -u ELECTRON_RUN_AS_NODE`）：vite 起 → Electron 窗口进程存活 → 后端自动拉起（6 次轮询内 LISTENING）→ `/health` code=0 连通，主进程/GPU/渲染子进程齐备。
+- 未完全自动化验证：真实「点窗口 X → 后端退出」链路——外发 WM_CLOSE 无法可靠触发 Electron 窗口 close，`stop()` 优雅关闭已由 headless e2e 覆盖，`before-quit→stop` 为标准 3 行事件绑定，列为低风险人工验收项。
 
 ### [artifact] 18:00 · 产出
 - 提交 `feat(backend)`：优雅关闭接口 POST /api/v1/shutdown
 - 提交 `feat(desktop)`：Electron 壳 + backend-process 进程管理 + 单测 + `dev:desktop` 脚本
 
 ### [review] 18:02 · 复盘
-进程生命周期是 M0 难点，本次把关键决策抽成纯函数 + 依赖注入，最难测的「残留进程清理」分支用 node:test 直接覆盖，且 headless e2e 跑通 start→stop 全链路。三点教训：① Electron 二进制下载是「网络/镜像」类外部依赖，应像 MySQL 凭据一样在会话开始就确认可达性，而不是到验证阶段才撞墙；② GUI 窗口这类「不可见验证」必须明确列为人工验收项，不能用「代码写完」冒充「验证通过」；③ 依赖注入让 Electron 主进程逻辑可脱离 Electron 单测，是这类「壳」任务的关键手段。下次 0.7 一键脚本/打包：dev/build/package 脚本 + verify 冒烟 + electron-builder NSIS，需一并解决 Electron 二进制下载问题。
+进程生命周期是 M0 难点，本次把关键决策抽成纯函数 + 依赖注入，最难测的「残留进程清理」分支用 node:test 直接覆盖，且 headless e2e 跑通 start→stop 全链路。三点教训：① Electron 二进制下载是「网络/镜像」类外部依赖，应像 MySQL 凭据一样在会话开始就确认可达性，而不是到验证阶段才撞墙；② GUI 窗口这类「不可见验证」必须明确列为人工验收项，不能用「代码写完」冒充「验证通过」；③ 依赖注入让 Electron 主进程逻辑可脱离 Electron 单测，是这类「壳」任务的关键手段；④ 镜像选择要实测速度：npmmirror CDN 65KB/s 与华为云 515KB/s 差近 8 倍；⑤ `ELECTRON_RUN_AS_NODE=1` 这类会话注入的环境变量会让 electron 静默降级为 node 模式，报错极不直观（`app` undefined），遇到 `require('electron')` 异常应先 `env | grep -i electron`。下次 0.7 一键脚本/打包：dev/build/package 脚本 + verify 冒烟 + electron-builder NSIS。
 
 ### [next] 18:02 · 下一步
 - [ ] 会话 6：任务 0.7（一键脚本 dev/build/package + verify 冒烟 + electron-builder NSIS 打包）
