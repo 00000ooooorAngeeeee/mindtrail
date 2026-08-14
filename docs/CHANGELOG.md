@@ -180,4 +180,39 @@ GUI 冒烟首次启动报 `TypeError: Cannot read properties of undefined (readi
 进程生命周期是 M0 难点，本次把关键决策抽成纯函数 + 依赖注入，最难测的「残留进程清理」分支用 node:test 直接覆盖，且 headless e2e 跑通 start→stop 全链路。三点教训：① Electron 二进制下载是「网络/镜像」类外部依赖，应像 MySQL 凭据一样在会话开始就确认可达性，而不是到验证阶段才撞墙；② GUI 窗口这类「不可见验证」必须明确列为人工验收项，不能用「代码写完」冒充「验证通过」；③ 依赖注入让 Electron 主进程逻辑可脱离 Electron 单测，是这类「壳」任务的关键手段；④ 镜像选择要实测速度：npmmirror CDN 65KB/s 与华为云 515KB/s 差近 8 倍；⑤ `ELECTRON_RUN_AS_NODE=1` 这类会话注入的环境变量会让 electron 静默降级为 node 模式，报错极不直观（`app` undefined），遇到 `require('electron')` 异常应先 `env | grep -i electron`。下次 0.7 一键脚本/打包：dev/build/package 脚本 + verify 冒烟 + electron-builder NSIS。
 
 ### [next] 18:02 · 下一步
-- [ ] 会话 6：任务 0.7（一键脚本 dev/build/package + verify 冒烟 + electron-builder NSIS 打包）
+- [x] 会话 6：任务 0.7（一键脚本 dev/build/package + verify 冒烟 + electron-builder NSIS 打包）
+
+## 会话 6 · M0 任务 0.7（一键脚本与打包）
+
+### [goal] 18:05 · 目标
+落地四个脚本 + 打包配置：`npm run dev` 一键开发、`npm run build` 构建、`npm run package` 打包、`node scripts/verify.mjs` 冒烟全绿输出 `M0 SMOKE: ALL PASS`。表现为：build/verify 真实跑通，dev/package 脚本就位且语法可用。
+
+### [action] 18:08 · 操作
+写四个 Node 脚本（`.mjs`，纯内建模块零新依赖）：`dev.mjs`（并行 spawn 前后端 + Ctrl+C 整树 taskkill）、`build.mjs`（前端 vite build + 后端 mvn clean package）、`package.mjs`（构建后调 electron-builder）、`verify.mjs`（/health → schema → workspace 往返）；补 `desktop/electron-builder.yml`（NSIS，jar 走 extraResources、前端 dist 入 asar），desktop/package.json 加 electron-builder 依赖与 `dist` 脚本。
+
+### [decision] 18:12 · 决策
+`dev.mjs` 复用 `desktop/main/backend-process.js` 的 `killProcessTree`（taskkill /T 杀进程树），而非在 scripts/ 里再写一份——同一段「杀进程树」逻辑已在 0.6 落地并单测，跨目录 import 一次即可，避免复制粘贴两份漂移。
+
+### [decision] 18:14 · 决策
+verify 的 schema 检查与 workspace 清理走 `mysql` CLI + `MYSQL_PWD` 环境变量，不引入 mysql2 依赖——脚本零第三方依赖，密码也不进命令行/日志。放弃 mysql2 因只为 2 条 SQL 加一个依赖不划算。
+
+### [decision] 18:14 · 决策
+verify 第 3 步的「DELETE 清理」用 SQL 而非 API：后端 0.4 只实现了创建/列表、无 DELETE 接口，加接口属 M1 全量 CRUD 的范围。故冒烟脚本用 `DELETE FROM workspace WHERE name=...` 清理（唯一名 `verify-<pid>-<ts>`），M1 补 DELETE 后可改回 API 调用。
+
+### [error] 18:20 · 错误
+verify.mjs 首跑 workspace 往返失败：`Content-Type 'application/octet-stream' is not supported`。根因：Node 内建 `http.request` 不自动设 Content-Type，POST 无 body 头被 Spring 判为 octet-stream 拒绝。修复：`request` 有 body 时显式加 `Content-Type: application/json` 头。这个正是冒烟脚本存在的价值——首跑就抓到真实缺陷。
+
+### [test] 18:40 · 验证
+- 单测：`node --test scripts/test/verify.test.mjs` 5 个通过（EXPECTED_TABLES 8 表 / missingTables 缺失检测 / summarize 通过·失败分支）。
+- verify e2e：起后端 jar（JDK21 + DB_PASS）→ `node scripts/verify.mjs` 输出 `M0 SMOKE: ALL PASS`（health code=0、schema 8/8、workspace 往返）；清理后 `verify-%` 残留=0、端口 17860 无 LISTENING。
+- build e2e：`node scripts/build.mjs` 跑通（前端 vite build + 后端 mvn clean package，8 个后端测试通过，jar 重建）。
+- **未完全自动化验证**：① `dev.mjs` 的真实 Ctrl+C 树杀（spawn 两个子进程 + 信号处理，本轮未拉起 GUI 前台进程实测，逻辑复用已单测的 killProcessTree）；② `package.mjs` 的 electron-builder NSIS 打包（electron-builder 尚未 npm install，且 NSIS/winCodeSign 需从 GitHub 下载，与会话 5 的 electron 二进制同类网络依赖）——列为人工验收项，见 0.8 总验收。
+
+### [artifact] 18:42 · 产出
+- `9a74c8e`：一键开发/构建/打包脚本 + 验收冒烟 + electron-builder 配置 + verify 单测
+
+### [review] 18:45 · 复盘
+0.7 把 M0 的「可工程化」补全，build/verify 两条主链路真跑通。三点教训：① 冒烟脚本首跑就抓到 Content-Type 缺陷，说明「先写脚本再跑一遍真服务」比「写完即称完成」可靠得多——验证优先于完成；② 复用既有 killProcessTree 而非复制，是「少写代码」的正例，但 `scripts/` 反向 import `desktop/main/` 的依赖方向略别扭，若后续 scripts 增多可考虑把通用进程工具抽到 `scripts/lib/`；③ 打包与 GUI 前台这类「网络/不可见」环节必须诚实标注为人工验收项，不能混进「已验证」。下次 0.8 做 M0 总验收 + dogfooding：把 M0 全程过程补成 CHANGELOG 记录并逐项勾选 07 §3 验收清单。
+
+### [next] 18:45 · 下一步
+- [ ] 会话 7：任务 0.8（M0 总验收 + dogfooding 启动记录：勾选 07 §3 全清单、补 M0 过程记录、同步 AGENTS.md 进度至 M1）
