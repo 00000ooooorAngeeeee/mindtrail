@@ -19,6 +19,11 @@ public class GlobalExceptionHandler {
         return ApiResponse.error(404, e.getMessage());
     }
 
+    @ExceptionHandler(ConflictException.class)
+    public ApiResponse<Void> handleConflict(ConflictException e) {
+        return ApiResponse.error(409, e.getMessage());
+    }
+
     @ExceptionHandler(Exception.class)
     public ApiResponse<Void> handleException(Exception e) {
         return ApiResponse.error(500, e.getMessage());
