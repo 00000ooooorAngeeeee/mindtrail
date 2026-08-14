@@ -375,3 +375,30 @@ content_json 解析用 Jackson tree 模型（JsonNode 遍历）而非定义 POJO
 - [ ] 遗留：导图重命名（PRD B4）——补 PUT 携带 name 或独立 PATCH 端点（重命名需同步更新 search_text 的 name 部分）
 - [ ] 遗留：verify.mjs 补导图往返冒烟（创建→保存→search_text/node_count 断言→删除）
 - [ ] 遗留：GUI 人工目测（20 节点布局 + 拖拽 5 次 + 折叠 2 处）
+
+## 会话 11 · 打包运行验收（安装启动白屏 + 后端 DB 凭据）
+
+### [goal] 00:16 · 目标
+让 `npm run package` 产出的安装包安装后**真正启动到可交互**——关闭 M0 唯一遗留验收项「双击 exe 安装、启动 ≤3s」的前置缺口。此前该项标「环境待办」：开发者模式未开 + 打包运行链路未实测。
+
+### [error] 00:18 · 错误（用户实测：安装后启动）
+用户安装后启动，窗口先显示「正在启动后端…」遮罩，随后**白屏**。两条根因，均与代码无关地藏在打包运行链路里：
+1. **前端路径 off-by-one**：`loadFrontend()` 打包态用 `__dirname/../../frontend/dist/index.html`，而前端在 `app.asar/frontend/dist/`（electron-builder `files` 的 `to: frontend/dist`），多退一层跳出 asar → `loadFile` 加载不存在的路径 → 白屏。`asar list` 实证 asar 顶层是 `\frontend\dist\index.html`，正确路径应 `__dirname/../frontend/...`。
+2. **后端连不上 DB**：打包 app 无 `.env`/`DB_PASS`，`spawnJavaProcess` 继承的环境空密码 → 后端启动时 `spring.sql.init` 执行 schema.sql `Access denied` → 健康检查不过。Java 本身不是问题：`JAVA_HOME` 是系统级 `jdk-25`（HKLM 注册表），Node `spawn` 绝对路径无扩展名也能解析 `java.exe`（实测 `-version` 通过）。
+
+### [action] 00:20 · 操作
+`desktop/main/index.js`：① `loadFrontend` 打包路径改 `path.join(__dirname, '..', 'frontend', 'dist', 'index.html')`；② 新增 `loadEnv()`——`app.isPackaged` 时从 `process.resourcesPath/.env`、dev 时从仓库根 `.env` 用 `process.loadEnvFile` 读入 DB 凭据，`app.whenReady` 里先 `loadEnv()` 再 `start()`（后端子进程继承 `process.env`，无需改 `backend-process.js`）。`desktop/electron-builder.yml`：`extraResources` 增 `from: ../.env → to: .env`，把 gitignored 的本地凭据打进安装包。
+
+### [test] 00:22 · 验证
+- `node --check main/index.js` 语法通过。
+- `npm run package` 全绿（EXIT=0，开发者模式已生效、winCodeSign 符号链接不再报权限错）。
+- 产物实证：`resources/.env` 已入包且含 `DB_USER=root`/`DB_PASS=***`；`resources/backend/trailmind-backend-0.0.1.jar` 在位；asar 内 `frontend/dist/index.html` 与 `main/index.js` 并存，修正后的相对路径可达。
+- 说明：无头环境无法实机点击窗口，GUI 最终启动仍待用户重装后人工确认。
+
+### [review] 00:24 · 复盘
+M0 的「一键打包」当时只验到「能产出 exe」就标环境待办，**运行链路（前端加载路径 + 后端 DB 凭据）从未实机走过**，结果用户一装就白屏——这正是把「打包」和「打包后能跑」混为一谈的代价。教训：① 打包验收必须包含「装完启动到可交互」，不能只验「exe 生成成功」；② 相对路径要对照打包产物真实结构（asar list）核对，别凭 `__dirname` 直觉推层级；③ 敏感凭据的正确归宿是 gitignored 的 `.env` 由脚本/主进程自动加载，而不是要求用户每次手动 export——与「一键」目标一致。遗留：安装包**未捆绑 JRE**（依赖本机 jdk-25，本机可用；真正分发需 `extraResources` 带 JRE 或用 jlink 裁剪），且 DB 密码打进安装包对公开分发是隐患——待 M4「设置页数据库连接」落地改为运行时用户配置。
+
+### [next] 00:24 · 下一步
+- [ ] 人工：重装 `TrailMind-Setup-0.0.1.exe` → 双击启动 → 确认不再白屏、≤3s 到可交互（关闭 M0 验收项）
+- [ ] 遗留：捆绑 JRE（jlink 裁剪或整 JDK）使安装包自包含，摆脱对系统 Java 的依赖
+- [ ] 遗留：DB 凭据从「打进安装包」迁到运行时用户配置（M4 设置页）
