@@ -289,3 +289,40 @@ M0 收尾：8 项验收中 7 项以硬证据勾选（verify 全绿 + 三套单�
 ### [next] 22:35 · 下一步
 - [ ] M1 任务二：导图数据层（mindmap CRUD + content_json 存取 + search_text/node_count 维护，05 §3/§4）
 - [ ] 遗留：树状画布（节点渲染/增删改/拖拽/折叠/布局/缩放）、撤销重做、整图防抖保存 + 乐观锁
+
+## 会话 9 · M1 任务二（导图数据层：content_json 存取 + search_text/node_count 维护）
+
+### [goal] 22:40 · 目标
+完成 M1 第二个任务：导图数据层。表现为：mindmap CRUD 五接口按 04 §5 契约可用、PUT 整图保存附 updatedAt 乐观锁、后端自动维护 search_text（name + 节点 text/note/tags + 边 label）与 node_count、新建默认单根节点、搜索可命中导图节点文本（search_text 生效）、工作区首页导图列表/新建/删除可用、三套单测全绿。
+
+### [action] 22:45 · 操作
+后端分层落地：`MindmapContentUtil` 纯函数（Jackson tree 模型解析 content_json → search_text 拼接 + node_count 统计，search_text 超 8000 截断）→ `entity/Mindmap` + `repository/MindmapMapper`（listSummaryByWorkspace 只查摘要列不含大字段；updateContent 自定义 @Update 排除 updated_at）→ `service/MindmapService`（create 默认单根节点 / get / list / save 乐观锁 / delete）→ `controller/MindmapController` 五接口。新增 `common/ConflictException`（→409）与 GlobalExceptionHandler 分支。
+
+### [action] 22:50 · 操作
+前端：`types.ts` 加 Mindmap 类型、`mindmaps.ts` 三接口、`App.tsx` 工作区详情页导图列表（节点数）+ 新建输入 + 二次确认删除，替换原「暂无导图（M1 后续任务实现导图数据层）」占位。
+
+### [decision] 22:45 · 决策
+列表接口只查摘要列（id/name/node_count/created_at/updated_at），不含 content_json/search_text 大字段——整图 JSON 单图可达上千节点，列表带入全量浪费；详情 GET 才返回整图。用 `@JsonInclude(NON_NULL)` 让列表响应省略这两列。
+
+### [decision] 22:46 · 决策
+整图保存用自定义 `@Update`（只 SET content_json/search_text/node_count），排除 updated_at，交由 MySQL `ON UPDATE CURRENT_TIMESTAMP` 推进——若走 MyBatis-Plus updateById 会把实体里的旧 updatedAt 写回，乐观锁就失效了。
+
+### [decision] 22:46 · 决策
+content_json 解析用 Jackson tree 模型（JsonNode 遍历）而非定义 POJO 类——只为拼搜索文本，POJO 纯样板；tree 模型一个方法搞定，且天然容忍结构演进时的未知字段。
+
+### [test] 23:00 · 验证
+- 后端 `mvn test`（JDK21 + DB_PASS）：44 通过（SchemaSql 1 + Health 1 + MindmapContentUtil 6 + MindmapService 12 + MindmapController 集成 7 + Workspace 17），本次新增 25 个。
+- 前端 `npm test`：13 通过；`npm run build`（tsc + vite）通过。
+- live 冒烟：起 jar → 建工作区+导图+保存整图 → 默认 nodeCount=1、保存后 nodeCount=3、search_text 含全部中文节点/标签/边 label → 乐观锁过期 updatedAt 返回 code=409 → 列表摘要无 content_json → 级联删除干净。
+- search_text 生效：`MATCH(search_text) AGAINST('树状画布')` 命中该导图（search_text='搜索验证导图 树状画布 前端'），ngram 中文检索可用（M4 搜索依赖提前验证）。
+
+### [artifact] 23:05 · 产出
+- `31eb9ea` feat(backend)：导图数据层 mindmap CRUD + content_json 存取 + search_text/node_count 维护 + 乐观锁
+- `f37b21e` feat(frontend)：工作区首页导图列表/新建/删除
+
+### [review] 23:08 · 复盘
+数据层一次通过，search_text 的 ngram 中文命中实测可用，为 M4 搜索扫清依赖。三点教训：① 列表与详情分离（摘要列 vs 整图）是「整图 JSON 存储」设计决策的直接推论，M0 建表时就可想到，本次才落到 Mapper 层；② MyBatis-Plus updateById 会把旧 updatedAt 写回、破坏 ON UPDATE 自增时间戳，凡依赖 DB 自维护时间戳的写操作都要用自定义 SQL 排除该列——这是乐观锁能生效的前提；③ mysql CLI 在 Windows 下默认 GBK 客户端字符集，查 utf8mb4 中文要 `--default-character-set=utf8mb4` 或 SQL 走 UTF-8 文件，否则中文查询词被当乱码匹配不到（验证期踩的坑，非产品缺陷，Java 走 JDBC utf8mb4 无此问题）。下次任务三「树状画布」：按 04 §6.4 自研树布局纯函数（O(n)、无重叠，TDD），节点渲染/增删改/拖拽/折叠接上 PUT 整图保存。
+
+### [next] 23:08 · 下一步
+- [ ] M1 任务三：树状模式画布（节点渲染/增删改/拖拽/折叠/布局/缩放，自研树布局纯函数）
+- [ ] 遗留：撤销/重做 ｜ 整图防抖保存（800ms）+ 乐观锁（后端乐观锁已在任务二完成，剩前端 800ms 防抖与撤销重做）
