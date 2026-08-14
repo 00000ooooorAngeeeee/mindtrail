@@ -90,9 +90,10 @@ export async function runChecks(deps = {}) {
     if (created?.json?.code !== 0 || !id) throw new Error(`创建失败：${JSON.stringify(created?.json)}`)
     const listed = await request(`${BASE}/api/v1/workspaces`)
     const visible = (listed?.json?.data || []).some((w) => w.name === name)
-    // 后端 0.4 仅创建/列表、无 DELETE 接口，清理直接 SQL 删除（见 review）
-    await mysql(`DELETE FROM trailmind.workspace WHERE name='${name}'`, deps)
-    if (visible) results.push({ ok: true, name: 'workspace 创建→列表→清理往返' })
+    // M1 起后端有 DELETE 接口，改回 API 清理（顺带验证级联删除不报错）
+    const deleted = await request(`${BASE}/api/v1/workspaces/${id}`, { method: 'DELETE' })
+    if (deleted?.json?.code !== 0) throw new Error(`删除失败：${JSON.stringify(deleted?.json)}`)
+    if (visible) results.push({ ok: true, name: 'workspace 创建→列表→删除往返' })
     else results.push({ ok: false, name: 'workspace 往返', error: '创建成功但列表不可见' })
   } catch (e) {
     results.push({ ok: false, name: 'workspace 往返', error: e.message })

@@ -14,6 +14,11 @@ public class GlobalExceptionHandler {
         return ApiResponse.error(400, e.getMessage());
     }
 
+    @ExceptionHandler(NotFoundException.class)
+    public ApiResponse<Void> handleNotFound(NotFoundException e) {
+        return ApiResponse.error(404, e.getMessage());
+    }
+
     @ExceptionHandler(Exception.class)
     public ApiResponse<Void> handleException(Exception e) {
         return ApiResponse.error(500, e.getMessage());
