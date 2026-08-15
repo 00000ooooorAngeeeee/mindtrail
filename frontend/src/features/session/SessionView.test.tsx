@@ -3,6 +3,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { SessionView } from './SessionView'
 import { getSession, updateSession } from '../../api/sessions'
 import { addEntry, deleteEntry, updateEntry } from '../../api/entries'
+import { MockIntersectionObserver } from '../../test/intersectionObserver'
+import { ENTRY_TYPE_STORAGE_KEY } from './typeMemory'
 import type { Entry, Session } from '../../api/types'
 
 vi.mock('../../api/sessions', () => ({
@@ -42,6 +44,8 @@ describe('SessionView 会话详情页（时间线条目）', () => {
     addMock.mockReset()
     updateEntryMock.mockReset()
     deleteEntryMock.mockReset()
+    MockIntersectionObserver.reset()
+    localStorage.clear()
     getMock.mockResolvedValue(activeSession())
   })
 
@@ -51,6 +55,7 @@ describe('SessionView 会话详情页（时间线条目）', () => {
     expect(await screen.findByText('测试会话')).toBeInTheDocument()
     expect(screen.getByText('进行中')).toBeInTheDocument()
     const list = screen.getByRole('list')
+    expect(within(list).getByText('🎯')).toBeInTheDocument()
     expect(within(list).getByText('目标')).toBeInTheDocument()
     expect(within(list).getByText('完成目标')).toBeInTheDocument()
     expect(within(list).getByText('错误')).toBeInTheDocument()
@@ -148,7 +153,7 @@ describe('SessionView 会话详情页（时间线条目）', () => {
     expect(Array.from(select.options).map((o) => o.value)).toEqual(['review', 'note'])
   })
 
-  it('加载更多：已加载条目数小于总数时请求下一页', async () => {
+  it('无限滚动：哨兵进入视口自动加载下一页（每页 50，无「加载更多」按钮）', async () => {
     const makeEntries = (from: number, count: number, content: string): Entry[] =>
       Array.from({ length: count }, (_, i) => ({
         id: from + i,
@@ -165,9 +170,39 @@ describe('SessionView 会话详情页（时间线条目）', () => {
     render(<SessionView sessionId={1} onBack={() => {}} />)
     await screen.findByText('条目1')
 
-    fireEvent.click(screen.getByText('加载更多'))
+    expect(screen.queryByText('加载更多')).not.toBeInTheDocument()
+    expect(MockIntersectionObserver.instances.length).toBeGreaterThan(0)
+    const last = MockIntersectionObserver.instances[MockIntersectionObserver.instances.length - 1]
+    last.triggerIntersect()
 
     await waitFor(() => expect(getMock).toHaveBeenLastCalledWith(1, 2, 50))
     expect(await screen.findByText('最后1')).toBeInTheDocument()
+  })
+
+  it('快速记录类型记忆：追加后重进页面恢复上次类型（03 §4）', async () => {
+    addMock.mockResolvedValue({ id: 13, sessionId: 1, seq: 3, type: 'decision', contentMd: '记一次', tags: [], createdAt: '2025-06-01T09:20:00' })
+    const { unmount } = render(<SessionView sessionId={1} onBack={() => {}} />)
+    await screen.findByText('测试会话')
+
+    fireEvent.change(screen.getByLabelText('类型'), { target: { value: 'decision' } })
+    fireEvent.change(screen.getByLabelText('记录内容'), { target: { value: '记一次' } })
+    fireEvent.keyDown(screen.getByLabelText('记录内容'), { key: 'Enter' })
+    await waitFor(() => expect(addMock).toHaveBeenCalled())
+    expect(localStorage.getItem(ENTRY_TYPE_STORAGE_KEY)).toBe('decision')
+
+    unmount()
+    render(<SessionView sessionId={1} onBack={() => {}} />)
+    await screen.findByText('测试会话')
+
+    expect((screen.getByLabelText('类型') as HTMLSelectElement).value).toBe('decision')
+  })
+
+  it('Ctrl+E 聚焦快速记录框（03 §5 快捷键）', async () => {
+    render(<SessionView sessionId={1} onBack={() => {}} />)
+    await screen.findByText('测试会话')
+
+    fireEvent.keyDown(document, { key: 'e', ctrlKey: true })
+
+    expect(screen.getByLabelText('记录内容')).toHaveFocus()
   })
 })

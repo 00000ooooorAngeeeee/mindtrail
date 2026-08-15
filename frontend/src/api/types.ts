@@ -64,6 +64,21 @@ export const ENTRY_TYPE_LABELS: Record<EntryType, string> = {
   note: '备注',
 }
 
+// 条目类型图标（03 §3.5「条目卡片按类型着色左缘 + 图标」）。
+export const ENTRY_TYPE_ICONS: Record<EntryType, string> = {
+  goal: '🎯',
+  context: '🧭',
+  prompt: '⌨️',
+  action: '⚙️',
+  artifact: '📦',
+  decision: '🔀',
+  error: '🐞',
+  test: '✅',
+  review: '📝',
+  next: '🔜',
+  note: '📌',
+}
+
 export interface Entry {
   id: number
   sessionId?: number

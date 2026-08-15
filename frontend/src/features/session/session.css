@@ -1,4 +1,4 @@
-/* 会话时间线（03 §5/§6）：条目按类型着色左缘，状态徽标，快速记录框 */
+/* 会话时间线（03 §5/§6）：垂直时间线（时间戳列 + 轴线 + 类型着色圆点/图标）、底部常驻快速记录框 */
 
 .session-view {
   width: 100%;
@@ -56,8 +56,55 @@
 }
 
 .entry-item {
+  display: flex;
+  gap: 10px;
+  padding: 0;
+  margin-bottom: 10px;
+  background: transparent;
+  border: none;
+}
+
+/* 左侧时间戳列 + 轴线 */
+.entry-time-col {
+  position: relative;
+  width: 44px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 6px;
+}
+
+.entry-time {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.entry-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-top: 6px;
+  background: var(--entry-color, #64748b);
+  flex: none;
+}
+
+.entry-item:not(:last-child) .entry-time-col::after {
+  content: '';
+  position: absolute;
+  top: 34px;
+  bottom: -10px;
+  left: 50%;
+  width: 2px;
+  margin-left: -1px;
+  background: #e2e8f0;
+}
+
+.entry-card {
+  flex: 1;
   border: 1px solid var(--border, #d9dee5);
   border-left-width: 4px;
+  border-left-color: var(--entry-color, #64748b);
   border-radius: 8px;
   padding: 8px 12px;
   margin-bottom: 8px;
@@ -71,6 +118,10 @@
   margin-bottom: 4px;
 }
 
+.entry-icon {
+  font-size: 14px;
+}
+
 .entry-chip {
   font-size: 12px;
   padding: 1px 8px;
@@ -79,14 +130,10 @@
   color: #334155;
 }
 
-.entry-time {
-  font-size: 12px;
-  color: #94a3b8;
-}
-
 .entry-seq {
   font-size: 12px;
   color: #cbd5e1;
+  margin-left: auto;
 }
 
 .entry-content {
@@ -130,13 +177,23 @@
   width: 100%;
 }
 
+.entry-sentinel {
+  height: 1px;
+}
+
+/* 底部常驻快速记录框（03 §3.5/§4；sticky 保证滚动时始终可见） */
+.quick-entry-bar {
+  position: sticky;
+  bottom: 0;
+  background: var(--app-bg, #fff);
+  padding: 10px 0 12px;
+  border-top: 1px solid var(--border, #d9dee5);
+}
+
 .quick-entry {
   display: flex;
   gap: 8px;
   align-items: flex-start;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border, #d9dee5);
 }
 
 .quick-entry textarea {
@@ -144,43 +201,43 @@
   min-height: 40px;
 }
 
-/* 条目类型左缘着色（03 §6 色板） */
+/* 条目类型色（03 §6 色板，CSS 变量供圆点与左缘共用） */
 .entry-type-goal {
-  border-left-color: #3b82f6;
+  --entry-color: #3b82f6;
 }
 
 .entry-type-action {
-  border-left-color: #06b6d4;
+  --entry-color: #06b6d4;
 }
 
 .entry-type-decision {
-  border-left-color: #8b5cf6;
+  --entry-color: #8b5cf6;
 }
 
 .entry-type-artifact {
-  border-left-color: #10b981;
+  --entry-color: #10b981;
 }
 
 .entry-type-error {
-  border-left-color: #ef4444;
+  --entry-color: #ef4444;
 }
 
 .entry-type-test {
-  border-left-color: #f97316;
+  --entry-color: #f97316;
 }
 
 .entry-type-review {
-  border-left-color: #ec4899;
+  --entry-color: #ec4899;
 }
 
 .entry-type-next {
-  border-left-color: #eab308;
+  --entry-color: #eab308;
 }
 
 .entry-type-context {
-  border-left-color: #6b7280;
+  --entry-color: #6b7280;
 }
 
 .entry-type-prompt {
-  border-left-color: #6366f1;
+  --entry-color: #6366f1;
 }

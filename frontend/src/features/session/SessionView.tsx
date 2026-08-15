@@ -1,16 +1,26 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { addEntry, deleteEntry, updateEntry } from '../../api/entries'
 import { getSession, updateSession } from '../../api/sessions'
-import { ENTRY_TYPE_LABELS, ENTRY_TYPES, type Entry, type EntryType, type Session } from '../../api/types'
+import {
+  ENTRY_TYPE_ICONS,
+  ENTRY_TYPE_LABELS,
+  ENTRY_TYPES,
+  type Entry,
+  type EntryType,
+  type Session,
+} from '../../api/types'
+import { loadEntryType, saveEntryType } from './typeMemory'
+import { useInfiniteScroll } from './useInfiniteScroll'
 import { formatTime } from './time'
 import './session.css'
 
 const PAGE_SIZE = 50
 
 /**
- * 会话详情页（时间线，07 §6 任务一的最小可用版本）：
- * 头部（标题/状态/时间跨度/条目数）、条目列表（类型着色 + 时间戳 + 编辑/删除）、底部追加表单、
- * 结束会话（总结写入 review 条目）、分页加载更多。任务二将升级为底部常驻快速记录框 + 无限滚动。
+ * 会话详情页（时间线，07 §6 任务二）：
+ * 头部（标题/状态/时间跨度/条目数）、垂直时间线（类型着色 + 图标 + 时间戳列，无限滚动每页 50）、
+ * 底部常驻快速记录框（Enter 提交、Shift+Enter 换行、类型记忆、Ctrl+E 聚焦）、
+ * 条目编辑/删除、结束会话（总结写入 review 条目）。
  */
 export function SessionView({ sessionId, onBack }: { sessionId: number; onBack: () => void }) {
   const [session, setSession] = useState<Session | null>(null)
@@ -20,8 +30,9 @@ export function SessionView({ sessionId, onBack }: { sessionId: number; onBack: 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const [draftType, setDraftType] = useState<EntryType>('action')
+  const [draftType, setDraftType] = useState<EntryType>(() => loadEntryType())
   const [draftContent, setDraftContent] = useState('')
+  const quickRef = useRef<HTMLTextAreaElement | null>(null)
 
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editType, setEditType] = useState<EntryType>('action')
@@ -52,6 +63,24 @@ export function SessionView({ sessionId, onBack }: { sessionId: number; onBack: 
   useEffect(() => {
     void load(1)
   }, [load])
+
+  // Ctrl+E 聚焦快速记录框（03 §5 快捷键全集）
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e') {
+        e.preventDefault()
+        quickRef.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  const hasMore = total > entries.length
+  const loadMore = useCallback(() => {
+    void load(page + 1)
+  }, [load, page])
+  const sentinelRef = useInfiniteScroll(hasMore, loading, loadMore)
 
   const submitAdd = async () => {
     const content = draftContent
@@ -165,96 +194,110 @@ export function SessionView({ sessionId, onBack }: { sessionId: number; onBack: 
         <ul className="entry-list">
           {entries.map((entry) => (
             <li key={entry.id} className={`entry-item entry-type-${entry.type}`}>
-              <div className="entry-meta">
-                <span className="entry-chip">{ENTRY_TYPE_LABELS[entry.type]}</span>
+              <div className="entry-time-col">
                 <span className="entry-time">{formatTime(entry.createdAt)}</span>
-                <span className="entry-seq">#{entry.seq}</span>
+                <span className="entry-dot" aria-hidden="true" />
               </div>
-              {editingId === entry.id ? (
-                <div className="entry-edit">
-                  <select
-                    aria-label="编辑类型"
-                    value={editType}
-                    onChange={(e) => setEditType(e.target.value as EntryType)}
-                  >
-                    {ENTRY_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {ENTRY_TYPE_LABELS[t]}
-                      </option>
-                    ))}
-                  </select>
-                  <textarea
-                    aria-label="编辑内容"
-                    value={editContent}
-                    onChange={(e) => setEditContent(e.target.value)}
-                  />
-                  <button onClick={() => void submitEdit(entry)}>保存</button>
-                  <button onClick={() => setEditingId(null)}>取消</button>
+              <div className="entry-card">
+                <div className="entry-meta">
+                  <span className="entry-icon" aria-hidden="true">
+                    {ENTRY_TYPE_ICONS[entry.type]}
+                  </span>
+                  <span className="entry-chip">{ENTRY_TYPE_LABELS[entry.type]}</span>
+                  <span className="entry-seq">#{entry.seq}</span>
                 </div>
-              ) : (
-                <>
-                  <pre className="entry-content">{entry.contentMd}</pre>
-                  {entry.tags && entry.tags.length > 0 && (
-                    <div className="entry-tags">
-                      {entry.tags.map((t) => (
-                        <span key={t} className="tag-chip">
-                          {t}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  <div className="entry-actions">
-                    <button
-                      onClick={() => {
-                        setEditingId(entry.id)
-                        setEditType(entry.type)
-                        setEditContent(entry.contentMd)
-                      }}
+                {editingId === entry.id ? (
+                  <div className="entry-edit">
+                    <select
+                      aria-label="编辑类型"
+                      value={editType}
+                      onChange={(e) => setEditType(e.target.value as EntryType)}
                     >
-                      编辑
-                    </button>
-                    <button className="danger" onClick={() => void handleDelete(entry)}>
-                      删除
-                    </button>
+                      {ENTRY_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {ENTRY_TYPE_LABELS[t]}
+                        </option>
+                      ))}
+                    </select>
+                    <textarea
+                      aria-label="编辑内容"
+                      value={editContent}
+                      onChange={(e) => setEditContent(e.target.value)}
+                    />
+                    <button onClick={() => void submitEdit(entry)}>保存</button>
+                    <button onClick={() => setEditingId(null)}>取消</button>
                   </div>
-                </>
-              )}
+                ) : (
+                  <>
+                    <pre className="entry-content">{entry.contentMd}</pre>
+                    {entry.tags && entry.tags.length > 0 && (
+                      <div className="entry-tags">
+                        {entry.tags.map((t) => (
+                          <span key={t} className="tag-chip">
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="entry-actions">
+                      <button
+                        onClick={() => {
+                          setEditingId(entry.id)
+                          setEditType(entry.type)
+                          setEditContent(entry.contentMd)
+                        }}
+                      >
+                        编辑
+                      </button>
+                      <button className="danger" onClick={() => void handleDelete(entry)}>
+                        删除
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             </li>
           ))}
         </ul>
       )}
 
-      {total > entries.length && !loading && (
-        <button onClick={() => void load(page + 1)}>加载更多</button>
-      )}
+      {loading && <p className="muted">加载中…</p>}
+      <div ref={sentinelRef} className="entry-sentinel" aria-hidden="true" />
 
-      <div className="quick-entry">
-        <select
-          aria-label="类型"
-          value={draftType}
-          onChange={(e) => setDraftType(e.target.value as EntryType)}
-        >
-          {typeOptions.map((t) => (
-            <option key={t} value={t}>
-              {ENTRY_TYPE_LABELS[t]}
-            </option>
-          ))}
-        </select>
-        <textarea
-          aria-label="记录内容"
-          placeholder="输入记录内容（Enter 发送，Shift+Enter 换行）"
-          value={draftContent}
-          onChange={(e) => setDraftContent(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              void submitAdd()
-            }
-          }}
-        />
-        <button onClick={() => void submitAdd()} disabled={!draftContent.trim()}>
-          追加
-        </button>
+      <div className="quick-entry-bar">
+        <div className="quick-entry">
+          <select
+            aria-label="类型"
+            value={draftType}
+            onChange={(e) => {
+              const t = e.target.value as EntryType
+              setDraftType(t)
+              saveEntryType(t)
+            }}
+          >
+            {typeOptions.map((t) => (
+              <option key={t} value={t}>
+                {ENTRY_TYPE_LABELS[t]}
+              </option>
+            ))}
+          </select>
+          <textarea
+            ref={quickRef}
+            aria-label="记录内容"
+            placeholder="输入记录内容（Enter 发送，Shift+Enter 换行，Ctrl+E 聚焦）"
+            value={draftContent}
+            onChange={(e) => setDraftContent(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                void submitAdd()
+              }
+            }}
+          />
+          <button onClick={() => void submitAdd()} disabled={!draftContent.trim()}>
+            追加
+          </button>
+        </div>
       </div>
     </section>
   )
