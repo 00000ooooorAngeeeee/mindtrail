@@ -86,8 +86,35 @@ export interface Entry {
   type: EntryType
   contentMd: string
   tags?: string[]
+  /** 绑定的 Git 提交完整 hash（经 entry_commit 回填，06 §3「commits」）。 */
+  commits?: string[]
   createdAt?: string
   updatedAt?: string
+}
+
+/** 仓库校验结果（04 §5 GET /git/repo/status）：head 为完整 40 位 hash，空仓库为 null。 */
+export interface RepoStatus {
+  path: string
+  head: string | null
+  branch: string | null
+}
+
+/** 提交元信息（04 §5 GET /git/repo/commits：hash/author/time/message/files）。 */
+export interface GitCommit {
+  hash: string
+  author: string
+  authorEmail?: string | null
+  time?: string | null
+  message: string
+  files: string[]
+}
+
+/** 会话内条目-提交绑定关系（GET /sessions/{id}/commits，Git 面板与未绑定缓冲计算）。 */
+export interface BoundCommit {
+  entryId: number
+  commitHash: string
+  repoPath: string
+  boundAt?: string
 }
 
 export interface Session {

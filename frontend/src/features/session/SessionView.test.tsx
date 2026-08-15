@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { SessionView } from './SessionView'
 import { getSession, updateSession } from '../../api/sessions'
 import { addEntry, deleteEntry, updateEntry } from '../../api/entries'
+import { bindCommits, getCommits, getSessionCommits, unbindCommit } from '../../api/git'
 import { MockIntersectionObserver } from '../../test/intersectionObserver'
 import { ENTRY_TYPE_STORAGE_KEY } from './typeMemory'
-import type { Entry, Session } from '../../api/types'
+import { gitSuggestKey } from './gitTimeline'
+import type { Entry, GitCommit, Session } from '../../api/types'
 
 vi.mock('../../api/sessions', () => ({
   getSession: vi.fn(),
@@ -16,12 +18,25 @@ vi.mock('../../api/entries', () => ({
   updateEntry: vi.fn(),
   deleteEntry: vi.fn(),
 }))
+vi.mock('../../api/git', () => ({
+  getCommits: vi.fn(),
+  getSessionCommits: vi.fn(),
+  bindCommits: vi.fn(),
+  unbindCommit: vi.fn(),
+}))
 
 const getMock = vi.mocked(getSession)
 const updateSessionMock = vi.mocked(updateSession)
 const addMock = vi.mocked(addEntry)
 const updateEntryMock = vi.mocked(updateEntry)
 const deleteEntryMock = vi.mocked(deleteEntry)
+const getCommitsMock = vi.mocked(getCommits)
+const getSessionCommitsMock = vi.mocked(getSessionCommits)
+const bindMock = vi.mocked(bindCommits)
+const unbindMock = vi.mocked(unbindCommit)
+
+const H1 = '1'.repeat(40)
+const H2 = '2'.repeat(40)
 
 const activeSession = (): Session => ({
   id: 1,
@@ -37,6 +52,21 @@ const activeSession = (): Session => ({
   ],
 })
 
+/** 带仓库的会话（触发 Git 轮询与面板）。 */
+const gitSession = (): Session => ({
+  ...activeSession(),
+  repoPath: 'D:/repo',
+  startHead: 'a'.repeat(40),
+})
+
+const commit = (hash: string, message: string, files = ['a.txt']): GitCommit => ({
+  hash,
+  author: '验证者',
+  time: '2025-06-01T09:30:00',
+  message,
+  files,
+})
+
 describe('SessionView 会话详情页（时间线条目）', () => {
   beforeEach(() => {
     getMock.mockReset()
@@ -44,9 +74,20 @@ describe('SessionView 会话详情页（时间线条目）', () => {
     addMock.mockReset()
     updateEntryMock.mockReset()
     deleteEntryMock.mockReset()
+    getCommitsMock.mockReset()
+    getSessionCommitsMock.mockReset()
+    bindMock.mockReset()
+    unbindMock.mockReset()
     MockIntersectionObserver.reset()
     localStorage.clear()
     getMock.mockResolvedValue(activeSession())
+    getCommitsMock.mockResolvedValue([])
+    getSessionCommitsMock.mockResolvedValue([])
+  })
+
+  afterEach(() => {
+    // 假定时器测试失败时防止污染后续用例（07 §6 轮询用例使用）
+    vi.useRealTimers()
   })
 
   it('渲染标题、状态徽标与时间线条目（类型名 + 内容 + 时间戳）', async () => {
@@ -204,5 +245,116 @@ describe('SessionView 会话详情页（时间线条目）', () => {
     fireEvent.keyDown(document, { key: 'e', ctrlKey: true })
 
     expect(screen.getByLabelText('记录内容')).toHaveFocus()
+  })
+
+  // ---------- Git 绑定（07 §6 任务三） ----------
+
+  it('无仓库会话：不请求 Git 接口也不渲染面板', async () => {
+    render(<SessionView sessionId={1} onBack={() => {}} />)
+    await screen.findByText('测试会话')
+
+    expect(getCommitsMock).not.toHaveBeenCalled()
+    expect(getSessionCommitsMock).not.toHaveBeenCalled()
+    expect(screen.queryByText(/Git 时间线/)).not.toBeInTheDocument()
+  })
+
+  it('Git 面板：展示提交（短 hash/信息/时间/作者/文件数）与绑定状态', async () => {
+    getMock.mockResolvedValue(gitSession())
+    getCommitsMock.mockResolvedValueOnce([commit(H1, 'feat: 第一个提交', ['a.txt', 'b.txt']), commit(H2, 'feat: 第二个提交')])
+    getSessionCommitsMock.mockResolvedValueOnce([{ entryId: 11, commitHash: H1, repoPath: 'D:/repo' }])
+    render(<SessionView sessionId={1} onBack={() => {}} />)
+    await screen.findByText('测试会话')
+
+    fireEvent.click(screen.getByText(/Git 时间线（2 个提交 · 1 未绑定）/))
+
+    expect(await screen.findByText(H1.slice(0, 7))).toBeInTheDocument()
+    expect(screen.getByText('feat: 第一个提交')).toBeInTheDocument()
+    expect(screen.getByText(/2 文件/)).toBeInTheDocument()
+    expect(screen.getByText('已绑定 #1')).toBeInTheDocument()
+    expect(screen.getByText('feat: 第二个提交')).toBeInTheDocument()
+  })
+
+  it('Git 面板空态：无提交显示空态引导（PRD C3.6）', async () => {
+    getMock.mockResolvedValue(gitSession())
+    getCommitsMock.mockResolvedValueOnce([])
+    getSessionCommitsMock.mockResolvedValueOnce([])
+    render(<SessionView sessionId={1} onBack={() => {}} />)
+    await screen.findByText('测试会话')
+
+    fireEvent.click(screen.getByText(/Git 时间线（0 个提交）/))
+
+    expect(await screen.findByText('会话期间暂无提交')).toBeInTheDocument()
+  })
+
+  it('5s 轮询发现新提交 → 建议卡片 → 一键绑定到最近条目并显示徽标', async () => {
+    // shouldAdvanceTime 让假定时钟与真实时间 1:1 推进（RTL waitFor 可用），5s 间隔在约 5s 真实时间后触发，
+    // 同时验证 07 §6 验收「新提交 ≤10s 内进入未绑定缓冲」的计时路径。
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    // 模拟后端绑定生效：初始 H1 已绑定到条目 11，绑定后 H2 进入绑定表 → 后续轮询不再弹建议
+    const boundRows = [{ entryId: 11, commitHash: H1, repoPath: 'D:/repo' }]
+    getMock.mockResolvedValue(gitSession())
+    getCommitsMock
+      .mockResolvedValueOnce([commit(H1, 'feat: 已有提交')])
+      .mockResolvedValue([commit(H2, 'feat: 新提交'), commit(H1, 'feat: 已有提交')])
+    getSessionCommitsMock.mockImplementation(async () => [...boundRows])
+    bindMock.mockImplementation(async (_id, hashes) => {
+      for (const h of hashes) boundRows.push({ entryId: 12, commitHash: h, repoPath: 'D:/repo' })
+      return [...hashes]
+    })
+    render(<SessionView sessionId={1} onBack={() => {}} />)
+    await screen.findByText('测试会话')
+    expect(screen.queryByText(/检测到新提交/)).not.toBeInTheDocument()
+
+    // 新提交经 5s 轮询进入未绑定缓冲 → 建议卡片出现（PRD C3.2）
+    await waitFor(() => expect(screen.queryAllByText(/检测到新提交/).length).toBeGreaterThan(0), { timeout: 7000 })
+
+    fireEvent.click(screen.getByText('绑定到最近条目'))
+
+    await waitFor(() => expect(bindMock).toHaveBeenCalledWith(12, [H2]))
+    await waitFor(() => expect(screen.queryAllByText(/检测到新提交/).length).toBe(0))
+    expect(screen.getByTitle(`点击解绑 ${H2}`)).toHaveTextContent(H2.slice(0, 7))
+
+    // 绑定生效后继续轮询：不再重复弹出建议
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000)
+    })
+    expect(screen.queryAllByText(/检测到新提交/).length).toBe(0)
+    vi.useRealTimers()
+  }, 15000)
+
+  it('忽略建议：标记已见并持久化（同会话最多 3 次提醒配额见纯函数单测）', async () => {
+    getMock.mockResolvedValue(gitSession())
+    getCommitsMock.mockResolvedValue([commit(H1, 'feat: 提交')])
+    getSessionCommitsMock.mockResolvedValue([])
+    render(<SessionView sessionId={1} onBack={() => {}} />)
+    await screen.findByText('测试会话')
+    await waitFor(() => expect(screen.queryAllByText(/检测到新提交/).length).toBeGreaterThan(0))
+
+    fireEvent.click(screen.getByText('忽略'))
+
+    await waitFor(() => expect(screen.queryAllByText(/检测到新提交/).length).toBe(0))
+    const state = JSON.parse(localStorage.getItem(gitSuggestKey(1)) ?? '{}') as { dismissed: number; seenHashes: string[] }
+    expect(state.dismissed).toBe(1)
+    expect(state.seenHashes).toContain(H1)
+  })
+
+  it('条目 commit 徽标：展示短 hash，点击确认后解绑', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const s = gitSession()
+    s.entries = [
+      ...(s.entries ?? []),
+      { id: 13, sessionId: 1, seq: 3, type: 'artifact', contentMd: '构建产物 13', tags: [], commits: [H1], createdAt: '2025-06-01T09:20:00' },
+    ]
+    getMock.mockResolvedValue(s)
+    unbindMock.mockResolvedValue(undefined)
+    render(<SessionView sessionId={1} onBack={() => {}} />)
+    await screen.findByText('构建产物 13')
+
+    const badge = screen.getByTitle(`点击解绑 ${H1}`)
+    expect(badge).toHaveTextContent(H1.slice(0, 7))
+    fireEvent.click(badge)
+
+    await waitFor(() => expect(unbindMock).toHaveBeenCalledWith(13, H1))
+    await waitFor(() => expect(screen.queryByTitle(`点击解绑 ${H1}`)).not.toBeInTheDocument())
   })
 })

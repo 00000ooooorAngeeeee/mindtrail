@@ -241,3 +241,117 @@
 .entry-type-prompt {
   --entry-color: #6366f1;
 }
+
+/* ---- Git 绑定（07 §6 任务三）：建议卡片、时间线面板、commit 徽标 ---- */
+
+/* 建议卡片（PRD C3.4：toast 式提示 + 一键绑定/忽略） */
+.git-suggest {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  margin: 0 0 10px;
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  background: #f0f9ff;
+}
+
+.git-suggest p {
+  margin: 0;
+  flex: 1;
+  min-width: 200px;
+}
+
+.git-suggest .muted {
+  font-size: 12px;
+}
+
+/* Git 时间线面板（PRD C3.6：独立于条目的提交对照） */
+.git-panel {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border, #d9dee5);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.git-panel-toggle {
+  border: none;
+  background: none;
+  padding: 2px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+}
+
+.git-commit-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.git-commit-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 5px 0;
+  border-top: 1px solid #f1f5f9;
+}
+
+.git-commit-item:first-child {
+  border-top: none;
+}
+
+.commit-hash {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.commit-msg {
+  flex: 1;
+  min-width: 160px;
+  font-size: 13px;
+  color: #1e293b;
+}
+
+.commit-meta {
+  font-size: 12px;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.commit-bound {
+  font-size: 12px;
+  color: #15803d;
+  background: #dcfce7;
+  border: none;
+  border-radius: 9px;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+
+/* 条目卡片的 commit 徽标（绑定证据，06 §5） */
+.entry-commits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.commit-badge {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  padding: 1px 7px;
+  border: 1px solid #bbf7d0;
+  border-radius: 9px;
+  background: #f0fdf4;
+  color: #166534;
+  cursor: pointer;
+}
