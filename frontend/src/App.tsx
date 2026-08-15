@@ -66,7 +66,6 @@ export default function App() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="输入工作区名称"
-                disabled={creating}
               />
               <button onClick={handleCreate} disabled={!name.trim() || creating}>
                 {creating ? '创建中…' : '创建工作区'}

@@ -14,15 +14,24 @@ export class ApiError extends Error {
   }
 }
 
+/** 请求超时（人工验收反馈：请求挂起会让 creating 状态永久卡死，输入框被禁用无法再创建）。 */
+const REQUEST_TIMEOUT_MS = 10000
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   let res: Response
   try {
     res = await fetch(`${BASE_URL}${path}`, {
       ...options,
+      signal: controller.signal,
       headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) },
     })
-  } catch {
+  } catch (e) {
+    if (controller.signal.aborted) throw new ApiError(-2, '请求超时，请重试')
     throw new ApiError(-1, '无法连接后端服务，请确认后端已启动')
+  } finally {
+    clearTimeout(timer)
   }
 
   let body: ApiResponse<T>

@@ -42,6 +42,25 @@ describe('api/client', () => {
     await expect(get('/health')).rejects.toThrow('无法连接后端服务')
   })
 
+  it('请求挂起超过 10s 时中止并抛出「请求超时」', async () => {
+    vi.useFakeTimers()
+    // 模拟永不响应的请求：仅在 AbortSignal 触发时 reject（超时中止路径）
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(
+        (_url: unknown, opts: { signal: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            opts.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+          }),
+      ),
+    )
+    const p = get('/health')
+    const assertion = expect(p).rejects.toThrow('请求超时')
+    await vi.advanceTimersByTimeAsync(10000)
+    await assertion
+    vi.useRealTimers()
+  })
+
   it('post 将请求体序列化为 JSON 并指向 /api/v1', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       status: 200,
