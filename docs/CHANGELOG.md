@@ -722,3 +722,43 @@ M2 总验收是 M2 五段会话里信息密度最高的一段：一次验收抓�
 ### [next] 15:03 · 下一步
 - [ ] M3 任务一：会话管理 + 时间线条目（07 §6）
 - [ ] GUI 脚本补焦点/选区断言（document.activeElement / getSelection）
+
+## 会话 21 · M3 任务一：会话管理 + 时间线条目
+
+### [goal] 14:58 · 目标
+完成 M3 任务一（07 §6）：会话开始/结束/列表/删除、start_head 记录；条目追加（类型+Markdown+标签）/编辑/删除、seq 管理；后端 API + 单测 + 前端会话列表/详情页接入。表现为：后端单测与集成测试全绿、前端单测与构建通过、verify 冒烟 ALL PASS、真实仓库 start_head/end_head 与 `git rev-parse HEAD` 一致。
+
+### [action] 15:01 · 操作
+按 TDD 先写失败单测（SessionServiceTest 19 条、EntryServiceTest 15 条、GitHeadReaderTest 4 条，编译失败确认 RED），再实现：JGit 6.10 依赖 + GitHeadReader（读 HEAD，空仓库返回 null、非法路径 400）；session/entry/tag/entry_tag 实体与 Mapper（列表带条目数统计、nextSeq=MAX(seq)+1、分页、级联清理 SQL）；SessionService/EntryService（start_head/end_head、结束会话总结写 review 条目、会话结束后仅可追加 review/note、标签按需即时创建）；SessionController/EntryController（04 §5 契约 + PATCH）；前端 SessionSection（会话列表/开始/删除）与 SessionView（时间线条目页：类型着色左缘、追加 Enter 提交、编辑、删除、结束会话、分页加载更多）；verify.mjs 补 session 往返冒烟。
+
+### [decision] 15:03 · 决策
+① JGit 依赖提前到任务一引入：仅用其读 HEAD 记录 start_head/end_head（任务一的验收项），任务三的提交历史/感知在此基础上扩展——放弃「任务三再引依赖」因为 start_head 是本次验收项，且一次会话只做一个任务。② 结束总结双写：summary 列保存原文 + 同时追加一条 review 条目——docs/05 列注释「渲染为 review 条目」与 PRD C1.3「写入 review 条目」存在表述差异，双写同时满足列表展示与时间线可编辑，语义已写回 docs/05。③ 条目标签按需即时创建（PRD C2.6），标签重命名/合并等管理留 M4 模块 D。④ 前端任务一不做仓库选择输入框：会话缺省继承工作区仓库（C1.1 默认行为），会话级覆盖留给任务三 Git 面板。
+
+### [error] 15:05 · 错误
+三处环境适配 + 一处实现笔误：① Maven 写 `C:\Users\Maa\.m2` 被沙箱拒绝 → 改工作区内本地仓库 `-Dmaven.repo.local=D:/VsCodeWorkPlace/.m2repo`（PowerShell 须给 -D 参数整体加引号，否则被拆成插件前缀 `.repo.local=D`）；② Mockito inline mockmaker 自附加（Windows 命名管道）被沙箱拦 → surefire 加 `-javaagent=byte-buddy-agent` 预装 agent 绕开自附加；③ 前端单测/构建的 esbuild 与 verify.mjs 的 mysql CLI 均以管道 stdio 拉起子进程被沙箱 EPERM 拦 → 按工具规则升级权限运行（无代码改动）。④ SessionView 单测一度全红：测试默认导入与组件命名导出不匹配，改命名导入后 79/79。
+
+### [action] 15:07 · 操作
+实机全链路验证：启动后端 → `node scripts/verify.mjs` 输出 `SMOKE: ALL PASS`（6/6）；在本仓库上创建带 repoPath 的工作区 → 开始/结束会话 → start_head/end_head 与 `git rev-parse HEAD`（abd08ff）完全一致 → 清理。
+
+### [test] 15:09 · 验证
+- 后端 `mvn test`：83/83（新增 SessionControllerTest 真实 MySQL 往返 + GitHeadReaderTest 4 + EntryServiceTest 15 + SessionServiceTest 19；既有 45 条不回归）。
+- 前端 `npm test`：79/79（新增 time 3 + SessionView 8 + App 会话流 2）；`npm run build` 通过。
+- scripts `node --test scripts/test/*.mjs`：12/12（verify 9 + verify-m2-gui 3，不回归）。
+- 冒烟 `node scripts/verify.mjs`：SMOKE: ALL PASS（新增 session 往返 1 项 + 工作区级联扩展断言）。
+- 任务一验收对应（07 §6 会话切分）：全部落地。
+
+### [artifact] 15:11 · 产出
+- `8e92766`：会话/条目数据层与 GitHeadReader（JGit 依赖 + 实体 + Mapper + 4 条单测）
+- `a1255dd`：会话与时间线条目服务及 REST 接口（单测 34 条 + MySQL 集成测试）
+- `abd08ff`：前端会话列表与时间线条目详情页接入（单测 13 条）
+- `87ec364`：verify 冒烟补 session/entry 往返与工作区级联断言
+
+### [review] 15:13 · 复盘
+任务一以「文档契约先行 + TDD + 冒烟闭环」完成，最大成本不在业务代码而在沙箱环境适配（Maven 仓库路径、Mockito 自附加、esbuild/CLI 管道），三条都是可复用的环境知识，已写进本会话 error 条目供后续会话直接查用。产品语义上两个取舍值得记：①「结束总结」在 05 与 02 文档间有表述差异，选择双写（summary 列 + review 条目）并在 docs/05 定死语义——下次遇到文档分歧应先记录再实现，不默默二选一；② 标签按需创建让条目 API 自洽（C2.6），但标签名一旦打错将永久留在工作区（删除入口属 M4），dogfooding 时注意写对。下次建议：任务二（快速记录框 + 时间线视图）起用产品本身记录过程（07 §6 dogfooding 切换点），CHANGELOG 只保留历史会话。
+
+### [next] 15:14 · 下一步
+- [ ] M3 任务二：快速记录框（底部常驻、Enter 提交、类型记忆）+ 时间线视图（类型着色/图标/时间戳/无限滚动，每页 50）
+- [ ] M3 任务三：Git 服务（JGit）——仓库校验、提交历史、5s 感知 + 未绑定缓冲、绑定/解绑、建议卡片、Git 时间线面板
+- [ ] M3 任务四：条目卡片完善（Markdown 渲染、commit 徽标 + 详情弹层）+ M3 总验收（dogfooding 强制）
+- [ ] 遗留：GUI 脚本补焦点/选区断言（document.activeElement / getSelection，会话 17 提出）
+- [ ] 遗留：M1 验收清单性能项（500 节点 ≥45fps）仍未实测（07 §4）
