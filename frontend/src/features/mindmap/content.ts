@@ -171,15 +171,21 @@ export function addChild(
   return { ...content, nodes: { ...content.nodes, [id]: node } }
 }
 
-/** 新增自由便签（无文本纯形状/备注卡，PRD B2.5）：text 空、sticky 标记、默认琥珀色，父挂根节点以便删除与树结构有效。 */
-export function addStickyNote(content: MindmapContent, layout: { x: number; y: number } | null = null): MindmapContent {
+/** 新增自由便签（无文本纯形状/备注卡，PRD B2.5）：text 空、sticky 标记、默认琥珀色。
+ *  挂载到指定父节点（人工验收：便签应成为选中节点的子节点）；缺省或父节点不存在时回退根节点。 */
+export function addStickyNote(
+  content: MindmapContent,
+  layout: { x: number; y: number } | null = null,
+  parentId: string | null = null,
+): MindmapContent {
+  const target = parentId && content.nodes[parentId] ? parentId : content.rootNodeId
   const id = nextNodeId(content)
   const node: MindmapNode = {
     id,
     text: '',
     style: { ...DEFAULT_NODE_STYLE, color: 'amber' },
     tags: [],
-    parentId: content.rootNodeId,
+    parentId: target,
     layout,
     collapsed: false,
     sticky: true,

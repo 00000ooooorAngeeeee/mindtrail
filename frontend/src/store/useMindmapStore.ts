@@ -170,9 +170,11 @@ export const useMindmapStore = create<MindmapState>()((set, get) => {
     },
 
     addStickyNote: (layout = null) => {
-      const { content } = get()
+      const { content, selectedIds } = get()
       if (!content) return
-      const next = addStickyNotePure(content, layout)
+      // 人工验收：便签应挂到选中节点（无选中/选中无效时回退根节点）
+      const parentId = selectedIds[0] ?? content.rootNodeId
+      const next = addStickyNotePure(content, layout, parentId)
       const newId = Object.keys(next.nodes).find((id) => !(id in content.nodes))
       apply(next, [newId ?? content.rootNodeId])
     },

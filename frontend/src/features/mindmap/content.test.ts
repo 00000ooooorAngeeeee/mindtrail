@@ -124,6 +124,15 @@ describe('addStickyNote（自由便签，PRD B2.5）', () => {
   it('缺省坐标为 null', () => {
     expect(addStickyNote(defaultContent()).nodes.n2.layout).toBeNull()
   })
+
+  it('指定父节点时挂到该节点（选中节点添加便签）；父节点不存在回退根节点', () => {
+    let c = defaultContent()
+    c = addChild(c, 'n1', '分支') // n2
+    const withParent = addStickyNote(c, null, 'n2')
+    expect(withParent.nodes.n3.parentId).toBe('n2')
+    const fallback = addStickyNote(c, null, 'n99')
+    expect(fallback.nodes.n3.parentId).toBe('n1')
+  })
 })
 
 describe('deleteNodes（批量删除，PRD B2.6）', () => {
