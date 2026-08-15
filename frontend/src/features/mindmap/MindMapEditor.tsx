@@ -1,14 +1,17 @@
-// 树状模式画布（07 §4「树状模式画布」验收项）：React Flow 渲染 + 自研树布局。
-// 交互：点选节点、双击编辑、拖拽改层级（悬停高亮）、折叠/展开、缩放/平移、双击空白加节点、快捷键。
+// 导图编辑器（07 §4 树状 + §5 画布双模式）：React Flow 渲染 + 自研树布局。
+// 树状：点选节点、双击编辑、拖拽改层级（悬停高亮）、折叠/展开、缩放/平移、双击空白加节点、快捷键。
+// 画布（M2 任务一）：自由拖拽（layout 持久化）、自由连线（type=free，可删除）、树→画布平铺、画布→树严格树判定 + 三选一。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Background,
   BackgroundVariant,
   Controls,
+  MarkerType,
   MiniMap,
   ReactFlow,
   useEdgesState,
   useNodesState,
+  type Connection,
   type Edge,
   type Node,
   type ReactFlowInstance,
@@ -16,6 +19,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useMindmapStore } from '../../store/useMindmapStore'
+import type { MindmapMode } from '../../store/useMindmapStore'
 import { descendants } from './content'
 import type { MindmapContent } from './content'
 import { computeTreeLayout, type LayoutPoint } from './treeLayout'
@@ -35,6 +39,7 @@ function buildNodes(
   positions: Map<string, LayoutPoint>,
   childCount: Map<string, number>,
   selectedId: string | null,
+  mode: MindmapMode,
 ): MindmapRFNode[] {
   const out: MindmapRFNode[] = []
   for (const [id, pos] of positions) {
@@ -51,14 +56,18 @@ function buildNodes(
         hasChildren: (childCount.get(id) ?? 0) > 0,
         childCount: childCount.get(id) ?? 0,
         collapsed: n.collapsed,
+        // 画布模式：渲染连接手柄；position 供工具栏「加子节点」在节点旁落点。
+        connectable: mode === 'canvas',
+        position: pos,
       },
     })
   }
   return out
 }
 
-function buildEdges(content: MindmapContent, positions: Map<string, LayoutPoint>): Edge[] {
+function buildEdges(content: MindmapContent, positions: Map<string, LayoutPoint>, mode: MindmapMode): Edge[] {
   const out: Edge[] = []
+  // 父链边（由 parentId 派生，05 §4 语义）：树模式主结构；画布模式保留展示但不可删除。
   for (const n of Object.values(content.nodes)) {
     if (!n.parentId || !positions.has(n.id) || !positions.has(n.parentId)) continue
     out.push({
@@ -66,8 +75,25 @@ function buildEdges(content: MindmapContent, positions: Map<string, LayoutPoint>
       source: n.parentId,
       target: n.id,
       type: 'smoothstep',
+      deletable: false,
+      selectable: mode === 'tree',
       style: { stroke: '#c3c8d4', strokeWidth: 1.5 },
     })
+  }
+  // 自由连线（type=free，PRD B2.2）：仅画布模式渲染，树视图忽略（PRD B3.3）。
+  if (mode === 'canvas') {
+    for (const e of content.edges) {
+      if (!positions.has(e.source) || !positions.has(e.target)) continue
+      out.push({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        type: 'default',
+        deletable: true,
+        markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18 },
+        style: { stroke: '#8b93a7', strokeWidth: 1.5 },
+      })
+    }
   }
   return out
 }
@@ -100,6 +126,12 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
   const addChild = useMindmapStore((s) => s.addChild)
   const deleteNode = useMindmapStore((s) => s.deleteNode)
   const moveNode = useMindmapStore((s) => s.moveNode)
+  const moveNodeLayout = useMindmapStore((s) => s.moveNodeLayout)
+  const addFreeEdge = useMindmapStore((s) => s.addFreeEdge)
+  const removeFreeEdge = useMindmapStore((s) => s.removeFreeEdge)
+  const switchMode = useMindmapStore((s) => s.switchMode)
+  const forceTreeMode = useMindmapStore((s) => s.forceTreeMode)
+  const ignoreFreeEdgesToTree = useMindmapStore((s) => s.ignoreFreeEdgesToTree)
   const save = useMindmapStore((s) => s.save)
   const undo = useMindmapStore((s) => s.undo)
   const redo = useMindmapStore((s) => s.redo)
@@ -109,6 +141,7 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
   const content = useMindmapStore((s) => s.content)
   const history = useMindmapStore((s) => s.history)
   const selectedId = useMindmapStore((s) => s.selectedId)
+  const mode = useMindmapStore((s) => s.mode)
   const loading = useMindmapStore((s) => s.loading)
   const error = useMindmapStore((s) => s.error)
   const saving = useMindmapStore((s) => s.saving)
@@ -117,6 +150,8 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
   const [nodes, setNodes, onNodesChange] = useNodesState<MindmapRFNode>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [zoom, setZoom] = useState(1)
+  // 画布→树遇非树边时的三选一对话框（07 §5）。
+  const [dialogOpen, setDialogOpen] = useState(false)
   const dragging = useRef(false)
   const dropTargetRef = useRef<string | null>(null)
   const fittedRef = useRef(false)
@@ -127,7 +162,18 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
     fittedRef.current = false
   }, [mindmapId, load])
 
-  const positions = useMemo(() => (content ? computeTreeLayout(content) : new Map<string, LayoutPoint>()), [content])
+  const positions = useMemo(() => {
+    if (!content) return new Map<string, LayoutPoint>()
+    // 画布模式折叠忽略（05 §4），树布局作为未摆放节点的回退坐标。
+    const tree = computeTreeLayout(content, mode === 'canvas')
+    if (mode === 'tree') return tree
+    const m = new Map<string, LayoutPoint>()
+    for (const [id, n] of Object.entries(content.nodes)) {
+      m.set(id, n.layout ?? tree.get(id) ?? { x: 0, y: 0 })
+    }
+    return m
+  }, [content, mode])
+
   const childCount = useMemo(() => {
     const m = new Map<string, number>()
     if (!content) return m
@@ -140,14 +186,27 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
   // 布局/内容变化时同步节点与边（拖拽中跳过，避免打断拖拽）。
   useEffect(() => {
     if (!content || dragging.current) return
-    setNodes(buildNodes(content, positions, childCount, selectedId))
-    setEdges(buildEdges(content, positions))
+    setNodes(buildNodes(content, positions, childCount, selectedId, mode))
+    setEdges(buildEdges(content, positions, mode))
     if (!fittedRef.current) {
       fittedRef.current = true
       // 双 rAF 等 React Flow 完成首轮测量后再 fit，避免按 0 尺寸计算。
       requestAnimationFrame(() => requestAnimationFrame(() => void rfRef.current?.fitView({ padding: 0.2 })))
     }
-  }, [content, positions, childCount, selectedId, setNodes, setEdges])
+  }, [content, positions, childCount, selectedId, mode, setNodes, setEdges])
+
+  // 切换模式后坐标来源变化（平铺/重排），重新适应视图。
+  useEffect(() => {
+    requestAnimationFrame(() => requestAnimationFrame(() => void rfRef.current?.fitView({ padding: 0.2 })))
+  }, [mode])
+
+  const trySwitch = useCallback(
+    (next: MindmapMode) => {
+      const r = switchMode(next)
+      if (r === 'non-tree') setDialogOpen(true)
+    },
+    [switchMode],
+  )
 
   const onNodeDragStart = useCallback(() => {
     dragging.current = true
@@ -156,24 +215,44 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
 
   const onNodeDrag = useCallback(
     (_e: unknown, node: Node) => {
-      if (!content) return
+      if (!content || mode !== 'tree') return
       const target = findDropTarget(node.id, node.position, positions, descendants(content, node.id))
       if (target === dropTargetRef.current) return
       dropTargetRef.current = target
       setNodes((nds) => nds.map((n) => ({ ...n, data: { ...n.data, hover: n.id === target } })))
     },
-    [content, positions, setNodes],
+    [content, mode, positions, setNodes],
   )
 
   const onNodeDragStop = useCallback(
     (_e: unknown, node: Node) => {
       dragging.current = false
+      if (mode === 'canvas') {
+        // 画布：自由摆放，落点坐标写入 layout 持久化（PRD B2.1）。
+        moveNodeLayout(node.id, node.position.x, node.position.y)
+        return
+      }
       const target = dropTargetRef.current
       dropTargetRef.current = null
       const newParent = target ?? content?.rootNodeId
       if (newParent) moveNode(node.id, newParent)
     },
-    [content, moveNode],
+    [mode, content, moveNode, moveNodeLayout],
+  )
+
+  const onConnect = useCallback(
+    (conn: Connection) => {
+      if (conn.source && conn.target) addFreeEdge(conn.source, conn.target)
+    },
+    [addFreeEdge],
+  )
+
+  // 画布模式删除自由连线（父链边 deletable=false 不会走到这里）。
+  const onEdgesDelete = useCallback(
+    (deleted: Edge[]) => {
+      for (const e of deleted) removeFreeEdge(e.id)
+    },
+    [removeFreeEdge],
   )
 
   const addNodeShortcut = useCallback(() => {
@@ -190,7 +269,7 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
     }
   }, [selectedId, content, deleteNode])
 
-  // 快捷键（08 §4.3 / 03 §5）：Ctrl+N 加节点、Delete 删除、Ctrl+S 保存、Ctrl+Z 撤销、Ctrl+Shift+Z/Ctrl+Y 重做。
+  // 快捷键（08 §4.3 / 03 §5）：Ctrl+N 加节点、Delete 删除、Ctrl+S 保存、Ctrl+Z 撤销、Ctrl+Shift+Z/Ctrl+Y 重做、Ctrl+1/2 切换模式。
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
       const t = e.target as HTMLElement | null
@@ -208,14 +287,21 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
         e.preventDefault()
         addNodeShortcut()
-      } else if (e.key === 'Delete') {
+      } else if ((e.ctrlKey || e.metaKey) && e.key === '1') {
+        e.preventDefault()
+        trySwitch('tree')
+      } else if ((e.ctrlKey || e.metaKey) && e.key === '2') {
+        e.preventDefault()
+        trySwitch('canvas')
+      } else if (e.key === 'Delete' && selectedId) {
+        // 仅在有选中节点时接管 Delete（带确认删子树）；选中连线时放行给 React Flow 删边。
         e.preventDefault()
         deleteSelected()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [save, undo, redo, addNodeShortcut, deleteSelected])
+  }, [save, undo, redo, addNodeShortcut, deleteSelected, selectedId, trySwitch])
 
   const nodeCount = content ? Object.keys(content.nodes).length : 0
 
@@ -224,6 +310,18 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
       <div className="mm-toolbar">
         <button onClick={onBack}>← 返回</button>
         <span className="mm-title">{mindmap?.name ?? '加载中…'}</span>
+        <div className="mm-mode-switch" role="group" aria-label="视图模式">
+          <button className={mode === 'tree' ? 'active' : ''} onClick={() => trySwitch('tree')} title="树状模式 (Ctrl+1)">
+            树状
+          </button>
+          <button
+            className={mode === 'canvas' ? 'active' : ''}
+            onClick={() => trySwitch('canvas')}
+            title="画布模式 (Ctrl+2)"
+          >
+            画布
+          </button>
+        </div>
         <div className="mm-toolbar-actions">
           <button onClick={undo} disabled={history.past.length === 0} title="撤销 (Ctrl+Z)">
             ↶ 撤销
@@ -247,6 +345,34 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
         </div>
       )}
 
+      {dialogOpen && (
+        <div className="mm-dialog-mask">
+          <div className="mm-dialog" role="alertdialog" aria-label="非树连线处理">
+            <p className="mm-dialog-title">切回树状模式</p>
+            <p>存在非树连线（自由连线会形成环或多父），树状视图将忽略它们。如何处理？</p>
+            <div className="mm-dialog-actions">
+              <button
+                onClick={() => {
+                  ignoreFreeEdgesToTree()
+                  setDialogOpen(false)
+                }}
+              >
+                忽略非树边
+              </button>
+              <button onClick={() => setDialogOpen(false)}>保持画布</button>
+              <button
+                onClick={() => {
+                  forceTreeMode()
+                  setDialogOpen(false)
+                }}
+              >
+                仅重排树形部分
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {loading && !content ? (
         <div className="mm-center muted">加载中…</div>
       ) : error && !content ? (
@@ -262,15 +388,28 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onNodeClick={(_, node) => select(node.id)}
+            onEdgeClick={() => select(null)}
+            deleteKeyCode={['Backspace', 'Delete']}
             onPaneClick={(e) => {
-              if (e.detail === 2) addNodeShortcut()
-              else select(null)
+              if (e.detail === 2) {
+                // 双击空白加节点（03 §4）：画布模式落在点击处。
+                if (mode === 'canvas' && rfRef.current) {
+                  const p = rfRef.current.screenToFlowPosition({ x: e.clientX, y: e.clientY })
+                  if (content) addChild(selectedId ?? content.rootNodeId, { x: Math.round(p.x), y: Math.round(p.y) })
+                } else {
+                  addNodeShortcut()
+                }
+              } else {
+                select(null)
+              }
             }}
             onNodeDragStart={onNodeDragStart}
             onNodeDrag={onNodeDrag}
             onNodeDragStop={onNodeDragStop}
+            onConnect={onConnect}
+            onEdgesDelete={onEdgesDelete}
             onMove={(_, viewport) => setZoom(viewport.zoom)}
-            nodesConnectable={false}
+            nodesConnectable={mode === 'canvas'}
             nodesFocusable={false}
             fitView={false}
             minZoom={0.2}
@@ -289,9 +428,13 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
 
       <div className="mm-statusbar">
         <span>{nodeCount} 节点</span>
-        <span>树状模式</span>
+        <span>{mode === 'tree' ? '树状模式' : '画布模式'}</span>
         <span>{Math.round(zoom * 100)}%</span>
-        <span className="muted">双击节点编辑 · 拖拽改层级 · 双击空白加节点</span>
+        <span className="muted">
+          {mode === 'tree'
+            ? '双击节点编辑 · 拖拽改层级 · 双击空白加节点'
+            : '拖拽摆放 · 从节点边缘拖出连线 · 选中边按 Delete 删除'}
+        </span>
       </div>
     </div>
   )

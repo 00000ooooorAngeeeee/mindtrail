@@ -15,6 +15,15 @@ import {
 } from '../features/mindmap/content'
 import type { MindmapContent } from '../features/mindmap/content'
 import {
+  addFreeEdge as addFreeEdgePure,
+  flattenLayout,
+  isStrictTree,
+  moveNodeLayout as moveNodeLayoutPure,
+  removeAllFreeEdges,
+  removeFreeEdge as removeFreeEdgePure,
+} from '../features/mindmap/canvas'
+import { computeTreeLayout } from '../features/mindmap/treeLayout'
+import {
   record as recordHistory,
   redo as redoHistory,
   undo as undoHistory,
@@ -24,22 +33,35 @@ import {
 /** 防抖保存间隔（04 §6.1：800ms 无操作即保存）。 */
 const SAVE_DEBOUNCE_MS = 800
 
+/** 导图视图模式（PRD B3.1）：同一份 content 的两种视图，模式本身不入库（05 §4 无模式字段）。 */
+export type MindmapMode = 'tree' | 'canvas'
+
 interface MindmapState {
   mindmap: Mindmap | null
   content: MindmapContent | null
   history: History
   selectedId: string | null
+  mode: MindmapMode
   loading: boolean
   saving: boolean
   dirty: boolean
   error: string | null
   load: (id: number) => Promise<void>
   select: (id: string | null) => void
-  addChild: (parentId: string) => void
+  addChild: (parentId: string, layout?: { x: number; y: number } | null) => void
   updateText: (id: string, text: string) => void
   deleteNode: (id: string) => void
   moveNode: (id: string, newParentId: string) => void
   toggleCollapse: (id: string) => void
+  moveNodeLayout: (id: string, x: number, y: number) => void
+  addFreeEdge: (source: string, target: string) => void
+  removeFreeEdge: (edgeId: string) => void
+  /** 切换模式；画布→树遇非树边返回 'non-tree'（由 UI 弹三选一，07 §5）。 */
+  switchMode: (next: MindmapMode) => 'ok' | 'non-tree'
+  /** 三选一之「仅重排树形部分」：保留自由边切回树状（树视图忽略自由边，PRD B3.3）。 */
+  forceTreeMode: () => void
+  /** 三选一之「忽略非树边」：删除全部自由边后切回树状。 */
+  ignoreFreeEdgesToTree: () => void
   undo: () => void
   redo: () => void
   clearError: () => void
@@ -83,6 +105,7 @@ export const useMindmapStore = create<MindmapState>()((set, get) => {
     content: null,
     history: { past: [], future: [] },
     selectedId: null,
+    mode: 'tree',
     loading: false,
     saving: false,
     dirty: false,
@@ -98,6 +121,7 @@ export const useMindmapStore = create<MindmapState>()((set, get) => {
           content: parseContent(mindmap.contentJson),
           history: { past: [], future: [] },
           selectedId: null,
+          mode: 'tree',
           loading: false,
           dirty: false,
         })
@@ -108,10 +132,10 @@ export const useMindmapStore = create<MindmapState>()((set, get) => {
 
     select: (id) => set({ selectedId: id }),
 
-    addChild: (parentId) => {
+    addChild: (parentId, layout = null) => {
       const { content } = get()
       if (!content) return
-      const next = addChildPure(content, parentId)
+      const next = addChildPure(content, parentId, '', layout)
       const newId = Object.keys(next.nodes).find((id) => !(id in content.nodes))
       apply(next, newId ?? parentId)
     },
@@ -138,6 +162,51 @@ export const useMindmapStore = create<MindmapState>()((set, get) => {
       const { content } = get()
       if (!content) return
       apply(toggleCollapsePure(content, id))
+    },
+
+    moveNodeLayout: (id, x, y) => {
+      const { content } = get()
+      if (!content) return
+      // 坐标取整：防抖保存序列化时避免拖拽浮点噪声（PRD B2.1 位置持久化）。
+      apply(moveNodeLayoutPure(content, id, Math.round(x), Math.round(y)))
+    },
+
+    addFreeEdge: (source, target) => {
+      const { content } = get()
+      if (!content) return
+      apply(addFreeEdgePure(content, source, target))
+    },
+
+    removeFreeEdge: (edgeId) => {
+      const { content } = get()
+      if (!content) return
+      apply(removeFreeEdgePure(content, edgeId))
+    },
+
+    switchMode: (next) => {
+      const { content, mode } = get()
+      if (!content || next === mode) return 'ok'
+      if (next === 'canvas') {
+        // 树→画布：布局结果平铺为坐标（04 §6.4「布局结果平铺」）；折叠子树也平铺（画布忽略折叠）。
+        set({ mode: next })
+        apply(flattenLayout(content, computeTreeLayout(content, true)))
+        return 'ok'
+      }
+      // 画布→树：边集构成严格树则直接切，否则交 UI 三选一（07 §5）。
+      if (isStrictTree(content)) {
+        set({ mode: 'tree' })
+        return 'ok'
+      }
+      return 'non-tree'
+    },
+
+    forceTreeMode: () => set({ mode: 'tree' }),
+
+    ignoreFreeEdgesToTree: () => {
+      const { content } = get()
+      if (!content) return
+      apply(removeAllFreeEdges(content))
+      set({ mode: 'tree' })
     },
 
     undo: () => {
