@@ -503,6 +503,25 @@ async function main() {
     await d.waitFor(`(document.querySelector('.mm-statusbar')?.textContent ?? '').includes('画布模式') && [...document.querySelectorAll('.mm-node-text')].some(t => t.textContent === '跨模式同步节点')`, '画布视图同步看到树状编辑的文本')
     check('S3b 树状编辑文本 → 画布视图同步可见（增删改互相同步）', true)
 
+    // ---------- S7：编辑态交互回归（人工验收反馈修复） ----------
+    // 编辑态 textarea 加 nodrag/nopan 后：内部拖拽不再被节点拖拽/画布平移劫持，文本可正常框选与输入
+    const editId = await d.evaluate(`(() => { const el = [...document.querySelectorAll('.react-flow__node')].find(n => n.querySelector('.mm-node-text')?.textContent === '跨模式同步节点'); return el?.getAttribute('data-id') ?? null })()`)
+    const editCenter = await d.nodeRect(editId)
+    await d.dblclickMouse(nodeInnerSel(editId), editCenter.cx, editCenter.cy)
+    await d.waitFor(`!!document.querySelector('.mm-node-input')`, 'S7 节点进入编辑态')
+    const taRect = await d.evaluate(`(() => { const r = document.querySelector('.mm-node-input').getBoundingClientRect(); return { cx: r.x + r.width / 2, cy: r.y + r.height / 2 } })()`)
+    const posBeforeEditDrag = (await d.nodeFlowPositions()).find((p) => p.id === editId)
+    await d.dragMouse('.mm-node-input', taRect.cx, taRect.cy, taRect.cx + 60, taRect.cy + 40)
+    await sleep(300)
+    const posAfterEditDrag = (await d.nodeFlowPositions()).find((p) => p.id === editId)
+    const notMoved = Math.abs(posAfterEditDrag.x - posBeforeEditDrag.x) < 0.5 && Math.abs(posAfterEditDrag.y - posBeforeEditDrag.y) < 0.5
+    const stillEditing = await d.evaluate(`!!document.querySelector('.mm-node-input')`)
+    check('S7a 编辑态内拖拽不拖动节点（文本框选不被劫持）', notMoved && stillEditing === true, `位移=(${posAfterEditDrag.x - posBeforeEditDrag.x}, ${posAfterEditDrag.y - posBeforeEditDrag.y}) 编辑框存活=${stillEditing}`)
+    await d.typeInto('.mm-node-input', '编辑态输入回归')
+    await d.waitFor(`[...document.querySelectorAll('.mm-node-text')].some(t => t.textContent === '编辑态输入回归')`, 'S7 编辑态输入提交生效')
+    check('S7b 编辑态文本可正常输入并提交', true)
+    await d.waitSaved()
+
     // ---------- S4：形状/颜色/加粗 + 便签 + 框选批量 ----------
     await sleep(600)
     const rootId = await d.evaluate(`[...document.querySelectorAll('.react-flow__node')].map(n => n.getAttribute('data-id')).find(id => document.querySelector('.react-flow__node[data-id="' + id + '"] .mm-node-text')?.textContent === '中心主题')`)

@@ -113,7 +113,13 @@ export function MindmapNode({ id, data, selected }: NodeProps<MindmapRFNode>) {
         </button>
       )}
 
-      <div className="mm-node-body">
+      {/*
+        编辑态下内容区加 XYFlow 交互排除类 nodrag/nopan：节点拖拽（d3-drag）与画布平移（d3-zoom）
+        的 mousedown 处理器会 preventDefault + stopImmediatePropagation，劫持 textarea 的聚焦与
+        文本拖选（人工验收反馈：编辑时无法框选文本、新建节点无法输入）。排除后 mousedown 正常冒泡，
+        编辑框回归标准输入行为。
+      */}
+      <div className={`mm-node-body${editing ? ' nodrag nopan' : ''}`}>
         {editing ? (
           <textarea
             className="mm-node-input"
