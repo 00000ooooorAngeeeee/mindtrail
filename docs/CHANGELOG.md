@@ -525,3 +525,44 @@ M2 任务一顺利完成，延续「纯函数 + TDD 锁死」的路子。三点�
 - [ ] 遗留：M1 验收清单性能项（20 节点无卡顿、500 节点 ≥45fps、刷新/重启恢复，需实机）
 - [ ] 遗留：导图重命名（PRD B4，补 PUT 携带 name 并同步 search_text 的 name 部分）
 - [ ] 遗留：verify.mjs 补导图往返冒烟
+
+## 会话 15 · M2 P1 项（框选多选 + 批量删除/移动 + 自由便签）
+
+### [goal] 11:10 · 目标
+完成 M2 剩余 P1 项：画布框选多选、批量删除/移动/设色、自由便签（无文本纯形状，PRD B2.5/B2.6）。表现为：画布可框选/Shift 多选、拖拽带动全体、批量设形/设色、Delete 批量删除带确认、工具栏「＋便签」新增无文本琥珀便签；纯函数单测与构建通过。
+
+### [action] 11:11 · 操作
+数据层纯函数（TDD 先行，10 条单测先红后绿）：`content.ts` 加 `sticky` 字段（normalize 缺省 false）+ `addStickyNote` + `deleteNodes`（级联子树、根跳过、并集去重）+ `updateNodesStyle`；`canvas.ts` 加 `moveNodesLayout`（批量坐标、无变化返回原对象）。
+
+### [action] 11:12 · 操作
+store + 组件：`selectedId` 收敛为 `selectedIds: string[]` 单一事实源，新增 `setSelectedIds`/`addStickyNote`/`updateStyles`/`deleteNodes`/`moveNodesLayout` action；`MindMapEditor` 接 `onSelectionChange` 回填、`selectionOnDrag` 框选、`onNodeDragStop` 批量移动、窗口 keydown 批量删除带确认、工具栏「＋便签」（画布模式）；`MindmapNode`/`mindmap.css` 便签渲染（紧凑尺寸 + 隐藏「＋」按钮）。
+
+### [decision] 11:12 · 决策
+选中模型收敛为单一 `selectedIds` 数组（React Flow `onSelectionChange` 回填），删除冗余的 `onNodeClick`/`onEdgeClick`/`toggleSelect`——单选即「长度 1 的数组」，单选/多选不再两套状态漂移。
+
+### [decision] 11:13 · 决策
+节点设 `deletable: false`，节点删除统一走窗口 keydown + store（带确认、排根、级联子树）；React Flow 的 `deleteKeyCode` 只用于删自由边。理由：React Flow 默认 Delete 键删节点会绕过「确认 + 根保护 + 子树级联」的业务规则，故把节点删除权收回到 store 单一入口（08 §4.3 一致性）。
+
+### [decision] 11:13 · 决策
+便签 `sticky` 为前端专用字段，后端 opaque 存整图 JSON、`analyze()` 用 `node.path()` 遍历天然容忍未知字段——旧数据缺省 false 由 normalize 兜底，无需 schema/后端改动（这是 M1 把 style 提前建模的同类红利）。
+
+### [decision] 11:14 · 决策
+批量纯函数取代并删除单数 `updateNodeStyle`/`moveNodeLayout`：二者在选中模型改多选后沦为「仅被单测引用」的死代码，且逻辑与批量版重复；一并清理（删函数 + 删对应单测），避免「生产代码仅由测试引用」的坏味道。
+
+### [test] 11:14 · 验证
+- 前端 `npm test`：60 通过（content 22 / canvas 14 / treeLayout 6 / history 5 / client 4 / App 9）。
+- `npm run build`（`tsc --noEmit` + `vite build`，352KB 产物）通过。
+- 说明：框选/批量删除确认/便签是 GUI 交互，无头环境未实机点击验证（沿用会话 12-14 惯例），建议 M2 总验收时人工目测：框选 3+ 节点拖拽带动、Delete 批量确认、便签无文本显示。
+
+### [artifact] 11:14 · 产出
+- `ca5d0e6` feat(frontend)：自由便签与批量操作纯函数（sticky/addStickyNote/deleteNodes/updateNodesStyle/moveNodesLayout）+ 单测
+- `7566ff2` feat(frontend)：画布框选多选与批量删除/移动/设色 + 便签渲染
+
+### [review] 11:15 · 复盘
+P1 项收尾，延续「纯函数 + TDD + 统一 store 入口」的路子，M2 实现全部落地（剩总验收）。三点体会：① 选中模型从「单 id + toggle」升级到「id 数组」时，最干净的做法是让 React Flow 的 `onSelectionChange` 成为唯一事实源回填，而非在点击/框选各写一套同步逻辑——单一数据源自然消灭多选/单选漂移；② 「批量删除」的坑不在删（纯函数简单），而在与 React Flow 默认 Delete 键的行为冲突——用 `deletable: false` 把节点删除权收回业务层，是本会话最关键的边界决策，后继 agent 改删除逻辑时别绕过它；③ 便签做成前端专用字段而非改 schema，是「整图 JSON 存储」设计决策的直接红利，与 M1 提前建 style 字段同理——能放 JSON 的轻字段不轻易动表。遗留：M2 总验收（100 节点拖拽流畅、GUI 交互实机验证）是 M2 唯一未勾选项。
+
+### [next] 11:15 · 下一步
+- [ ] M2 总验收（07 §5 验收清单：坐标/形状/颜色持久化重启不丢、100 节点自由画布拖拽流畅、框选/批量操作实机、两模式增删改同步）
+- [ ] 遗留：M1 验收清单性能项（20 节点无卡顿、500 节点 ≥45fps、刷新/重启恢复，需实机）
+- [ ] 遗留：导图重命名（PRD B4，补 PUT 携带 name 并同步 search_text 的 name 部分）
+- [ ] 遗留：verify.mjs 补导图往返冒烟
