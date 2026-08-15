@@ -485,6 +485,106 @@ export async function runChecks(deps = {}) {
     }
   }
 
+  // 6.5 全局搜索往返（M4 任务一）：建含关键词的导图/会话/条目 → 全类型命中（FULLTEXT ngram + 标题 LIKE）→
+  //     type/workspaceId 过滤 → 单字 LIKE 兜底 → 片段/节点定位回填 → 清理（额外建的空工作区一并删除）
+  let searchOtherWid = null
+  try {
+    if (!workspaceId) throw new Error('依赖第 3 步的 workspace id')
+    const kw = `搜验${process.pid}${Date.now()}`
+
+    // 导图：n2 节点文本含关键词（search_text 含节点文本 → FULLTEXT 命中；nodeId 定位 n2）
+    const smContent = JSON.stringify({
+      version: 1,
+      rootNodeId: 'n1',
+      nodes: {
+        n1: { id: 'n1', text: '根', note: '', style: {}, tags: [], parentId: null, layout: null, collapsed: false },
+        n2: { id: 'n2', text: `节点 ${kw}`, note: '', style: {}, tags: [], parentId: 'n1', layout: null, collapsed: false },
+      },
+      edges: [],
+    })
+    const sm = await request(`${BASE}/api/v1/workspaces/${workspaceId}/mindmaps`, {
+      method: 'POST',
+      body: { name: '搜索导图', contentJson: smContent },
+    })
+    const smId = sm?.json?.data?.id
+    if (sm?.json?.code !== 0 || !smId) throw new Error(`搜索导图创建失败：${JSON.stringify(sm?.json)}`)
+
+    // 会话：标题含关键词（标题 LIKE 命中）
+    const ss = await request(`${BASE}/api/v1/workspaces/${workspaceId}/sessions`, {
+      method: 'POST',
+      body: { title: `搜索会话 ${kw}` },
+    })
+    const ssId = ss?.json?.data?.id
+    if (ss?.json?.code !== 0 || !ssId) throw new Error(`搜索会话创建失败：${JSON.stringify(ss?.json)}`)
+
+    // 条目：正文含关键词（content_md FULLTEXT 命中）；另加罕见单字条目（单字 LIKE 兜底）
+    const se = await request(`${BASE}/api/v1/sessions/${ssId}/entries`, {
+      method: 'POST',
+      body: { type: 'note', contentMd: `全局搜索条目 ${kw} 正文` },
+    })
+    if (se?.json?.code !== 0) throw new Error(`搜索条目创建失败：${JSON.stringify(se?.json)}`)
+    const seId = se?.json?.data?.id
+    const sc = await request(`${BASE}/api/v1/sessions/${ssId}/entries`, {
+      method: 'POST',
+      body: { type: 'note', contentMd: '罕见字 龘 条目' },
+    })
+    if (sc?.json?.code !== 0) throw new Error(`单字条目创建失败：${JSON.stringify(sc?.json)}`)
+
+    // 全类型命中 + 片段 + 节点定位（workspaceId 圈定范围，结果确定）
+    const all = await request(`${BASE}/api/v1/search?q=${encodeURIComponent(kw)}&workspaceId=${workspaceId}`)
+    const data = all?.json?.data
+    if (all?.json?.code !== 0) throw new Error(`搜索失败：${JSON.stringify(all?.json)}`)
+    const mhit = data?.mindmaps?.find((m) => m.id === smId)
+    if (!mhit) throw new Error('导图未命中搜索')
+    if (mhit.nodeId !== 'n2') throw new Error(`导图命中 nodeId=${mhit.nodeId} ≠ n2`)
+    if (!(mhit.snippet || '').includes(kw)) throw new Error('导图片段未包含关键词')
+    const ehit = data?.entries?.find((e) => e.id === seId)
+    if (!ehit) throw new Error('条目未命中搜索')
+    if (ehit.sessionId !== ssId || ehit.seq !== 1) throw new Error('条目命中上下文（sessionId/seq）错误')
+    if (!(ehit.snippet || '').includes(kw)) throw new Error('条目片段未包含关键词')
+    if (!data?.sessions?.some((s) => s.id === ssId)) throw new Error('会话标题未命中搜索（LIKE）')
+
+    // type 过滤：type=entry 只返回条目类
+    const only = await request(`${BASE}/api/v1/search?q=${encodeURIComponent(kw)}&type=entry&workspaceId=${workspaceId}`)
+    if ((only?.json?.data?.entries?.length ?? 0) !== 1) throw new Error('type=entry 应仅 1 条条目命中')
+    if ((only?.json?.data?.mindmaps?.length ?? 0) !== 0 || (only?.json?.data?.sessions?.length ?? 0) !== 0) {
+      throw new Error('type=entry 不应返回导图/会话')
+    }
+
+    // 单字 LIKE 兜底（ngram_token_size=2 无法索引单字；workspaceId 圈定断言确定）
+    const single = await request(`${BASE}/api/v1/search?q=%E9%BE%98&workspaceId=${workspaceId}`)
+    if ((single?.json?.data?.entries?.length ?? 0) !== 1) throw new Error('单字搜索应命中 1 条条目（LIKE 兜底）')
+
+    // workspaceId 过滤负例：其它空工作区搜同词 → 全空
+    const so = await request(`${BASE}/api/v1/workspaces`, { method: 'POST', body: { name: `搜索负例-${kw}` } })
+    searchOtherWid = so?.json?.data?.id
+    if (so?.json?.code !== 0 || !searchOtherWid) throw new Error('负例工作区创建失败')
+    const neg = await request(`${BASE}/api/v1/search?q=${encodeURIComponent(kw)}&workspaceId=${searchOtherWid}`)
+    if ((neg?.json?.data?.mindmaps?.length ?? 0) + (neg?.json?.data?.entries?.length ?? 0) + (neg?.json?.data?.sessions?.length ?? 0) !== 0) {
+      throw new Error('其它工作区搜同词应无结果')
+    }
+
+    // 参数校验：空关键词 400、非法 type 400
+    const blank = await request(`${BASE}/api/v1/search?q=%20%20`)
+    if (blank?.json?.code !== 400) throw new Error('空关键词应返回 400')
+    const badType = await request(`${BASE}/api/v1/search?q=${encodeURIComponent(kw)}&type=bogus`)
+    if (badType?.json?.code !== 400) throw new Error('非法 type 应返回 400')
+
+    // 清理：搜索会话/导图随第 8 步工作区级联删除；负例工作区在此删除
+    await request(`${BASE}/api/v1/workspaces/${searchOtherWid}`, { method: 'DELETE' })
+    searchOtherWid = null
+
+    results.push({
+      ok: true,
+      name: '全局搜索往返（FULLTEXT 命中/标题 LIKE/type 过滤/单字 LIKE 兜底/片段与节点定位/400 校验）',
+    })
+  } catch (e) {
+    results.push({ ok: false, name: '全局搜索往返', error: e.message })
+    if (searchOtherWid != null) {
+      await request(`${BASE}/api/v1/workspaces/${searchOtherWid}`, { method: 'DELETE' }).catch(() => {})
+    }
+  }
+
   // 7. M3 总验收：10 条不同类型条目计时（单条 ≤10s，NFR）+ 会话 Markdown 导出往返（06 §4 解析 → 与库中数据逐一比对）
   let acceptSessionId = null
   try {
