@@ -9,6 +9,7 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { execFile } from 'node:child_process'
 import { parseSessionMarkdown } from './session-export.mjs'
+import { parseOpmlOutlines, pngInfoFromBase64 } from './mindmap-export.mjs'
 
 export const BASE = 'http://127.0.0.1:17860'
 export const EXPECTED_TABLES = [
@@ -674,6 +675,112 @@ export async function runChecks(deps = {}) {
     })
   } catch (e) {
     results.push({ ok: false, name: '标签往返', error: e.message })
+  }
+
+  // 6.7 导出往返（M4 任务三，07 §7 验收「会话导出 100% 还原、导图 PNG 完整、OPML 可导入」）：
+  //     会话 → JSON（trailmind-session-json v1，字段逐项比对）｜ 导图 → OPML（树状层级/备注/标签还原、自由边忽略）
+  //     ｜ 导图 → PNG（Base64 → PNG 魔数 + IHDR 尺寸 > 0）｜ 非法导出类型 400
+  try {
+    if (!workspaceId) throw new Error('依赖第 3 步的 workspace id')
+
+    // 导图：根 → 子 → 孙（含备注/标签）+ 1 条自由连线（OPML 应忽略、PNG 应整图）
+    const expContent = JSON.stringify({
+      version: 1,
+      rootNodeId: 'n1',
+      nodes: {
+        n1: {
+          id: 'n1', text: '导出根', note: '根备注', style: { color: 'indigo', bold: true, shape: 'rounded' },
+          tags: ['导出标签'], parentId: null, layout: null, collapsed: false, sticky: false,
+        },
+        n2: {
+          id: 'n2', text: '导出子', note: '子备注', style: { color: 'green', bold: false, shape: 'ellipse' },
+          tags: [], parentId: 'n1', layout: null, collapsed: false, sticky: false,
+        },
+        n3: {
+          id: 'n3', text: '导出孙', note: '', style: { color: 'default', bold: false, shape: 'rect' },
+          tags: [], parentId: 'n2', layout: null, collapsed: false, sticky: false,
+        },
+      },
+      edges: [{ id: 'e1', source: 'n1', target: 'n2', type: 'free', label: '自由连线应忽略' }],
+    })
+    const em = await request(`${BASE}/api/v1/workspaces/${workspaceId}/mindmaps`, {
+      method: 'POST',
+      body: { name: '导出导图', contentJson: expContent },
+    })
+    const emId = em?.json?.data?.id
+    if (em?.json?.code !== 0 || !emId) throw new Error(`导出导图创建失败：${JSON.stringify(em?.json)}`)
+
+    const opml = await request(`${BASE}/api/v1/mindmaps/${emId}/export?type=OPML`, { method: 'POST' })
+    if (opml?.json?.code !== 0) throw new Error(`OPML 导出失败：${JSON.stringify(opml?.json)}`)
+    if (opml.json.data.filename !== '导出导图.opml') throw new Error(`OPML 文件名错误：${opml.json.data.filename}`)
+    const opmlRoots = parseOpmlOutlines(opml.json.data.content)
+    if (opmlRoots.length !== 1) throw new Error(`OPML 根节点数 ${opmlRoots.length} ≠ 1`)
+    const opmlRoot = opmlRoots[0]
+    if (opmlRoot.text !== '导出根' || opmlRoot.note !== '根备注' || opmlRoot.category !== '导出标签') {
+      throw new Error(`OPML 根节点属性错误：${JSON.stringify(opmlRoot)}`)
+    }
+    if (opmlRoot.children?.[0]?.text !== '导出子' || opmlRoot.children[0].note !== '子备注') {
+      throw new Error(`OPML 子节点属性错误：${JSON.stringify(opmlRoot.children?.[0])}`)
+    }
+    if (opmlRoot.children[0]?.children?.[0]?.text !== '导出孙') throw new Error('OPML 孙节点层级未还原')
+    if (opml.json.data.content.includes('自由连线应忽略')) throw new Error('OPML 不应包含自由连线（无法表达）')
+
+    const png = await request(`${BASE}/api/v1/mindmaps/${emId}/export?type=PNG`, { method: 'POST' })
+    if (png?.json?.code !== 0) throw new Error(`PNG 导出失败：${JSON.stringify(png?.json)}`)
+    if (png.json.data.filename !== '导出导图.png' || png.json.data.contentType !== 'image/png') {
+      throw new Error(`PNG 产物元数据错误：${JSON.stringify(png.json.data)}`)
+    }
+    const pngInfo = pngInfoFromBase64(png.json.data.content)
+    if (pngInfo.width <= 0 || pngInfo.height <= 0) throw new Error(`PNG 尺寸非法：${JSON.stringify(pngInfo)}`)
+
+    const badType = await request(`${BASE}/api/v1/mindmaps/${emId}/export?type=MD`, { method: 'POST' })
+    if (badType?.json?.code !== 400) throw new Error('非法导图导出类型应返回 400')
+
+    // 会话 → JSON：2 条不同类型条目 + 标签，字段逐项还原（PRD C5，机器可读协议）
+    const es = await request(`${BASE}/api/v1/workspaces/${workspaceId}/sessions`, {
+      method: 'POST',
+      body: { title: '导出 JSON 会话' },
+    })
+    const esId = es?.json?.data?.id
+    if (es?.json?.code !== 0 || !esId) throw new Error(`导出会话创建失败：${JSON.stringify(es?.json)}`)
+    const e1 = await request(`${BASE}/api/v1/sessions/${esId}/entries`, {
+      method: 'POST',
+      body: { type: 'goal', contentMd: '导出目标', tags: ['导出标签'] },
+    })
+    const e2 = await request(`${BASE}/api/v1/sessions/${esId}/entries`, {
+      method: 'POST',
+      body: { type: 'note', contentMd: '导出备注' },
+    })
+    if (e1?.json?.code !== 0 || e2?.json?.code !== 0) throw new Error('导出会话条目创建失败')
+
+    const sj = await request(`${BASE}/api/v1/sessions/${esId}/export/json`)
+    const sjData = sj?.json?.data
+    if (sj?.json?.code !== 0 || sjData?.format !== 'trailmind-session-json' || sjData?.version !== 1) {
+      throw new Error(`会话 JSON 格式标识错误：${JSON.stringify(sj?.json)}`)
+    }
+    if (sjData.session?.title !== '导出 JSON 会话' || sjData.session?.status !== 'active') {
+      throw new Error(`会话 JSON 会话字段错误：${JSON.stringify(sjData.session)}`)
+    }
+    if (sjData.entryCount !== 2 || sjData.entries?.length !== 2) {
+      throw new Error(`会话 JSON 条目数错误：${JSON.stringify({ entryCount: sjData.entryCount, n: sjData.entries?.length })}`)
+    }
+    const sjGoal = sjData.entries[0]
+    if (sjGoal.seq !== 1 || sjGoal.type !== 'goal' || sjGoal.contentMd !== '导出目标') {
+      throw new Error(`会话 JSON 条目 1 未还原：${JSON.stringify(sjGoal)}`)
+    }
+    if (JSON.stringify(sjGoal.tags) !== JSON.stringify(['导出标签'])) throw new Error('会话 JSON 标签未还原')
+    if (typeof sjGoal.createdAt !== 'string' || !sjGoal.createdAt.includes('T')) throw new Error('会话 JSON 时间应为 ISO-8601 字符串')
+    if (sjData.entries[1].type !== 'note' || sjData.entries[1].contentMd !== '导出备注') throw new Error('会话 JSON 条目 2 未还原')
+
+    const missingJson = await request(`${BASE}/api/v1/sessions/99999999/export/json`)
+    if (missingJson?.json?.code !== 404) throw new Error('不存在的会话导出 JSON 应返回 404')
+
+    results.push({
+      ok: true,
+      name: `导出往返（会话 JSON v1 字段还原 2/2 + 导图 OPML 层级/备注/标签还原 + PNG ${pngInfo.width}×${pngInfo.height} 有效 + 非法类型 400）`,
+    })
+  } catch (e) {
+    results.push({ ok: false, name: '导出往返（JSON/OPML/PNG）', error: e.message })
   }
 
   // 7. M3 总验收：10 条不同类型条目计时（单条 ≤10s，NFR）+ 会话 Markdown 导出往返（06 §4 解析 → 与库中数据逐一比对）
