@@ -122,8 +122,9 @@ function buildEdges(
         // 保留当前选中态：点击选中边会联动取消节点选中 → selectedIds 变化触发本 effect 重建，
         // 若不带入 selected 标记会把刚选中的边立即「洗掉」，导致按 Delete 无法断开连线（人工验收反馈）。
         selected: selectedEdgeIds.has(e.id),
+        // 颜色走 CSS 类（mm-free-edge）：内联 style 会压掉选中态变色，选中无高亮反馈（人工验收反馈）。
+        className: 'mm-free-edge',
         markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18 },
-        style: { stroke: '#8b93a7', strokeWidth: 1.5 },
       })
     }
   }

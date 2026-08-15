@@ -71,6 +71,25 @@
   min-height: 0;
 }
 
+/* 自由连线命中与选中高亮（人工验收反馈修复）：
+   ① XYFlow v12 基样式 .react-flow__edge 为 pointer-events: visibleStroke，透明交互路径
+      （stroke-opacity:0）不计为可见描边 → 命中区只剩约 1.5px 细线，真实点击几乎必失；
+      显式恢复交互路径的描边命中（20px 宽命中带）。
+   ② 边颜色改走 CSS 类（原内联 style 会压掉选中态变色），选中时品牌色加粗，高亮可见。 */
+.react-flow__edge-interaction {
+  pointer-events: stroke;
+}
+
+.react-flow__edge.mm-free-edge .react-flow__edge-path {
+  stroke: #8b93a7;
+  stroke-width: 1.5;
+}
+
+.react-flow__edge.mm-free-edge.selected .react-flow__edge-path {
+  stroke: var(--brand);
+  stroke-width: 2.5;
+}
+
 .mm-center {
   flex: 1;
   display: flex;

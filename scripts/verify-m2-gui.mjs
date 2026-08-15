@@ -494,9 +494,17 @@ async function main() {
       const p = el.querySelector('.react-flow__edge-interaction') ?? el.querySelector('path')
       const r = p.getBoundingClientRect()
       return { id: el.getAttribute('data-id'), cx: r.x + r.width / 2, cy: r.y + r.height / 2 } })()`)
+    // 真实命中检测断言：线中点四周 6px 的 elementFromPoint 应命中交互路径（20px 命中带，真实点击等价证据）
+    const hitInfo = await d.evaluate(`(() => {
+      const pts = [[${edgeEl.cx} + 6, ${edgeEl.cy}], [${edgeEl.cx} - 6, ${edgeEl.cy}], [${edgeEl.cx}, ${edgeEl.cy} + 6], [${edgeEl.cx}, ${edgeEl.cy} - 6]]
+      return pts.map(([x, y]) => { const el = document.elementFromPoint(x, y); return !!(el?.closest?.('.react-flow__edge')) }) })()`)
+    check('S2f0 自由连线 20px 命中带可点中（elementFromPoint 命中）', hitInfo.some(Boolean) === true, JSON.stringify(hitInfo))
+    const strokeBefore = await d.evaluate(`getComputedStyle(document.querySelector('.react-flow__edge.mm-free-edge .react-flow__edge-path')).stroke`)
     await d.clickMouseFull(`.react-flow__edge[data-id="${edgeEl.id}"]`, edgeEl.cx, edgeEl.cy)
     await sleep(300)
     const edgeSelected = await d.evaluate(`(() => { const el = [...document.querySelectorAll('.react-flow__edge')].find(e => /^e\\d+$/.test(e.getAttribute('data-id') || '')); return el ? [...el.classList].includes('selected') : false })()`)
+    const strokeAfter = await d.evaluate(`getComputedStyle(document.querySelector('.react-flow__edge.mm-free-edge .react-flow__edge-path')).stroke`)
+    check('S2f1 选中边有可见高亮（描边变色）', edgeSelected === true && strokeAfter !== strokeBefore, `${strokeBefore} → ${strokeAfter} 选中=${edgeSelected}`)
     await d.key('Delete')
     await d.waitFor(`(() => [...document.querySelectorAll('.react-flow__edge')].filter(e => /^e\\d+$/.test(e.getAttribute('data-id') || '')).length === 0)()`, 'S2f Delete 断开连线')
     await d.waitSaved()
