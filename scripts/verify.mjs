@@ -1,7 +1,10 @@
 // 验收冒烟（docs/10 §10/§12 起）：/health → schema 表齐全 → workspace 往返 → mindmap 往返（M2 总验收补充）
-// → session/entry 往返（M3 任务一：start_head、seq 1/2/3、标签、分页、编辑、结束写 review、追加限制、级联删除）→ 输出 ALL PASS。
-// 仅依赖 Node 内建（http/child_process），无第三方依赖。前置：后端已在 127.0.0.1:17860 运行、MySQL 可连（DB_PASS/MYSQL_PWD）。
+// → session/entry 往返（M3 任务一：start_head、seq 1/2/3、标签、分页、编辑、结束写 review、追加限制、级联删除）
+// → git 服务往返（M3 任务三：仓库校验、提交历史、since=start_head 新提交感知、绑定/解绑、详情回填、级联清理）→ 输出 ALL PASS。
+// 仅依赖 Node 内建（http/child_process/fs）+ 系统 git 命令，无第三方依赖。前置：后端已在 127.0.0.1:17860 运行、MySQL 可连（DB_PASS/MYSQL_PWD）。
 import http from 'node:http'
+import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { execFile } from 'node:child_process'
@@ -101,6 +104,15 @@ function mysql(sql, deps) {
       ['-h127.0.0.1', '-uroot', '--default-character-set=utf8mb4', '-N', '-e', sql],
       { env: { ...process.env, MYSQL_PWD: deps.dbPass || process.env.DB_PASS || '' }, windowsHide: true },
       (err, stdout) => (err ? reject(new Error(`MySQL 失败：${err.message}`)) : resolve((stdout || '').trim())),
+    )
+  })
+}
+
+// 执行任意命令并取 stdout（M3 任务三 Git 往返用 git CLI 建临时仓库）。
+function execOut(cmd, args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, { ...opts, windowsHide: true }, (err, stdout) =>
+      err ? reject(new Error(`${cmd} 失败：${err.message}`)) : resolve((stdout || '').trim()),
     )
   })
 }
@@ -338,7 +350,133 @@ export async function runChecks(deps = {}) {
     results.push({ ok: false, name: 'session 往返', error: e.message })
   }
 
-  // 6. workspace 级联删除（连同第 4 步创建的导图 + 本步补建的会话与标签）
+  // 6. git 服务往返（M3 任务三）：临时真实仓库 3 次提交 → /git/repo/status 与 git rev-parse 一致 →
+  //    提交历史与 git log 一致（含变更文件）→ 带仓库会话 start_head → 新提交感知（since=start_head 命中 c3）→
+  //    追加条目携带 commitHashes 绑定 → 会话绑定列表 + 详情回填 → 防造假 400 → 解绑 → 删除会话级联 entry_commit → 清理
+  let gitWorkspaceId = null
+  let gitRepoDir = null
+  try {
+    if (!workspaceId) throw new Error('依赖第 3 步的 workspace id')
+    gitRepoDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'trailmind-verify-git-'))
+    const runGit = (args) => execOut('git', args, { cwd: gitRepoDir })
+    await runGit(['init', '-q'])
+    await runGit(['config', 'user.name', 'TrailMind Verify'])
+    await runGit(['config', 'user.email', 'verify@trailmind.local'])
+    const write = (file, text) => fs.promises.writeFile(path.join(gitRepoDir, file), text)
+    await write('a.txt', 'one')
+    await runGit(['add', '.'])
+    await runGit(['commit', '-q', '-m', 'c1 初始化'])
+    const c1 = await runGit(['rev-parse', 'HEAD'])
+    await write('b.txt', 'two')
+    await runGit(['add', '.'])
+    await runGit(['commit', '-q', '-m', 'c2 加文件'])
+    const c2 = await runGit(['rev-parse', 'HEAD'])
+
+    // 仓库校验 + 提交历史（新→旧、含变更文件）
+    const st = await request(`${BASE}/api/v1/git/repo/status?path=${encodeURIComponent(gitRepoDir)}`)
+    if (st?.json?.code !== 0 || st?.json?.data?.head !== c2) {
+      throw new Error(`仓库校验失败：${JSON.stringify(st?.json)}`)
+    }
+    const hist = await request(`${BASE}/api/v1/git/repo/commits?path=${encodeURIComponent(gitRepoDir)}`)
+    const hashes = (hist?.json?.data || []).map((c) => c.hash)
+    if (hashes[0] !== c2 || !hashes.includes(c1)) throw new Error(`提交历史与 git log 不一致：${hashes.join(',')}`)
+    if (hist?.json?.data?.[0]?.files?.[0] !== 'b.txt') throw new Error('提交变更文件列表错误')
+    const since = await request(
+      `${BASE}/api/v1/git/repo/commits?path=${encodeURIComponent(gitRepoDir)}&since=${c1}`,
+    )
+    if (since?.json?.data?.length !== 1 || since?.json?.data?.[0]?.hash !== c2) {
+      throw new Error('since 过滤错误（应仅剩 c2）')
+    }
+
+    // 带仓库会话：start_head = 当前 HEAD
+    const gws = await request(`${BASE}/api/v1/workspaces`, {
+      method: 'POST',
+      body: { name: `verify-git-${Date.now()}` },
+    })
+    gitWorkspaceId = gws?.json?.data?.id
+    if (gws?.json?.code !== 0 || !gitWorkspaceId) throw new Error(`git 工作区创建失败：${JSON.stringify(gws?.json)}`)
+    const gsess = await request(`${BASE}/api/v1/workspaces/${gitWorkspaceId}/sessions`, {
+      method: 'POST',
+      body: { title: '验收 Git 会话', repoPath: gitRepoDir },
+    })
+    const gsid = gsess?.json?.data?.id
+    if (gsess?.json?.code !== 0 || gsess?.json?.data?.startHead !== c2) {
+      throw new Error(`start_head 应等于当前 HEAD：${JSON.stringify(gsess?.json)}`)
+    }
+
+    // 新提交感知：会话开始后再提交 c3，since=start_head 应只返回 c3（07 §6 验收「≤10s 出现」）
+    await write('c.txt', 'three')
+    await runGit(['add', '.'])
+    await runGit(['commit', '-q', '-m', 'c3 新提交'])
+    const c3 = await runGit(['rev-parse', 'HEAD'])
+    const news = await request(
+      `${BASE}/api/v1/git/repo/commits?path=${encodeURIComponent(gitRepoDir)}&since=${gsess?.json?.data?.startHead}`,
+    )
+    if (news?.json?.data?.length !== 1 || news?.json?.data?.[0]?.hash !== c3) {
+      throw new Error(`新提交感知失败（since=start_head 应只返回 c3）：${JSON.stringify(news?.json)}`)
+    }
+
+    // 追加条目携带 commitHashes 绑定 → 会话绑定列表 → 详情回填
+    const gent = await request(`${BASE}/api/v1/sessions/${gsid}/entries`, {
+      method: 'POST',
+      body: { type: 'artifact', contentMd: 'c3 产出', commitHashes: [c3] },
+    })
+    if (gent?.json?.code !== 0 || gent?.json?.data?.commits?.[0] !== c3) {
+      throw new Error(`创建时绑定失败：${JSON.stringify(gent?.json)}`)
+    }
+    const bound = await request(`${BASE}/api/v1/sessions/${gsid}/commits`)
+    if (bound?.json?.data?.length !== 1 || bound?.json?.data?.[0]?.commitHash !== c3) {
+      throw new Error('会话绑定列表错误')
+    }
+    const gdetail = await request(`${BASE}/api/v1/sessions/${gsid}`)
+    if (gdetail?.json?.data?.entries?.[0]?.commits?.[0] !== c3) throw new Error('详情条目未回填 commits')
+
+    // 防造假：仓库不存在的 hash 绑定 → 400
+    const fake = await request(`${BASE}/api/v1/entries/${gent?.json?.data?.id}/commits`, {
+      method: 'POST',
+      body: { commitHashes: ['0'.repeat(40)] },
+    })
+    if (fake?.json?.code !== 400) throw new Error('不存在的提交应拒绝绑定（400）')
+
+    // 解绑 → 绑定列表清空；删除会话级联清理 entry_commit；清理临时仓库与工作区
+    const unbind = await request(`${BASE}/api/v1/entries/${gent?.json?.data?.id}/commits/${c3}`, {
+      method: 'DELETE',
+    })
+    if (unbind?.json?.code !== 0) throw new Error('解绑失败')
+    const bound2 = await request(`${BASE}/api/v1/sessions/${gsid}/commits`)
+    if ((bound2?.json?.data || []).length !== 0) throw new Error('解绑后绑定列表应清空')
+    const rebind = await request(`${BASE}/api/v1/entries/${gent?.json?.data?.id}/commits`, {
+      method: 'POST',
+      body: { commitHashes: [c3] },
+    })
+    if (rebind?.json?.code !== 0) throw new Error('重新绑定失败')
+    const delGs = await request(`${BASE}/api/v1/sessions/${gsid}`, { method: 'DELETE' })
+    if (delGs?.json?.code !== 0) throw new Error('删除 Git 会话失败')
+    const ecLeft = await mysql(
+      `SELECT COUNT(*) FROM trailmind.entry_commit WHERE entry_id=${gent?.json?.data?.id}`,
+      deps,
+    )
+    if (ecLeft !== '0') throw new Error(`删除会话后 entry_commit 残留 ${ecLeft}`)
+    await request(`${BASE}/api/v1/workspaces/${gitWorkspaceId}`, { method: 'DELETE' })
+    gitWorkspaceId = null
+    await fs.promises.rm(gitRepoDir, { recursive: true, force: true })
+    gitRepoDir = null
+
+    results.push({
+      ok: true,
+      name: 'git 服务往返（status/历史 since/start_head/新提交感知/绑定解绑/详情回填/防造假 400/级联清理）',
+    })
+  } catch (e) {
+    results.push({ ok: false, name: 'git 服务往返', error: e.message })
+    if (gitWorkspaceId != null) {
+      await request(`${BASE}/api/v1/workspaces/${gitWorkspaceId}`, { method: 'DELETE' }).catch(() => {})
+    }
+    if (gitRepoDir != null) {
+      await fs.promises.rm(gitRepoDir, { recursive: true, force: true }).catch(() => {})
+    }
+  }
+
+  // 7. workspace 级联删除（连同第 4 步创建的导图 + 本步补建的会话与标签）
   try {
     // 补建一个会话，验证工作区删除时会话/标签级联（条目级联见第 5 步）
     const s2 = await request(`${BASE}/api/v1/workspaces/${workspaceId}/sessions`, {
