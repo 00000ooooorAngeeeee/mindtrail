@@ -226,6 +226,13 @@ function makeDriver(cdp) {
   const clickMouse = async (selector, x, y, { detail = 1 } = {}) =>
     evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false
       el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window, clientX: ${x}, clientY: ${y}, detail: ${detail} })); return true })()`)
+  /** 完整点击序列（mousedown+mouseup+click）：真实用户点击的等价注入。React 边选中等交互依赖完整序列（实测仅发 click 不选中边）。 */
+  const clickMouseFull = async (selector, x, y, { detail = 1 } = {}) =>
+    evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false
+      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: ${x}, clientY: ${y}, buttons: 1, detail: ${detail} }))
+      el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window, clientX: ${x}, clientY: ${y}, buttons: 0, detail: ${detail} }))
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window, clientX: ${x}, clientY: ${y}, buttons: 0, detail: ${detail} }))
+      return true })()`)
   /**
    * 画布模式 pane 双击（selectionOnDrag=true 时 pane 的 click 走 pointerup 路径）：
    * 真实双击序列 pointerdown/up ×2（第二对 detail=2），并覆写 setPointerCapture（合成指针无活动 pointerId，否则抛 NotFoundError）。
@@ -260,10 +267,10 @@ function makeDriver(cdp) {
   const dblclickMouse = async (selector, x, y) =>
     evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false
       el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, view: window, clientX: ${x}, clientY: ${y}, detail: 2 })); return true })()`)
-  /** 快捷键：window 合成 KeyboardEvent（应用监听 window keydown）。 */
+  /** 快捷键：从 document.body 分发合成 KeyboardEvent（冒泡同时覆盖 document 与 window 两层监听：应用在 window、XYFlow useKeyPress 在 document）。 */
   const key = async (keyName, { ctrl = false, shift = false } = {}) => {
-    await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(keyName)}, code: ${JSON.stringify(keyName)}, ctrlKey: ${ctrl}, shiftKey: ${shift}, bubbles: true, cancelable: true }))`)
-    await evaluate(`window.dispatchEvent(new KeyboardEvent('keyup', { key: ${JSON.stringify(keyName)}, code: ${JSON.stringify(keyName)}, ctrlKey: ${ctrl}, shiftKey: ${shift}, bubbles: true, cancelable: true }))`)
+    await evaluate(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(keyName)}, code: ${JSON.stringify(keyName)}, ctrlKey: ${ctrl}, shiftKey: ${shift}, bubbles: true, cancelable: true }))`)
+    await evaluate(`document.body.dispatchEvent(new KeyboardEvent('keyup', { key: ${JSON.stringify(keyName)}, code: ${JSON.stringify(keyName)}, ctrlKey: ${ctrl}, shiftKey: ${shift}, bubbles: true, cancelable: true }))`)
   }
   /** 在 textarea 上输入文本（React 受控组件走原生 setter + input 事件）后回车提交。 */
   const typeInto = async (selector, text) => {
@@ -307,7 +314,7 @@ function makeDriver(cdp) {
   const nodeCountText = () => evaluate(
     `(document.querySelector('.mm-statusbar')?.textContent ?? '').match(/(\\d+) 节点/)?.[1]`,
   )
-  return { evaluate, waitFor, waitSaved, screenshot, dragMouse, dragConnect, clickMouse, paneDoubleClick, dragSelect, dblclickMouse, key, typeInto, clickText, nodeFlowPositions, viewportTransform, nodeRect, handleCenter, freeEdgeCount, statusbarText, nodeCountText }
+  return { evaluate, waitFor, waitSaved, screenshot, dragMouse, dragConnect, clickMouse, clickMouseFull, paneDoubleClick, dragSelect, dblclickMouse, key, typeInto, clickText, nodeFlowPositions, viewportTransform, nodeRect, handleCenter, freeEdgeCount, statusbarText, nodeCountText }
 }
 
 const nodeSel = (id) => `.react-flow__node[data-id="${id}"]`
@@ -477,6 +484,25 @@ async function main() {
     const freeNotRendered = (await d.freeEdgeCount()) === 0
     check('S2e 三选一「仅重排树形部分」：切回树状且自由边保留（树视图不渲染）', apiEdges1.length === 1 && freeNotRendered, `edges=${apiEdges1.length} 树视图渲染自由边=${await d.freeEdgeCount()}`)
 
+    // ---------- S2f：自由连线删除（人工验收反馈「无法断开连线」回归：选中边 + Delete） ----------
+    await d.clickText('.mm-mode-switch button', '画布')
+    await d.waitFor(`(document.querySelector('.mm-statusbar')?.textContent ?? '').includes('画布模式')`, 'S2f 切回画布')
+    await sleep(600)
+    const edgeEl = await d.evaluate(`(() => {
+      const el = [...document.querySelectorAll('.react-flow__edge')].find(e => /^e\\d+$/.test(e.getAttribute('data-id') || ''))
+      if (!el) return null
+      const p = el.querySelector('.react-flow__edge-interaction') ?? el.querySelector('path')
+      const r = p.getBoundingClientRect()
+      return { id: el.getAttribute('data-id'), cx: r.x + r.width / 2, cy: r.y + r.height / 2 } })()`)
+    await d.clickMouseFull(`.react-flow__edge[data-id="${edgeEl.id}"]`, edgeEl.cx, edgeEl.cy)
+    await sleep(300)
+    const edgeSelected = await d.evaluate(`(() => { const el = [...document.querySelectorAll('.react-flow__edge')].find(e => /^e\\d+$/.test(e.getAttribute('data-id') || '')); return el ? [...el.classList].includes('selected') : false })()`)
+    await d.key('Delete')
+    await d.waitFor(`(() => [...document.querySelectorAll('.react-flow__edge')].filter(e => /^e\\d+$/.test(e.getAttribute('data-id') || '')).length === 0)()`, 'S2f Delete 断开连线')
+    await d.waitSaved()
+    const apiEdges2 = JSON.parse((await rest('GET', `/mindmaps/${mid1}`)).data.contentJson).edges
+    check('S2f 选中自由边按 Delete 断开连线（edges 清空并落库）', apiEdges2.length === 0, `边点击选中=${edgeSelected} 落库 edges=${apiEdges2.length}`)
+
     // ---------- S3：两模式间增删改互相同步（B3.4） ----------
     await d.clickText('.mm-mode-switch button', '画布')
     await d.waitFor(`(document.querySelector('.mm-statusbar')?.textContent ?? '').includes('画布模式')`, '切画布')
@@ -535,15 +561,25 @@ async function main() {
     const rootStyleOk = await d.evaluate(`(() => { const el = document.querySelector(${JSON.stringify(nodeInnerSel(rootId))})
       return el.className.includes('shape-diamond') && el.className.includes('bold') && el.style.getPropertyValue('--node-bg') === '#eef1ff' })()`)
     check('S4a 形状（菱形）+ 颜色（靛蓝）+ 加粗即时生效', rootStyleOk === true)
+    // 选中一个非根节点后加便签 → 便签应成为该节点的子节点（人工验收反馈）
+    const stickyParentId = await d.evaluate(`(() => { const el = [...document.querySelectorAll('.react-flow__node')].find(n => (n.querySelector('.mm-node-text')?.textContent ?? '') === '编辑态输入回归'); return el?.getAttribute('data-id') ?? null })()`)
+    const spCenter = await d.nodeRect(stickyParentId)
+    await d.clickMouse(nodeSel(stickyParentId), spCenter.cx, spCenter.cy)
+    await d.waitFor(`!!document.querySelector('.mm-style-panel')`, 'S4b 选中目标节点')
     await d.clickText('.mm-toolbar-actions button', '便签')
     await d.waitFor(`!!document.querySelector('.mm-node.sticky')`, '＋便签出现无文本便签节点')
     check('S4b 自由便签（无文本纯形状）可添加', true)
+    // 把便签拖到左上角（远离后续框选区域，避免框选批量删除把便签卷入；同时验证便签可自由拖动）
+    const stickyId = await d.evaluate(`(() => { const el = [...document.querySelectorAll('.react-flow__node')].find(n => n.querySelector('.mm-node.sticky')); return el?.getAttribute('data-id') ?? null })()`)
+    const stickyRect = await d.nodeRect(stickyId)
+    await d.dragMouse(nodeSel(stickyId), stickyRect.cx, stickyRect.cy, 200, 140)
+    await sleep(300)
     await d.waitSaved()
     await d.screenshot('03-style-sticky')
     const apiSaved = JSON.parse((await rest('GET', `/mindmaps/${mid1}`)).data.contentJson)
     const rootSaved = apiSaved.nodes[rootId]
     const stickySaved = Object.values(apiSaved.nodes).find((n) => n.sticky)
-    check('S4c 形状/颜色/加粗/便签落库持久化', rootSaved?.style?.shape === 'diamond' && rootSaved?.style?.color === 'indigo' && rootSaved?.style?.bold === true && stickySaved?.text === '', JSON.stringify(rootSaved?.style))
+    check('S4c 形状/颜色/加粗/便签落库持久化 + 便签挂到选中节点', rootSaved?.style?.shape === 'diamond' && rootSaved?.style?.color === 'indigo' && rootSaved?.style?.bold === true && stickySaved?.text === '' && stickySaved?.parentId === stickyParentId, `样式=${JSON.stringify(rootSaved?.style)} 便签父=${stickySaved?.parentId}(期望 ${stickyParentId})`)
 
     // 框选两个子节点 → 批量移动 → 批量删除（PRD B2.6）
     const boxNodes = await d.evaluate(`(() => { const els = [...document.querySelectorAll('.react-flow__node')]
