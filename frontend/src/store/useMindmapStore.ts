@@ -84,6 +84,18 @@ function fixSelection(content: MindmapContent, selectedIds: string[]): string[] 
   return selectedIds.filter((id) => content.nodes[id])
 }
 
+/**
+ * 选中集相同（顺序无关、含新数组字面量）判定。
+ * React Flow 的 onSelectionChange 会在节点渲染/选中属性变化时反复回填同一个选中集，
+ * 若每次都 set 一个新数组会触发 effect 重放 setNodes → 再触发 onSelectionChange，形成
+ * 「最大更新深度」无限循环（React error #185）。同集时跳过 set 即可打断该环。
+ */
+function sameIdSet(a: string[], b: string[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  return a.every((id) => b.includes(id))
+}
+
 export const useMindmapStore = create<MindmapState>()((set, get) => {
   // 防抖定时器挂在闭包中，随 store 单例生命周期存在。
   let saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -143,7 +155,11 @@ export const useMindmapStore = create<MindmapState>()((set, get) => {
 
     select: (id) => set({ selectedIds: id ? [id] : [] }),
 
-    setSelectedIds: (ids) => set({ selectedIds: ids }),
+    setSelectedIds: (ids) => {
+      // 同集幂等跳过：打断 onSelectionChange 回填 → effect 重放 setNodes → onSelectionChange 的无限环
+      if (sameIdSet(ids, get().selectedIds)) return
+      set({ selectedIds: ids })
+    },
 
     addChild: (parentId, layout = null) => {
       const { content } = get()
