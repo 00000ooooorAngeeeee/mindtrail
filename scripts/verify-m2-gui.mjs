@@ -378,6 +378,33 @@ async function main() {
 
     // ---------- S0：启动 → 工作区 → 打开导图 ----------
     await d.waitFor(`[...document.querySelectorAll('.workspace-item .item-name')].some(b => b.textContent.includes(${JSON.stringify(wsName)}))`, '工作区列表出现验收工作区', 20000)
+    // ---------- S0c：工作区创建表单端到端（人工验收反馈：无法输入名称/无法创建） ----------
+    const formName = `验收表单-${ts}`
+    const formInfo = await d.evaluate(`(() => { const inp = document.querySelector('.create-form input')
+      if (!inp) return { found: false }
+      // 列表较长时表单在视口下方，先滚动到可见（与真实用户操作一致）再做命中检测
+      inp.scrollIntoView({ block: 'center' })
+      return { found: true, disabled: inp.disabled } })()`)
+    await sleep(300)
+    const formHit = await d.evaluate(`(() => { const inp = document.querySelector('.create-form input')
+      const r = inp.getBoundingClientRect()
+      const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+      return { hitIsInput: hit === inp, cx: r.x + r.width / 2, cy: r.y + r.height / 2 } })()`)
+    check('S0c0 工作区名称输入框可点中且未禁用', formInfo?.found === true && formHit?.hitIsInput === true && formInfo?.disabled === false, JSON.stringify({ ...formInfo, ...formHit }))
+    await d.clickMouseFull('.create-form input', formHit.cx, formHit.cy)
+    await sleep(200)
+    await d.evaluate(`(() => { const inp = document.querySelector('.create-form input')
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+      setter.call(inp, ${JSON.stringify(formName)})
+      inp.dispatchEvent(new Event('input', { bubbles: true }))
+      return true })()`)
+    await sleep(200)
+    const btnEnabled = await d.evaluate(`!document.querySelector('.create-form button').disabled`)
+    check('S0c1 输入名称后创建按钮启用', btnEnabled === true, `按钮启用=${btnEnabled}`)
+    await d.clickText('.create-form button', '创建工作区')
+    await d.waitFor(`[...document.querySelectorAll('.workspace-item .item-name')].some(b => b.textContent.includes(${JSON.stringify(formName)}))`, '表单创建的工作区出现在列表', 10000)
+    const inputUsable = await d.evaluate(`!document.querySelector('.create-form input').disabled`)
+    check('S0c2 创建成功后输入框仍可用（creating 状态复位）', inputUsable === true, `输入框可用=${inputUsable}`)
     await d.clickText('.workspace-item .item-name', wsName)
     await d.waitFor(`[...document.querySelectorAll('.workspace-item')].some(li => li.textContent.includes('M2验收主图'))`, '导图列表出现主图')
     await d.evaluate(`(() => { const li = [...document.querySelectorAll('.workspace-item')].find(li => li.textContent.includes('M2验收主图'))
@@ -716,6 +743,8 @@ async function main() {
 
     // ---------- 清理：删除验收工作区（级联）→ 关闭应用 ----------
     await rest('DELETE', `/workspaces/${wid}`)
+    const formWs = (await rest('GET', '/workspaces')).data.find((w) => w.name === `验收表单-${ts}`)
+    if (formWs) await rest('DELETE', `/workspaces/${formWs.id}`)
     await d2.evaluate(`window.close()`).catch(() => {})
     await sleep(1200)
   } finally {
