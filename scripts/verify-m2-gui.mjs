@@ -1,7 +1,15 @@
 // M2 总验收 GUI 实机验证（docs/07 §5 验收清单）：
 // 拉起真实 Electron 应用（dev 态经 TRAILMIND_DEV_URL 加载本脚本内建静态服务器上的前端产物，
 // Electron 主进程自动拉起后端 jar），经 Chrome DevTools Protocol（CDP，Node 24 内建 WebSocket）
-// 驱动真实鼠标/键盘交互逐项验证 M2 验收清单，截图存档 scripts/out/m2-gui/（.gitignore 已忽略 out/）。
+// 在真实页面内注入合成事件驱动交互（节点拖拽/连线/框选/双击编辑/快捷键），
+// 逐项验证 M2 验收清单，截图存档 scripts/out/m2-gui/（.gitignore 已忽略 out/）。
+//
+// 事件注入要点（本会话实机调试得出，勿改回 CDP Input）：
+// - CDP Input.dispatchKeyEvent/MouseEvent 在 Electron 窗口失焦时不达页面；故全部走页面内合成事件
+// - d3-drag（XYFlow 节点拖拽）监听 mousedown 且依赖 event.view 注册 move 监听：合成 MouseEvent 必须带 view: window
+// - 连线手柄是 React onPointerDown（PointerEvent）+ document 级 mousemove/mouseup；move/up 从 body 冒泡同时覆盖 document 与 window 两层
+// - 键盘走 window 上的合成 KeyboardEvent（应用监听 window keydown）
+//
 // 前置：MySQL 已启动；frontend/dist 与 backend/target/trailmind-backend-0.0.1.jar 已构建（node scripts/build.mjs）。
 // 用法：node scripts/verify-m2-gui.mjs
 import http from 'node:http'
@@ -85,6 +93,14 @@ class Cdp {
         this.pending.delete(msg.id)
         msg.error ? reject(new Error(msg.error.message)) : resolve(msg.result)
       }
+      // 页面运行时异常/控制台错误原样打印，便于定位白屏类缺陷
+      if (msg.method === 'Runtime.exceptionThrown') {
+        const d = msg.params.exceptionDetails
+        console.log(`[page-error] ${d.text} ${d.exception?.description ?? ''}`)
+      }
+      if (msg.method === 'Log.entryAdded' && ['error', 'warning'].includes(msg.params.entry.level)) {
+        console.log(`[page-log] ${msg.params.entry.text}`)
+      }
     }
   }
   send(method, params = {}) {
@@ -149,7 +165,10 @@ async function killTree(pid) {
 const results = []
 const check = (name, ok, error) => results.push({ name, ok: !!ok, ...(error ? { error } : {}) })
 
-/** 页面驱动会话封装：evaluate/waitFor/鼠标/键盘/截图，绑定一个 CDP 连接。 */
+/**
+ * 页面驱动会话封装：evaluate/waitFor/合成事件/截图，绑定一个 CDP 连接。
+ * 输入全部为页面内合成事件（view: window），驱动真实 DOM 事件流水线与应用逻辑。
+ */
 function makeDriver(cdp) {
   const evaluate = async (expression) => {
     const r = await cdp.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })
@@ -162,7 +181,11 @@ function makeDriver(cdp) {
       try { if (await evaluate(expression)) return } catch { /* 页面导航中，重试 */ }
       await sleep(250)
     }
-    throw new Error(`等待超时：${desc}`)
+    let dump = ''
+    try { dump = (await evaluate(`document.body.innerText.slice(0, 600)`)) ?? '' } catch { /* 忽略 */ }
+    let shot = ''
+    try { shot = await screenshot(`fail-${Date.now()}`) } catch { /* 忽略 */ }
+    throw new Error(`等待超时：${desc}\n页面文本：${dump}\n截图：${shot}`)
   }
   const waitSaved = () => waitFor(
     `[...document.querySelectorAll('.mm-toolbar-actions button')].some(b => b.textContent.includes('已保存'))`,
@@ -174,24 +197,81 @@ function makeDriver(cdp) {
     fs.writeFileSync(file, Buffer.from(r.data, 'base64'))
     return file
   }
-  const mouse = (type, x, y, extra = {}) => cdp.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', ...extra })
-  const mouseClick = async (x, y, { count = 1 } = {}) => {
-    for (let i = 1; i <= count; i++) {
-      await mouse('mousePressed', x, y, { clickCount: i, buttons: 1 })
-      await mouse('mouseReleased', x, y, { clickCount: i, buttons: 0 })
-    }
-  }
-  const mouseDrag = async (x1, y1, x2, y2, { steps = 16, totalMs = 300 } = {}) => {
-    await mouse('mousePressed', x1, y1, { clickCount: 1, buttons: 1 })
+  // 在指定元素上 dispatch 鼠标事件（view: window 必带，d3-drag 依赖它）；move/up 从 body 冒泡覆盖 document+window 两层监听
+  const mouseOn = async (selector, type, x, y, init = {}) =>
+    evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false
+      el.dispatchEvent(new MouseEvent(${JSON.stringify(type)}, { bubbles: true, cancelable: true, view: window, clientX: ${x}, clientY: ${y}, ...${JSON.stringify(init)} })); return true })()`)
+  const mouseOnBody = (type, x, y, init = {}) =>
+    evaluate(`document.body.dispatchEvent(new MouseEvent(${JSON.stringify(type)}, { bubbles: true, cancelable: true, view: window, clientX: ${x}, clientY: ${y}, ...${JSON.stringify(init)} }))`)
+  /** 鼠标拖拽：mousedown 落在 selector 元素上（节点=d3-drag；空白=框选/平移），move/up 走 body。 */
+  const dragMouse = async (selector, x1, y1, x2, y2, { steps = 16, totalMs = 300 } = {}) => {
+    await mouseOn(selector, 'mousedown', x1, y1, { buttons: 1 })
     for (let i = 1; i <= steps; i++) {
-      await mouse('mouseMoved', x1 + ((x2 - x1) * i) / steps, y1 + ((y2 - y1) * i) / steps, { buttons: 1 })
+      await mouseOnBody('mousemove', x1 + ((x2 - x1) * i) / steps, y1 + ((y2 - y1) * i) / steps, { buttons: 1 })
       await sleep(totalMs / steps)
     }
-    await mouse('mouseReleased', x2, y2, { clickCount: 1, buttons: 0 })
+    await mouseOnBody('mouseup', x2, y2, { buttons: 0 })
   }
-  const key = async (keyName, code, vk, modifiers = 0) => {
-    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: keyName, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers })
-    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: keyName, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers })
+  /** 连线拖拽：手柄绑定 React onMouseDown（类名含 nodrag，不会误触发节点拖拽），连接过程监听 document 级 mousemove/mouseup。 */
+  const dragConnect = async (selector, x1, y1, x2, y2, { steps = 12, totalMs = 400 } = {}) => {
+    await evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false
+      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: ${x1}, clientY: ${y1}, buttons: 1 })); return true })()`)
+    for (let i = 1; i <= steps; i++) {
+      await mouseOnBody('mousemove', x1 + ((x2 - x1) * i) / steps, y1 + ((y2 - y1) * i) / steps, { buttons: 1 })
+      await sleep(totalMs / steps)
+    }
+    await mouseOnBody('mouseup', x2, y2, { buttons: 0 })
+  }
+  /** 单击/双击（detail=2 走应用 onPaneClick/onDoubleClick 判定）。 */
+  const clickMouse = async (selector, x, y, { detail = 1 } = {}) =>
+    evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window, clientX: ${x}, clientY: ${y}, detail: ${detail} })); return true })()`)
+  /**
+   * 画布模式 pane 双击（selectionOnDrag=true 时 pane 的 click 走 pointerup 路径）：
+   * 真实双击序列 pointerdown/up ×2（第二对 detail=2），并覆写 setPointerCapture（合成指针无活动 pointerId，否则抛 NotFoundError）。
+   */
+  const paneDoubleClick = async (selector, x, y) => evaluate(`(() => {
+      const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false
+      el.setPointerCapture = () => {}
+      el.releasePointerCapture = () => {}
+      const fire = (type, cc, extra) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, view: window, clientX: ${x}, clientY: ${y}, pointerId: 21, pointerType: 'mouse', isPrimary: true, detail: cc, ...extra }))
+      fire('pointerdown', 1, { button: 0, buttons: 1 })
+      fire('pointerup', 1, { button: 0, buttons: 0 })
+      fire('pointerdown', 2, { button: 0, buttons: 1 })
+      fire('pointerup', 2, { button: 0, buttons: 0 })
+      return true })()`)
+  /** 画布模式框选：pointer 事件在 pane 上按下-移动-释放（selectionOnDrag 走 XYFlow UserSelection 链路）。 */
+  const dragSelect = async (selector, x1, y1, x2, y2, { steps = 10, totalMs = 300 } = {}) => {
+    await evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false
+      el.setPointerCapture = () => {}
+      el.releasePointerCapture = () => {}
+      el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, view: window, clientX: ${x1}, clientY: ${y1}, pointerId: 22, pointerType: 'mouse', isPrimary: true, button: 0, buttons: 1, detail: 1 }))
+      return true })()`)
+    for (let i = 1; i <= steps; i++) {
+      await evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false
+        el.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, cancelable: true, view: window, clientX: ${x1 + ((x2 - x1) * i) / steps}, clientY: ${y1 + ((y2 - y1) * i) / steps}, pointerId: 22, pointerType: 'mouse', isPrimary: true, button: -1, buttons: 1, detail: 0 }))
+        return true })()`)
+      await sleep(totalMs / steps)
+    }
+    await evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false
+      el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, view: window, clientX: ${x2}, clientY: ${y2}, pointerId: 22, pointerType: 'mouse', isPrimary: true, button: 0, buttons: 0, detail: 1 }))
+      return true })()`)
+  }
+  const dblclickMouse = async (selector, x, y) =>
+    evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false
+      el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, view: window, clientX: ${x}, clientY: ${y}, detail: 2 })); return true })()`)
+  /** 快捷键：window 合成 KeyboardEvent（应用监听 window keydown）。 */
+  const key = async (keyName, { ctrl = false, shift = false } = {}) => {
+    await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(keyName)}, code: ${JSON.stringify(keyName)}, ctrlKey: ${ctrl}, shiftKey: ${shift}, bubbles: true, cancelable: true }))`)
+    await evaluate(`window.dispatchEvent(new KeyboardEvent('keyup', { key: ${JSON.stringify(keyName)}, code: ${JSON.stringify(keyName)}, ctrlKey: ${ctrl}, shiftKey: ${shift}, bubbles: true, cancelable: true }))`)
+  }
+  /** 在 textarea 上输入文本（React 受控组件走原生 setter + input 事件）后回车提交。 */
+  const typeInto = async (selector, text) => {
+    await evaluate(`(() => { const ta = document.querySelector(${JSON.stringify(selector)}); if (!ta) return false
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+      setter.call(ta, ${JSON.stringify(text)})
+      ta.dispatchEvent(new Event('input', { bubbles: true })); return true })()`)
+    await evaluate(`document.querySelector(${JSON.stringify(selector)}).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }))`)
   }
   const clickText = (selector, text) => evaluate(
     `(() => { const b = [...document.querySelectorAll(${JSON.stringify(selector)})].find(x => x.textContent.includes(${JSON.stringify(text)})); if (!b) return false; b.click(); return true })()`,
@@ -227,8 +307,11 @@ function makeDriver(cdp) {
   const nodeCountText = () => evaluate(
     `(document.querySelector('.mm-statusbar')?.textContent ?? '').match(/(\\d+) 节点/)?.[1]`,
   )
-  return { evaluate, waitFor, waitSaved, screenshot, mouse, mouseClick, mouseDrag, key, clickText, nodeFlowPositions, viewportTransform, nodeRect, handleCenter, freeEdgeCount, statusbarText, nodeCountText }
+  return { evaluate, waitFor, waitSaved, screenshot, dragMouse, dragConnect, clickMouse, paneDoubleClick, dragSelect, dblclickMouse, key, typeInto, clickText, nodeFlowPositions, viewportTransform, nodeRect, handleCenter, freeEdgeCount, statusbarText, nodeCountText }
 }
+
+const nodeSel = (id) => `.react-flow__node[data-id="${id}"]`
+const nodeInnerSel = (id) => `.react-flow__node[data-id="${id}"] .mm-node`
 
 async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true })
@@ -250,7 +333,16 @@ async function main() {
     const env = { ...process.env, TRAILMIND_DEV_URL: FRONTEND_URL }
     delete env.ELECTRON_RUN_AS_NODE
     const launchElectron = () => {
-      const child = spawn(electronBin, [`--remote-debugging-port=${CDP_PORT}`, '.'], {
+      // 反后台化开关：agent 环境的 Electron 窗口常处于遮挡/后台状态，Chromium 会暂停 rAF 与节流定时器，
+      // 导致依赖 rAF 的测量链路（XYFlow ResizeObserver 回调、fitView、useUpdateNodeInternals）冻结。
+      // 这些开关让窗口无论可见性如何都保持渲染循环（真实用户前台使用不受影响）。
+      const child = spawn(electronBin, [
+        `--remote-debugging-port=${CDP_PORT}`,
+        '--disable-renderer-backgrounding',
+        '--disable-background-timer-throttling',
+        '--disable-features=CalculateNativeWinOcclusion',
+        '.',
+      ], {
         cwd: path.join(ROOT, 'desktop'), env, stdio: 'ignore', windowsHide: true,
       })
       child.on('exit', () => {})
@@ -258,20 +350,24 @@ async function main() {
     }
     electron = launchElectron()
 
-    // 页面目标出现意味着 Electron 已完成后端健康等待并加载前端 → 后端此时可用，做数据准备
+    // 页面目标出现意味着 Electron 已完成后端健康等待并加载前端 → 后端此时可用
     const target = await waitForPageTarget()
+
+    cdp = new Cdp(target.webSocketDebuggerUrl)
+    await cdp.open()
+    await cdp.send('Runtime.enable')
+    await cdp.send('Page.enable')
+    await cdp.send('Log.enable')
+    const d = makeDriver(cdp)
+
+    // 数据准备（页面首屏已加载完工作区列表，创建后强制刷新一次让列表带出新工作区）
     console.log('[m2-gui] 数据准备：验收工作区 + 主图 + 百节点导图')
     wid = (await rest('POST', '/workspaces', { name: wsName })).data.id
     mid1 = (await rest('POST', `/workspaces/${wid}/mindmaps`, { name: 'M2验收主图' })).data.id
     const mid2 = (await rest('POST', `/workspaces/${wid}/mindmaps`, { name: 'M2验收百节点' })).data.id
     const big = await rest('GET', `/mindmaps/${mid2}`)
     await rest('PUT', `/mindmaps/${mid2}`, { contentJson: JSON.stringify(gridContent(100)), updatedAt: big.data.updatedAt })
-
-    cdp = new Cdp(target.webSocketDebuggerUrl)
-    await cdp.open()
-    await cdp.send('Runtime.enable')
-    await cdp.send('Page.enable')
-    const d = makeDriver(cdp)
+    await d.evaluate(`location.reload()`).catch(() => {})
 
     // ---------- S0：启动 → 工作区 → 打开导图 ----------
     await d.waitFor(`[...document.querySelectorAll('.workspace-item .item-name')].some(b => b.textContent.includes(${JSON.stringify(wsName)}))`, '工作区列表出现验收工作区', 20000)
@@ -281,11 +377,21 @@ async function main() {
       const b = [...li.querySelectorAll('button')].find(x => x.textContent.trim() === '打开'); b.click(); return true })()`)
     await d.waitFor(`!!document.querySelector('.mm-canvas') && (document.querySelector('.mm-statusbar')?.textContent ?? '').includes('1 节点')`, '编辑器加载出单根节点')
     check('S0 启动→工作区→打开导图（GUI 可达，编辑器渲染）', true)
+    await sleep(600) // 等显式测量（useUpdateNodeInternals 经 setTimeout + rAF）生效
+    const nodeVisible = await d.evaluate(`(() => {
+      const el = document.querySelector('.react-flow__node')
+      if (!el) return { visible: false, reason: '无节点 DOM' }
+      const cs = window.getComputedStyle(el)
+      const r = el.getBoundingClientRect()
+      const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+      return { visible: cs.visibility === 'visible', hit: hit === el || el.contains(hit) }
+    })()`)
+    check('S0b 节点已测量且可见（visibility=visible + 命中检测命中节点）', nodeVisible?.visible === true && nodeVisible?.hit === true, JSON.stringify(nodeVisible))
     await d.screenshot('00-editor')
 
     // ---------- S1：树→画布位置合理 + 自由拖动任意节点 + 坐标持久化 ----------
-    await d.key('n', 'KeyN', 78, 2) // Ctrl+N ×2 挂根加两个子节点（树状模式）
-    await d.key('n', 'KeyN', 78, 2)
+    await d.key('n', { ctrl: true }) // Ctrl+N ×2 挂根加两个子节点（树状模式）
+    await d.key('n', { ctrl: true })
     await d.waitFor(`(document.querySelector('.mm-statusbar')?.textContent ?? '').includes('3 节点')`, 'Ctrl+N 添加 2 个子节点')
     await d.clickText('.mm-mode-switch button', '画布')
     await d.waitFor(`(document.querySelector('.mm-statusbar')?.textContent ?? '').includes('画布模式')`, '切到画布模式')
@@ -308,14 +414,17 @@ async function main() {
     const before = await d.nodeRect(childId)
     const beforeFlow = (await d.nodeFlowPositions()).find((p) => p.id === childId)
     const zoom = (await d.viewportTransform()).zoom
-    await d.mouseDrag(before.cx, before.cy, before.cx + 180, before.cy + 120)
+    await d.dragMouse(nodeSel(childId), before.cx, before.cy, before.cx + 180, before.cy + 120)
     await sleep(400)
     const afterFlow = (await d.nodeFlowPositions()).find((p) => p.id === childId)
     const dx = afterFlow.x - beforeFlow.x
     const dy = afterFlow.y - beforeFlow.y
     const expX = 180 / zoom
     const expY = 120 / zoom
-    check('S1b 自由拖动节点（画布坐标随拖拽等比变化）', Math.abs(dx - expX) < 4 && Math.abs(dy - expY) < 4, `dx=${dx.toFixed(1)}(期望 ${expX.toFixed(1)}) dy=${dy.toFixed(1)}(期望 ${expY.toFixed(1)})`)
+    // nodeDragThreshold=1 会消耗首个移动步进（约 1/16 位移），断言按比例落在 [0.88, 1.02] 且方向一致
+    const rx = dx / expX
+    const ry = dy / expY
+    check('S1b 自由拖动节点（画布坐标随拖拽等比变化）', rx > 0.88 && rx < 1.02 && ry > 0.88 && ry < 1.02, `dx=${dx.toFixed(1)}(期望 ${expX.toFixed(1)}) dy=${dy.toFixed(1)}(期望 ${expY.toFixed(1)})`)
     await d.waitSaved()
     const apiAfter = await rest('GET', `/mindmaps/${mid1}`)
     const apiNode = apiAfter?.data?.contentJson ? JSON.parse(apiAfter.data.contentJson).nodes[childId] : null
@@ -326,7 +435,7 @@ async function main() {
     const otherChildId = await d.evaluate(`(() => { const ids = [...document.querySelectorAll('.react-flow__node')].map(n => n.getAttribute('data-id')); return ids.find(id => id !== ${JSON.stringify(childId)} && (document.querySelector('.react-flow__node[data-id="' + id + '"] .mm-node-text')?.textContent ?? '') === '') ?? null })()`)
     const src = await d.handleCenter(childId, 'source')
     const dst = await d.handleCenter(otherChildId, 'target')
-    await d.mouseDrag(src.cx, src.cy, dst.cx, dst.cy, { steps: 12, totalMs: 400 })
+    await d.dragConnect(`${nodeSel(childId)} .react-flow__handle.source`, src.cx, src.cy, dst.cx, dst.cy)
     await d.waitFor(`(() => [...document.querySelectorAll('.react-flow__edge')].filter(e => /^e\\d+$/.test(e.getAttribute('data-id') || '')).length === 1)()`, '画布上拖出 1 条自由连线')
     await d.waitSaved()
     const apiEdge = await rest('GET', `/mindmaps/${mid1}`)
@@ -356,7 +465,7 @@ async function main() {
     await sleep(600)
     const src2 = await d.handleCenter(childId, 'source')
     const dst2 = await d.handleCenter(otherChildId, 'target')
-    await d.mouseDrag(src2.cx, src2.cy, dst2.cx, dst2.cy, { steps: 12, totalMs: 400 })
+    await d.dragConnect(`${nodeSel(childId)} .react-flow__handle.source`, src2.cx, src2.cy, dst2.cx, dst2.cy)
     await d.waitFor(`(() => [...document.querySelectorAll('.react-flow__edge')].filter(e => /^e\\d+$/.test(e.getAttribute('data-id') || '')).length === 1)()`, '重建自由连线')
     await d.waitSaved()
     await d.clickText('.mm-mode-switch button', '树状')
@@ -373,18 +482,21 @@ async function main() {
     await d.waitFor(`(document.querySelector('.mm-statusbar')?.textContent ?? '').includes('画布模式')`, '切画布')
     await sleep(600)
     const beforeCount = await d.nodeCountText()
-    await d.mouseClick(60, 520, { count: 2 }) // 双击空白落点加节点
+    await d.paneDoubleClick('.react-flow__pane', 60, 520) // 双击空白落点加节点（画布模式 pane 双击走 pointer 路径）
     await d.waitFor(`(document.querySelector('.mm-statusbar')?.textContent ?? '').includes(${JSON.stringify(String(Number(beforeCount) + 1) + ' 节点')})`, '双击空白加节点')
     await d.clickText('.mm-mode-switch button', '树状')
+    await d.waitFor(`(document.querySelector('.mm-statusbar')?.textContent ?? '').includes('树状模式') || !!document.querySelector('.mm-dialog')`, '切回树状（S2e 保留的自由边会再弹三选一）')
+    if (await d.evaluate(`!!document.querySelector('.mm-dialog')`)) {
+      await d.clickText('.mm-dialog-actions button', '仅重排树形部分')
+    }
     await d.waitFor(`(document.querySelector('.mm-statusbar')?.textContent ?? '').includes('树状模式') && [...document.querySelectorAll('.react-flow__node')].length === ${Number(beforeCount) + 1}`, '树状视图同步看到画布新增节点')
     check('S3a 画布新增节点 → 树状视图同步可见', true)
     // 在树状编辑该节点文本（找唯一空文本节点）
     const newId = await d.evaluate(`(() => { const el = [...document.querySelectorAll('.react-flow__node')].find(n => (n.querySelector('.mm-node-text')?.textContent ?? '') === ''); return el?.getAttribute('data-id') ?? null })()`)
     const newCenter = await d.nodeRect(newId)
-    await d.mouseClick(newCenter.cx, newCenter.cy, { count: 2 })
+    await d.dblclickMouse(nodeInnerSel(newId), newCenter.cx, newCenter.cy)
     await d.waitFor(`!!document.querySelector('.mm-node-input')`, '节点进入编辑态')
-    await cdp.send('Input.insertText', { text: '跨模式同步节点' })
-    await d.key('Enter', 'Enter', 13)
+    await d.typeInto('.mm-node-input', '跨模式同步节点')
     await d.waitFor(`[...document.querySelectorAll('.mm-node-text')].some(t => t.textContent === '跨模式同步节点')`, '文本提交')
     await d.waitSaved()
     await d.clickText('.mm-mode-switch button', '画布')
@@ -395,13 +507,13 @@ async function main() {
     await sleep(600)
     const rootId = await d.evaluate(`[...document.querySelectorAll('.react-flow__node')].map(n => n.getAttribute('data-id')).find(id => document.querySelector('.react-flow__node[data-id="' + id + '"] .mm-node-text')?.textContent === '中心主题')`)
     const rootCenter = await d.nodeRect(rootId)
-    await d.mouseClick(rootCenter.cx, rootCenter.cy)
+    await d.clickMouse(nodeSel(rootId), rootCenter.cx, rootCenter.cy)
     await d.waitFor(`!!document.querySelector('.mm-style-panel')`, '选中节点出现样式面板')
     await d.evaluate(`document.querySelector('.mm-style-panel button[title="菱形"]')?.click()`)
     await d.evaluate(`document.querySelector('.mm-style-panel .mm-color-swatch[title="靛蓝"]')?.click()`)
     await d.evaluate(`document.querySelector('.mm-style-panel button[title="加粗"]')?.click()`)
-    await d.waitFor(`document.querySelector('.react-flow__node[data-id=${JSON.stringify(rootId)}] .mm-node')?.className.includes('shape-diamond')`, '根节点变菱形')
-    const rootStyleOk = await d.evaluate(`(() => { const el = document.querySelector('.react-flow__node[data-id=${JSON.stringify(rootId)}] .mm-node')
+    await d.waitFor(`document.querySelector(${JSON.stringify(nodeInnerSel(rootId))})?.className.includes('shape-diamond')`, '根节点变菱形')
+    const rootStyleOk = await d.evaluate(`(() => { const el = document.querySelector(${JSON.stringify(nodeInnerSel(rootId))})
       return el.className.includes('shape-diamond') && el.className.includes('bold') && el.style.getPropertyValue('--node-bg') === '#eef1ff' })()`)
     check('S4a 形状（菱形）+ 颜色（靛蓝）+ 加粗即时生效', rootStyleOk === true)
     await d.clickText('.mm-toolbar-actions button', '便签')
@@ -419,7 +531,7 @@ async function main() {
       return els.filter(el => (el.querySelector('.mm-node-text')?.textContent ?? '') === '' && !el.querySelector('.mm-node.sticky')).map(el => el.getAttribute('data-id')).slice(0, 2) })()`)
     const r1 = await d.nodeRect(boxNodes[0])
     const r2 = await d.nodeRect(boxNodes[1])
-    await d.mouseDrag(Math.min(r1.left, r2.left) - 12, Math.min(r1.top, r2.top) - 12, Math.max(r1.right, r2.right) + 12, Math.max(r1.bottom, r2.bottom) + 12, { steps: 10, totalMs: 300 })
+    await d.dragSelect('.react-flow__pane', Math.min(r1.left, r2.left) - 12, Math.min(r1.top, r2.top) - 12, Math.max(r1.right, r2.right) + 12, Math.max(r1.bottom, r2.bottom) + 12, { steps: 10, totalMs: 300 })
     await sleep(300)
     const selectedIds = await d.evaluate(`[...document.querySelectorAll('.react-flow__node .mm-node.selected')].map(n => n.closest('.react-flow__node').getAttribute('data-id'))`)
     check('S4d 框选多选（拖框选中 ≥2 节点）', selectedIds.length >= 2, `选中 ${selectedIds.length} 个：${selectedIds.join(',')}`)
@@ -427,7 +539,7 @@ async function main() {
     // 批量移动：拖其中一个选中节点，全体同位移
     const moveId = selBefore[0].id
     const moveCenter = await d.nodeRect(moveId)
-    await d.mouseDrag(moveCenter.cx, moveCenter.cy, moveCenter.cx + 60, moveCenter.cy + 40)
+    await d.dragMouse(nodeSel(moveId), moveCenter.cx, moveCenter.cy, moveCenter.cx + 60, moveCenter.cy + 40)
     await sleep(400)
     const selAfter = (await d.nodeFlowPositions()).filter((p) => selectedIds.includes(p.id))
     const deltas = selAfter.map((p) => {
@@ -436,13 +548,21 @@ async function main() {
     })
     const sameDelta = deltas.length === selBefore.length && deltas.every((dd) => Math.abs(dd.dx - deltas[0].dx) < 3 && Math.abs(dd.dy - deltas[0].dy) < 3)
     check('S4e 批量移动（拖动一个带动全部选中）', sameDelta, JSON.stringify(deltas))
-    // 批量删除（带确认，override confirm）
+    // 批量删除（带确认，override confirm）：应用按 PRD 级联删除选中节点及其子树，
+    // 期望剩余 = 快照节点数 - 选中节点子树的并集大小（子树按 parentId 链计算）。
     const beforeDelete = await d.nodeCountText()
+    const selBeforeDelete = await d.evaluate(`[...document.querySelectorAll('.react-flow__node .mm-node.selected')].map(n => n.closest('.react-flow__node').getAttribute('data-id'))`)
+    const inSubtree = (n, sid) => {
+      if (n.id === sid) return true
+      const p = apiSaved.nodes[n.parentId]
+      return p ? inSubtree(p, sid) : false
+    }
+    const remaining = Object.values(apiSaved.nodes).filter((n) => !selBeforeDelete.some((sid) => inSubtree(n, sid))).length
     await d.evaluate(`window.__origConfirm = window.confirm; window.confirm = () => true`)
-    await d.key('Delete', 'Delete', 46)
-    await d.waitFor(`(document.querySelector('.mm-statusbar')?.textContent ?? '').includes(${JSON.stringify(String(Number(beforeDelete) - selectedIds.length) + ' 节点')})`, '批量删除生效')
+    await d.key('Delete')
+    await d.waitFor(`(document.querySelector('.mm-statusbar')?.textContent ?? '').includes(${JSON.stringify(String(remaining) + ' 节点')})`, '批量删除生效（含子树级联）')
     await d.evaluate(`window.confirm = window.__origConfirm`)
-    check('S4f 批量删除（Delete + 确认，级联移除选中节点）', true)
+    check('S4f 批量删除（Delete + 确认，级联移除选中节点及子树）', true)
     await d.waitSaved()
 
     // ---------- S5：重启应用（Electron + 后端），坐标/形状/颜色/便签完整恢复 ----------
@@ -463,6 +583,7 @@ async function main() {
     await cdp2.open()
     await cdp2.send('Runtime.enable')
     await cdp2.send('Page.enable')
+    await cdp2.send('Log.enable')
     const d2 = makeDriver(cdp2)
 
     await d2.waitFor(`[...document.querySelectorAll('.workspace-item .item-name')].some(b => b.textContent.includes(${JSON.stringify(wsName)}))`, '重启后工作区列表恢复', 20000)
@@ -475,12 +596,10 @@ async function main() {
     await d2.waitFor(`(document.querySelector('.mm-statusbar')?.textContent ?? '').includes('画布模式')`, '重启后切画布')
     await sleep(900)
     const restored = await d2.evaluate(`(() => {
-      const vp = document.querySelector('.react-flow__viewport')?.style.transform || ''
-      const m = vp.match(/translate\\((-?[\\d.]+)px, (-?[\\d.]+)px\\) scale\\(([\\d.]+)\\)/)
-      const zoom = m ? parseFloat(m[3]) : 1, px = m ? parseFloat(m[1]) : 0, py = m ? parseFloat(m[2]) : 0
       const nodes = [...document.querySelectorAll('.react-flow__node')].map(el => {
+        // 节点 transform 即 flow 坐标（viewport 的 scale 在父层生效，无需换算）
         const t = (el.style.transform || '').match(/translate\\((-?[\\d.]+)px, (-?[\\d.]+)px\\)/)
-        return { id: el.getAttribute('data-id'), fx: (parseFloat(t[1]) - px) / zoom, fy: (parseFloat(t[2]) - py) / zoom,
+        return { id: el.getAttribute('data-id'), fx: parseFloat(t[1]), fy: parseFloat(t[2]),
           cls: el.querySelector('.mm-node')?.className ?? '', bg: el.querySelector('.mm-node')?.style.getPropertyValue('--node-bg') ?? '' }
       })
       return nodes })()`)
@@ -515,17 +634,18 @@ async function main() {
       true`)
     await d2.evaluate(`window.__fpsStart()`)
     const dragNode = await d2.evaluate(`(() => { const el = [...document.querySelectorAll('.react-flow__node')].find(n => n.querySelector('.mm-node-text')?.textContent === '节点50'); const r = el.getBoundingClientRect(); return { id: el.getAttribute('data-id'), cx: r.x + r.width / 2, cy: r.y + r.height / 2 } })()`)
-    await d2.mouse('mousePressed', dragNode.cx, dragNode.cy, { clickCount: 1, buttons: 1 })
+    await d2.evaluate(`(() => { const el = document.querySelector(${JSON.stringify(nodeSel(dragNode.id))})
+      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: ${dragNode.cx}, clientY: ${dragNode.cy}, buttons: 1 })); return true })()`)
     const segs = [
       [dragNode.cx + 200, dragNode.cy], [dragNode.cx + 200, dragNode.cy + 160], [dragNode.cx, dragNode.cy + 160], [dragNode.cx, dragNode.cy],
     ]
     for (const [tx, ty] of segs) {
       for (let i = 1; i <= 15; i++) {
-        await d2.mouse('mouseMoved', dragNode.cx + ((tx - dragNode.cx) * i) / 15, dragNode.cy + ((ty - dragNode.cy) * i) / 15, { buttons: 1 })
+        await d2.evaluate(`document.body.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, view: window, clientX: ${dragNode.cx + ((tx - dragNode.cx) * i) / 15}, clientY: ${dragNode.cy + ((ty - dragNode.cy) * i) / 15}, buttons: 1 }))`)
         await sleep(25)
       }
     }
-    await d2.mouse('mouseReleased', dragNode.cx, dragNode.cy, { clickCount: 1, buttons: 0 })
+    await d2.evaluate(`document.body.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window, clientX: ${dragNode.cx}, clientY: ${dragNode.cy}, buttons: 0 }))`)
     const fpsInfo = await d2.evaluate(`window.__fpsStop()`)
     const fps = fpsInfo.frames / (fpsInfo.dt / 1000)
     check('S6b 100 节点拖拽流畅（拖拽期帧率 ≥ 30fps）', fps >= 30, `实测 ${fps.toFixed(1)}fps（${fpsInfo.frames} 帧 / ${(fpsInfo.dt / 1000).toFixed(2)}s）`)

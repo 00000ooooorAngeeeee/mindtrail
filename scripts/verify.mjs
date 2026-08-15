@@ -222,6 +222,13 @@ export async function runChecks(deps = {}) {
       if (!searchText.includes(kw)) throw new Error(`search_text 缺失关键词：${kw}`)
     }
 
+    // ngram 全文检索命中（07 §4 验收「搜索可命中导图节点文本」，M4 搜索依赖提前验证）
+    const matched = await mysql(
+      `SELECT COUNT(*) FROM trailmind.mindmap WHERE id=${mid} AND MATCH(search_text) AGAINST('画布坐标子节点' IN NATURAL LANGUAGE MODE) > 0`,
+      deps,
+    )
+    if (matched !== '1') throw new Error(`ngram MATCH 未命中导图节点文本（命中 ${matched} 行）`)
+
     // 幂等：用最新 updatedAt 再存一次同内容，乐观锁不冲突（M2 持久化写路径稳定）
     const saved2 = await request(`${BASE}/api/v1/mindmaps/${mid}`, {
       method: 'PUT',
