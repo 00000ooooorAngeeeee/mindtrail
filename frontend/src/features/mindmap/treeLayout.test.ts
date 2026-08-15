@@ -44,6 +44,14 @@ describe('computeTreeLayout 自研树布局', () => {
     expect(pos.has('n3')).toBe(true)
   })
 
+  it('ignoreCollapsed=true 时折叠子树也参与布局（画布模式忽略折叠，05 §4）', () => {
+    const collapsed = toggleCollapse(buildTree(), 'n2')
+    const pos = computeTreeLayout(collapsed, true)
+    expect(pos.has('n4')).toBe(true)
+    expect(pos.has('n5')).toBe(true)
+    expect(computeTreeLayout(collapsed).has('n4')).toBe(false)
+  })
+
   it('同一父下的叶子按 DFS 序垂直递增', () => {
     const pos = computeTreeLayout(buildTree())
     expect(pos.get('n4')!.y).toBeLessThan(pos.get('n5')!.y)

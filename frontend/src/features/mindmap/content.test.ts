@@ -50,6 +50,12 @@ describe('节点增删改移折叠（纯函数）', () => {
     expect(c.nodes.n2.text).toBe('子节点')
   })
 
+  it('addChild 可带布局坐标（画布模式在点击处加节点），缺省为 null', () => {
+    const c = addChild(defaultContent(), 'n1', '', { x: 100, y: 200 })
+    expect(c.nodes.n2.layout).toEqual({ x: 100, y: 200 })
+    expect(addChild(defaultContent(), 'n1').nodes.n2.layout).toBeNull()
+  })
+
   it('updateNodeText 更新文本', () => {
     const c = updateNodeText(defaultContent(), 'n1', '改后的主题')
     expect(c.nodes.n1.text).toBe('改后的主题')

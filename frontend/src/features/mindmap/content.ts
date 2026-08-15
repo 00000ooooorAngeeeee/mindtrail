@@ -146,8 +146,13 @@ function buildChildren(content: MindmapContent): Map<string, string[]> {
   return children
 }
 
-/** 新增子节点（parentId 指向目标），返回新内容。 */
-export function addChild(content: MindmapContent, parentId: string, text = ''): MindmapContent {
+/** 新增子节点（parentId 指向目标），返回新内容。画布模式可带布局坐标（在点击处落点）。 */
+export function addChild(
+  content: MindmapContent,
+  parentId: string,
+  text = '',
+  layout: { x: number; y: number } | null = null,
+): MindmapContent {
   const id = nextNodeId(content)
   const node: MindmapNode = {
     id,
@@ -155,7 +160,7 @@ export function addChild(content: MindmapContent, parentId: string, text = ''): 
     style: { ...DEFAULT_NODE_STYLE },
     tags: [],
     parentId,
-    layout: null,
+    layout,
     collapsed: false,
   }
   return { ...content, nodes: { ...content.nodes, [id]: node } }

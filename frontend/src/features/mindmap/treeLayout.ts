@@ -16,9 +16,10 @@ export const ROW_GAP = 64
 
 /**
  * 计算每个可见节点的坐标。折叠节点的子树不占位（07 §4「折叠后布局正确收缩」）。
+ * ignoreCollapsed=true 时折叠子树也参与布局（画布模式忽略折叠，05 §4；树→画布平铺用）。
  * 返回 Map<nodeId, {x,y}>；x/y 为节点左上角坐标（配合 React Flow 默认 origin [0,0]）。
  */
-export function computeTreeLayout(content: MindmapContent): Map<string, LayoutPoint> {
+export function computeTreeLayout(content: MindmapContent, ignoreCollapsed = false): Map<string, LayoutPoint> {
   const { nodes, rootNodeId } = content
 
   const children = new Map<string, string[]>()
@@ -49,7 +50,7 @@ export function computeTreeLayout(content: MindmapContent): Map<string, LayoutPo
     if (visited.has(id)) return
     visited.add(id)
     const node = nodes[id]
-    const kids = node.collapsed ? [] : (children.get(id) ?? [])
+    const kids = !ignoreCollapsed && node.collapsed ? [] : (children.get(id) ?? [])
     let slot: number
     if (kids.length === 0) {
       slot = nextLeaf++
