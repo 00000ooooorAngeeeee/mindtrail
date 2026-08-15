@@ -8,6 +8,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { execFile } from 'node:child_process'
+import { parseSessionMarkdown } from './session-export.mjs'
 
 export const BASE = 'http://127.0.0.1:17860'
 export const EXPECTED_TABLES = [
@@ -438,6 +439,14 @@ export async function runChecks(deps = {}) {
     })
     if (fake?.json?.code !== 400) throw new Error('不存在的提交应拒绝绑定（400）')
 
+    // 导出往返（M3 总验收 / 06 §9）：git 会话导出含绑定提交行与 gitRange（start_head=c2、end_head=null）
+    const gexp = await request(`${BASE}/api/v1/sessions/${gsid}/export/markdown`)
+    const gparsed = parseSessionMarkdown(gexp?.json?.data)
+    if (gparsed.entries?.[0]?.commits?.[0] !== c3) throw new Error('导出应还原绑定提交（> git 行）')
+    if (gparsed.frontmatter.session.gitRange?.[0] !== c2 || gparsed.frontmatter.session.gitRange?.[1] !== null) {
+      throw new Error(`导出 gitRange 错误：${JSON.stringify(gparsed.frontmatter.session.gitRange)}`)
+    }
+
     // 解绑 → 绑定列表清空；删除会话级联清理 entry_commit；清理临时仓库与工作区
     const unbind = await request(`${BASE}/api/v1/entries/${gent?.json?.data?.id}/commits/${c3}`, {
       method: 'DELETE',
@@ -476,7 +485,62 @@ export async function runChecks(deps = {}) {
     }
   }
 
-  // 7. workspace 级联删除（连同第 4 步创建的导图 + 本步补建的会话与标签）
+  // 7. M3 总验收：10 条不同类型条目计时（单条 ≤10s，NFR）+ 会话 Markdown 导出往返（06 §4 解析 → 与库中数据逐一比对）
+  let acceptSessionId = null
+  try {
+    if (!workspaceId) throw new Error('依赖第 3 步的 workspace id')
+    const asess = await request(`${BASE}/api/v1/workspaces/${workspaceId}/sessions`, {
+      method: 'POST',
+      body: { title: '验收导出会话' },
+    })
+    acceptSessionId = asess?.json?.data?.id
+    if (asess?.json?.code !== 0 || !acceptSessionId) throw new Error(`验收会话创建失败：${JSON.stringify(asess?.json)}`)
+
+    const types = ['goal', 'context', 'prompt', 'action', 'artifact', 'decision', 'error', 'test', 'review', 'note']
+    let worstMs = 0
+    for (let i = 0; i < types.length; i++) {
+      const t0 = Date.now()
+      const r = await request(`${BASE}/api/v1/sessions/${acceptSessionId}/entries`, {
+        method: 'POST',
+        body: { type: types[i], contentMd: `第 ${i + 1} 条 · ${types[i]} 验收内容`, tags: i % 2 === 0 ? ['验收标签'] : [] },
+      })
+      const ms = Date.now() - t0
+      if (r?.json?.code !== 0) throw new Error(`第 ${i + 1} 条写入失败：${JSON.stringify(r?.json)}`)
+      if (ms > 10000) throw new Error(`第 ${i + 1} 条耗时 ${ms}ms 超过 10s（NFR）`)
+      worstMs = Math.max(worstMs, ms)
+    }
+
+    const ex = await request(`${BASE}/api/v1/sessions/${acceptSessionId}/export/markdown`)
+    const parsed = parseSessionMarkdown(ex?.json?.data)
+    const detail = await request(`${BASE}/api/v1/sessions/${acceptSessionId}?page=1&size=50`)
+    const apiEntries = detail?.json?.data?.entries || []
+    if (parsed.entries.length !== 10 || apiEntries.length !== 10) {
+      throw new Error(`导出/API 条目数不符：${parsed.entries.length}/${apiEntries.length}`)
+    }
+    if (parsed.frontmatter.session.title !== '验收导出会话') throw new Error('导出 frontmatter 标题错误')
+    if (parsed.frontmatter.entries !== 10) throw new Error('导出 frontmatter entries 计数错误')
+    parsed.entries.forEach((p, i) => {
+      const d = apiEntries[i]
+      if (p.type !== d.type) throw new Error(`第 ${i + 1} 条类型 ${p.type} ≠ ${d.type}`)
+      if (p.time !== (d.createdAt || '').slice(11, 16)) throw new Error(`第 ${i + 1} 条时间 ${p.time} 未还原`)
+      if (p.content !== d.contentMd) throw new Error(`第 ${i + 1} 条内容未还原`)
+      if (JSON.stringify(p.tags) !== JSON.stringify(d.tags)) throw new Error(`第 ${i + 1} 条标签未还原`)
+    })
+
+    await request(`${BASE}/api/v1/sessions/${acceptSessionId}`, { method: 'DELETE' })
+    acceptSessionId = null
+    results.push({
+      ok: true,
+      name: `M3 总验收：10 条不同类型条目写入最慢 ${worstMs}ms/条（≤10s）+ 导出→解析→比对 10/10 还原`,
+    })
+  } catch (e) {
+    results.push({ ok: false, name: 'M3 总验收（10 条目计时 + 导出往返）', error: e.message })
+    if (acceptSessionId != null) {
+      await request(`${BASE}/api/v1/sessions/${acceptSessionId}`, { method: 'DELETE' }).catch(() => {})
+    }
+  }
+
+  // 8. workspace 级联删除（连同第 4 步创建的导图 + 本步补建的会话与标签）
   try {
     // 补建一个会话，验证工作区删除时会话/标签级联（条目级联见第 5 步）
     const s2 = await request(`${BASE}/api/v1/workspaces/${workspaceId}/sessions`, {

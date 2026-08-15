@@ -2,6 +2,7 @@ package com.trailmind.backend.controller;
 
 import com.trailmind.backend.common.ApiResponse;
 import com.trailmind.backend.entity.Session;
+import com.trailmind.backend.service.SessionExportService;
 import com.trailmind.backend.service.SessionService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,16 +19,19 @@ import java.util.List;
 /**
  * 记录会话接口（04 §5 契约）：
  * POST /workspaces/{wid}/sessions 开始会话（start_head 记录）、GET 列表、
- * GET /sessions/{id} 详情（含条目分页，默认每页 50）、PATCH（title/status/summary）、DELETE（级联）。
+ * GET /sessions/{id} 详情（含条目分页，默认每页 50）、PATCH（title/status/summary）、DELETE（级联）、
+ * GET /sessions/{id}/export/markdown 导出 Markdown（严格 06 §4，M3 总验收「导出→解析→比对」）。
  */
 @RestController
 @RequestMapping("/api/v1")
 public class SessionController {
 
     private final SessionService service;
+    private final SessionExportService exportService;
 
-    public SessionController(SessionService service) {
+    public SessionController(SessionService service, SessionExportService exportService) {
         this.service = service;
+        this.exportService = exportService;
     }
 
     @PostMapping("/workspaces/{workspaceId}/sessions")
@@ -56,5 +60,10 @@ public class SessionController {
     public ApiResponse<Void> delete(@PathVariable Long id) {
         service.delete(id);
         return ApiResponse.ok(null);
+    }
+
+    @GetMapping("/sessions/{id}/export/markdown")
+    public ApiResponse<String> exportMarkdown(@PathVariable Long id) {
+        return ApiResponse.ok(exportService.exportMarkdown(id));
     }
 }
