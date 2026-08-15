@@ -487,3 +487,41 @@ M2 任务一顺利完成，延续「纯函数 + TDD 锁死」的路子。三点�
 - [ ] 遗留：M1 验收清单性能项——20 节点无卡顿、500 节点 ≥45fps、刷新/重启恢复（需 GUI 实机或人工验证）
 - [ ] 遗留：导图重命名（PRD B4，补 PUT 携带 name 并同步 search_text 的 name 部分）
 - [ ] 遗留：verify.mjs 补导图往返冒烟（创建→保存→search_text/node_count 断言→删除）
+
+## 会话 14 · M2 任务二（节点形状 + 颜色）
+
+### [goal] 10:43 · 目标
+完成 M2 第二个任务：节点形状（圆角矩形/矩形/椭圆/菱形）与颜色。表现为：选中节点可改形状/颜色/加粗、四种形状视觉区分明显、样式随整图防抖保存重启不丢、前端单测与构建通过。
+
+### [action] 10:45 · 操作
+`content.ts` 新增 `updateNodeStyle` 纯函数（Partial 合并）；`nodeStyle.ts` 集中定义形状预设（NODE_SHAPES）与颜色色板（NODE_COLORS，浅底深描边）；`useMindmapStore` 加 `updateStyle` action（走统一 apply 入口）；`MindmapNode` 按 style 渲染形状/颜色/加粗；`MindMapEditor` 选中节点浮出样式面板（形状/颜色/加粗）；`mindmap.css` 加形状/色板/面板样式。
+
+### [decision] 10:46 · 决策
+节点视觉（背景/边框/圆角/阴影）从 `.mm-node` 移到内层 `.mm-node-body`，外层只留定位与尺寸。理由：菱形用 `clip-path` 实现，clip-path 会裁掉挂在 `.mm-node` 上的浮动工具条/折叠按钮/徽标（它们绝对定位在节点外）；分离后这些控件不受形状裁切影响，且四形状共用同一结构。
+
+### [decision] 10:46 · 决策
+颜色色板单源定义在 `nodeStyle.ts`，CSS 经 `--node-bg`/`--node-border` CSS 变量消费，而非「TS 一份 hex + CSS 一份 hex」双份维护。理由：色值唯一来源，改色板只动一处；未知颜色名经 `nodeColor()` 回退默认，兼容旧数据。
+
+### [decision] 10:47 · 决策
+菱形在 `clip-path` 基础上加宽内边距 + 文本居中。理由：节点宽 > 高，纯 clip-path 菱形会把左对齐的文本切到左右顶点之外；加宽 padding 让文本落在菱形中部。
+
+### [note] 10:47 · 备注
+根节点改色只改背景、边框仍保留品牌色（中心主题身份）；轻微不一致可接受，避免「根节点 border 强制品牌色」与「用户自定义色」打架。若需根节点边框随色，后续可加「根节点颜色=default 时用品牌色、否则用色板边框」的判定。
+
+### [test] 10:48 · 验证
+- 前端 `npm test`：54 通过（新增 updateNodeStyle 2 条：合并更新形状/颜色/加粗且不篡改原节点、节点不存在返回原内容）。
+- `npm run build`（`tsc --noEmit` + `vite build`，351KB 产物）通过。
+- 说明：形状/颜色/面板是 GUI 交互，无头环境未实机点击验证（沿用会话 12/13 惯例），建议人工打开导图目测四种形状 + 改色后重启确认持久化。
+
+### [artifact] 10:49 · 产出
+- `ed38f96` feat(frontend)：节点形状与颜色（圆角矩形/矩形/椭圆/菱形 + 预设色板）
+
+### [review] 10:50 · 复盘
+样式功能「数据层已有 style 字段、后端整图存 JSON」意味着本次纯前端即可闭环，无需动 schema/后端——这是 M1 把 style 字段提前建模的红利。两点教训：① 本次提交第一次 `git add frontend/src/features/mindmap/` 漏掉了 `src/store/useMindmapStore.ts`（在 store 目录、不在 features 下），靠 `git status` 复核 + `--amend` 补回——「按目录 add」容易漏掉跨目录的相关改动，应 `git status` 逐文件核对后再提交；② 菱形这类「形状」需求的正确解法是 clip-path + 内层包裹，比 rotate 方案（会转文字）干净，也印证「把视觉放在可独立裁切的内层」是 React Flow 自定义节点形状的通用结构。遗留：M2 剩余 P1 项（框选/便签）与总验收，GUI 交互仍需实机验证。
+
+### [next] 10:50 · 下一步
+- [ ] M2 P1 项：框选多选、批量删除/移动 ｜ 自由便签（无文本纯形状，07 §5 / PRD B2.5/B2.6）
+- [ ] M2 总验收（含 100 节点拖拽流畅、GUI 交互实机验证；框选未做则明确记录为 P1 遗留）
+- [ ] 遗留：M1 验收清单性能项（20 节点无卡顿、500 节点 ≥45fps、刷新/重启恢复，需实机）
+- [ ] 遗留：导图重命名（PRD B4，补 PUT 携带 name 并同步 search_text 的 name 部分）
+- [ ] 遗留：verify.mjs 补导图往返冒烟
