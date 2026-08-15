@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import App from './App'
 import { fetchHealth } from './api/health'
 import { deleteWorkspace, fetchWorkspaces, updateWorkspace } from './api/workspaces'
 import { createMindmap, deleteMindmap, listMindmaps } from './api/mindmaps'
+import { createSession, deleteSession, getSession, listSessions } from './api/sessions'
 
 vi.mock('./api/health', () => ({ fetchHealth: vi.fn() }))
 vi.mock('./api/workspaces', () => ({
@@ -17,6 +18,13 @@ vi.mock('./api/mindmaps', () => ({
   createMindmap: vi.fn(),
   deleteMindmap: vi.fn(),
 }))
+vi.mock('./api/sessions', () => ({
+  listSessions: vi.fn(),
+  createSession: vi.fn(),
+  deleteSession: vi.fn(),
+  getSession: vi.fn(),
+  updateSession: vi.fn(),
+}))
 
 const healthMock = vi.mocked(fetchHealth)
 const workspacesMock = vi.mocked(fetchWorkspaces)
@@ -25,6 +33,10 @@ const deleteMock = vi.mocked(deleteWorkspace)
 const listMindmapsMock = vi.mocked(listMindmaps)
 const createMindmapMock = vi.mocked(createMindmap)
 const deleteMindmapMock = vi.mocked(deleteMindmap)
+const listSessionsMock = vi.mocked(listSessions)
+const createSessionMock = vi.mocked(createSession)
+const deleteSessionMock = vi.mocked(deleteSession)
+const getSessionMock = vi.mocked(getSession)
 
 const ws = { id: 1, name: '项目A', mindmapCount: 2, sessionCount: 1 }
 
@@ -37,6 +49,10 @@ describe('App 首页', () => {
     listMindmapsMock.mockReset()
     createMindmapMock.mockReset()
     deleteMindmapMock.mockReset()
+    listSessionsMock.mockReset()
+    createSessionMock.mockReset()
+    deleteSessionMock.mockReset()
+    getSessionMock.mockReset()
     healthMock.mockResolvedValue({ status: 'ok', app: 'trailmind', version: '0.0.1' })
     workspacesMock.mockResolvedValue([])
     updateMock.mockResolvedValue({ ...ws })
@@ -44,6 +60,9 @@ describe('App 首页', () => {
     listMindmapsMock.mockResolvedValue([])
     createMindmapMock.mockResolvedValue({ id: 10, name: '新导图', nodeCount: 1 })
     deleteMindmapMock.mockResolvedValue(undefined)
+    listSessionsMock.mockResolvedValue([])
+    createSessionMock.mockResolvedValue({ id: 1, title: '新会话', status: 'active' })
+    deleteSessionMock.mockResolvedValue(undefined)
   })
 
   it('渲染品牌名与后端版本号', async () => {
@@ -97,7 +116,7 @@ describe('App 首页', () => {
 
     expect(screen.getByText('导图 2 · 会话 1')).toBeInTheDocument()
     expect(await screen.findByText(/暂无导图/)).toBeInTheDocument()
-    expect(screen.getByText(/暂无会话/)).toBeInTheDocument()
+    expect(await screen.findByText(/暂无会话/)).toBeInTheDocument()
   })
 
   it('进入工作区详情显示导图列表', async () => {
@@ -137,5 +156,46 @@ describe('App 首页', () => {
     fireEvent.click(await screen.findByText('删除'))
 
     await waitFor(() => expect(deleteMindmapMock).toHaveBeenCalledWith(10))
+  })
+
+  it('工作区页显示会话列表并可开始新会话', async () => {
+    workspacesMock.mockResolvedValue([ws])
+    listSessionsMock.mockResolvedValue([
+      { id: 7, title: '会话A', status: 'active', entryCount: 3, startedAt: '2025-06-01T09:00:00' },
+    ])
+    render(<App />)
+
+    fireEvent.click(await screen.findByText('项目A'))
+    expect(await screen.findByText('会话A')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText('输入会话标题'), { target: { value: '新会话' } })
+    fireEvent.click(screen.getByText('开始会话'))
+
+    await waitFor(() => expect(createSessionMock).toHaveBeenCalledWith(1, { title: '新会话' }))
+  })
+
+  it('打开会话进入时间线详情页', async () => {
+    workspacesMock.mockResolvedValue([ws])
+    listSessionsMock.mockResolvedValue([
+      { id: 7, title: '会话A', status: 'active', entryCount: 1, startedAt: '2025-06-01T09:00:00' },
+    ])
+    getSessionMock.mockResolvedValue({
+      id: 7,
+      title: '会话A',
+      status: 'active',
+      entryTotal: 1,
+      startedAt: '2025-06-01T09:00:00',
+      endedAt: null,
+      entries: [
+        { id: 1, sessionId: 7, seq: 1, type: 'goal', contentMd: '目标内容', tags: [], createdAt: '2025-06-01T09:02:00' },
+      ],
+    })
+    render(<App />)
+
+    fireEvent.click(await screen.findByText('项目A'))
+    fireEvent.click(await screen.findByText('会话A'))
+
+    expect(await screen.findByText('目标内容')).toBeInTheDocument()
+    expect(within(screen.getByRole('list')).getByText('目标')).toBeInTheDocument()
   })
 })

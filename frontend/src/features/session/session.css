@@ -1,0 +1,186 @@
+/* 会话时间线（03 §5/§6）：条目按类型着色左缘，状态徽标，快速记录框 */
+
+.session-view {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.session-header {
+  margin-bottom: 12px;
+}
+
+.session-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.session-title-row h2 {
+  margin: 0;
+}
+
+.status-badge {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.status-active {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.status-completed {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.complete-panel {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 8px 0;
+}
+
+.complete-panel textarea {
+  flex: 1;
+  min-height: 56px;
+}
+
+.entry-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+}
+
+.entry-item {
+  border: 1px solid var(--border, #d9dee5);
+  border-left-width: 4px;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background: #fff;
+}
+
+.entry-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.entry-chip {
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 9px;
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.entry-time {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.entry-seq {
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.entry-content {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.entry-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.tag-chip {
+  font-size: 12px;
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: #eef2ff;
+  color: #4338ca;
+}
+
+.entry-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.entry-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.entry-edit textarea {
+  min-height: 60px;
+  width: 100%;
+}
+
+.quick-entry {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border, #d9dee5);
+}
+
+.quick-entry textarea {
+  flex: 1;
+  min-height: 40px;
+}
+
+/* 条目类型左缘着色（03 §6 色板） */
+.entry-type-goal {
+  border-left-color: #3b82f6;
+}
+
+.entry-type-action {
+  border-left-color: #06b6d4;
+}
+
+.entry-type-decision {
+  border-left-color: #8b5cf6;
+}
+
+.entry-type-artifact {
+  border-left-color: #10b981;
+}
+
+.entry-type-error {
+  border-left-color: #ef4444;
+}
+
+.entry-type-test {
+  border-left-color: #f97316;
+}
+
+.entry-type-review {
+  border-left-color: #ec4899;
+}
+
+.entry-type-next {
+  border-left-color: #eab308;
+}
+
+.entry-type-context {
+  border-left-color: #6b7280;
+}
+
+.entry-type-prompt {
+  border-left-color: #6366f1;
+}

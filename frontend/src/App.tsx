@@ -3,6 +3,8 @@ import { useAppStore } from './store/useAppStore'
 import { createMindmap, deleteMindmap, listMindmaps } from './api/mindmaps'
 import type { Mindmap, Workspace } from './api/types'
 import { MindMapEditor } from './features/mindmap/MindMapEditor'
+import { SessionSection } from './features/session/SessionSection'
+import { SessionView } from './features/session/SessionView'
 import './App.css'
 
 export default function App() {
@@ -10,6 +12,7 @@ export default function App() {
   const [name, setName] = useState('')
   const [open, setOpen] = useState<Workspace | null>(null)
   const [openMindmapId, setOpenMindmapId] = useState<number | null>(null)
+  const [openSessionId, setOpenSessionId] = useState<number | null>(null)
 
   useEffect(() => {
     void load()
@@ -44,8 +47,15 @@ export default function App() {
       <main className="content">
         {openMindmapId != null ? (
           <MindMapEditor mindmapId={openMindmapId} onBack={() => setOpenMindmapId(null)} />
+        ) : openSessionId != null ? (
+          <SessionView sessionId={openSessionId} onBack={() => setOpenSessionId(null)} />
         ) : open ? (
-          <WorkspaceHome ws={open} onBack={() => setOpen(null)} onOpenMindmap={setOpenMindmapId} />
+          <WorkspaceHome
+            ws={open}
+            onBack={() => setOpen(null)}
+            onOpenMindmap={setOpenMindmapId}
+            onOpenSession={setOpenSessionId}
+          />
         ) : (
           <section className="workspace-panel">
             <h2>工作区</h2>
@@ -132,10 +142,12 @@ function WorkspaceHome({
   ws,
   onBack,
   onOpenMindmap,
+  onOpenSession,
 }: {
   ws: Workspace
   onBack: () => void
   onOpenMindmap: (id: number) => void
+  onOpenSession: (id: number) => void
 }) {
   const [mindmaps, setMindmaps] = useState<Mindmap[]>([])
   const [name, setName] = useState('')
@@ -225,7 +237,7 @@ function WorkspaceHome({
       </div>
 
       <h3>会话</h3>
-      <p className="muted">暂无会话（M3 实现过程记录）</p>
+      <SessionSection ws={ws} onOpenSession={onOpenSession} />
     </section>
   )
 }
