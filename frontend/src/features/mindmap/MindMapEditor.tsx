@@ -89,7 +89,12 @@ function buildNodes(
   return out
 }
 
-function buildEdges(content: MindmapContent, positions: Map<string, LayoutPoint>, mode: MindmapMode): Edge[] {
+function buildEdges(
+  content: MindmapContent,
+  positions: Map<string, LayoutPoint>,
+  mode: MindmapMode,
+  selectedEdgeIds: Set<string> = new Set(),
+): Edge[] {
   const out: Edge[] = []
   // 父链边（由 parentId 派生，05 §4 语义）：树模式主结构；画布模式保留展示但不可删除。
   for (const n of Object.values(content.nodes)) {
@@ -114,6 +119,9 @@ function buildEdges(content: MindmapContent, positions: Map<string, LayoutPoint>
         target: e.target,
         type: 'default',
         deletable: true,
+        // 保留当前选中态：点击选中边会联动取消节点选中 → selectedIds 变化触发本 effect 重建，
+        // 若不带入 selected 标记会把刚选中的边立即「洗掉」，导致按 Delete 无法断开连线（人工验收反馈）。
+        selected: selectedEdgeIds.has(e.id),
         markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18 },
         style: { stroke: '#8b93a7', strokeWidth: 1.5 },
       })
@@ -214,7 +222,11 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
   useEffect(() => {
     if (!content || dragging.current) return
     setNodes(buildNodes(content, positions, childCount, selectedIds, mode))
-    setEdges(buildEdges(content, positions, mode))
+    // 函数式更新保留当前边选中态：点击选中边会联动取消节点选中（selectedIds 变化触发本 effect），
+    // 直接重建会把刚选中的边洗掉，导致「选中边按 Delete 断开」失效（人工验收反馈修复）。
+    setEdges((current) =>
+      buildEdges(content, positions, mode, new Set(current.filter((e) => e.selected).map((e) => e.id))),
+    )
     if (!fittedRef.current) {
       fittedRef.current = true
       // 双 rAF 等 React Flow 完成首轮测量后再 fit，避免按 0 尺寸计算。
@@ -334,15 +346,20 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
       } else if ((e.ctrlKey || e.metaKey) && e.key === '2') {
         e.preventDefault()
         trySwitch('canvas')
-      } else if (e.key === 'Delete' && selectedIds.length > 0) {
-        // 仅在有选中节点时接管 Delete（带确认删子树/批量删）；选中连线时放行给 React Flow 删边。
-        e.preventDefault()
-        deleteSelected()
+      } else if (e.key === 'Delete') {
+        // 人工验收反馈修复：原逻辑只要有选中节点就接管 Delete（带确认删节点），导致选中连线后
+        // 按 Delete 无法断开连线（节点仍处选中态时被劫持去删节点）。现仅在「有选中节点且未选中
+        // 自由边」时接管；选中边时放行给 React Flow 的删除链路（useKeyPress 监听 document）。
+        const hasEdgeSelected = edges.some((ed) => ed.selected)
+        if (selectedIds.length > 0 && !hasEdgeSelected) {
+          e.preventDefault()
+          deleteSelected()
+        }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [save, undo, redo, addNodeShortcut, deleteSelected, selectedIds, trySwitch])
+  }, [save, undo, redo, addNodeShortcut, deleteSelected, selectedIds, trySwitch, edges])
 
   const nodeCount = content ? Object.keys(content.nodes).length : 0
   // 样式面板以「首个选中节点」样式为基准，操作批量应用到全部选中（PRD B2.6 批量设色）。
