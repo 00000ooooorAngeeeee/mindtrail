@@ -4,7 +4,8 @@ import { createMindmap, deleteMindmap, listMindmaps } from './api/mindmaps'
 import type { Mindmap, Workspace } from './api/types'
 import { MindMapEditor } from './features/mindmap/MindMapEditor'
 import { SessionSection } from './features/session/SessionSection'
-import { SessionView } from './features/session/SessionView'
+import { PAGE_SIZE, SessionView } from './features/session/SessionView'
+import { SearchOverlay, type SearchNavigateTarget } from './features/search/SearchOverlay'
 import './App.css'
 
 export default function App() {
@@ -13,10 +14,47 @@ export default function App() {
   const [open, setOpen] = useState<Workspace | null>(null)
   const [openMindmapId, setOpenMindmapId] = useState<number | null>(null)
   const [openSessionId, setOpenSessionId] = useState<number | null>(null)
+  // 全局搜索（M4 任务一）：浮层开关 + 跳转定位信息（导图命中节点 / 条目所在页与条目 id）
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [mindmapHighlight, setMindmapHighlight] = useState<string | null>(null)
+  const [sessionJump, setSessionJump] = useState<{ page: number; entryId: number } | null>(null)
 
   useEffect(() => {
     void load()
   }, [load])
+
+  // Ctrl+K 打开全局搜索（03 §5）。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setSearchOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // 搜索结果跳转（PRD D2）：定位到对应工作区/导图/会话及具体条目，目标高亮闪烁。
+  const handleSearchNavigate = (t: SearchNavigateTarget) => {
+    setSearchOpen(false)
+    setOpen(workspaces.find((w) => w.id === t.workspaceId) ?? null)
+    setMindmapHighlight(null)
+    setSessionJump(null)
+    if (t.kind === 'mindmap') {
+      setOpenSessionId(null)
+      setMindmapHighlight(t.nodeId)
+      setOpenMindmapId(t.mindmapId)
+    } else if (t.kind === 'entry') {
+      setOpenMindmapId(null)
+      // 条目按 seq 分页：估算目标条目所在页（删除造成的 seq 空洞可能偏移，未命中时静默忽略）
+      setSessionJump({ page: Math.floor((t.seq - 1) / PAGE_SIZE) + 1, entryId: t.entryId })
+      setOpenSessionId(t.sessionId)
+    } else {
+      setOpenMindmapId(null)
+      setOpenSessionId(t.sessionId)
+    }
+  }
 
   const handleCreate = async () => {
     const trimmed = name.trim()
@@ -36,7 +74,14 @@ export default function App() {
         ) : (
           <span className="version muted">后端未连接</span>
         )}
+        <button className="header-search" onClick={() => setSearchOpen(true)}>
+          🔍 搜索（Ctrl+K）
+        </button>
       </header>
+
+      {searchOpen && (
+        <SearchOverlay onClose={() => setSearchOpen(false)} onNavigate={handleSearchNavigate} />
+      )}
 
       {error && (
         <div className="error" role="alert">
@@ -46,9 +91,24 @@ export default function App() {
 
       <main className="content">
         {openMindmapId != null ? (
-          <MindMapEditor mindmapId={openMindmapId} onBack={() => setOpenMindmapId(null)} />
+          <MindMapEditor
+            mindmapId={openMindmapId}
+            highlightNodeId={mindmapHighlight}
+            onBack={() => {
+              setOpenMindmapId(null)
+              setMindmapHighlight(null)
+            }}
+          />
         ) : openSessionId != null ? (
-          <SessionView sessionId={openSessionId} onBack={() => setOpenSessionId(null)} />
+          <SessionView
+            sessionId={openSessionId}
+            initialPage={sessionJump?.page}
+            initialHighlightEntryId={sessionJump?.entryId}
+            onBack={() => {
+              setOpenSessionId(null)
+              setSessionJump(null)
+            }}
+          />
         ) : open ? (
           <WorkspaceHome
             ws={open}

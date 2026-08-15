@@ -23,6 +23,8 @@ export type MindmapNodeData = {
   position?: { x: number; y: number }
   /** 拖拽悬停时的候选落点（拖拽改层级高亮，03 §4）。 */
   hover?: boolean
+  /** 搜索跳转定位闪烁（PRD D2「跳转后目标高亮闪烁」）。 */
+  flash?: boolean
 }
 
 export type MindmapRFNode = Node<MindmapNodeData, 'mindmap'>
@@ -71,7 +73,7 @@ export function MindmapNode({ id, data, selected }: NodeProps<MindmapRFNode>) {
 
   return (
     <div
-      className={`mm-node${selected ? ' selected' : ''}${data.isRoot ? ' root' : ''}${data.hover ? ' drop-target' : ''}${data.sticky ? ' sticky' : ''} shape-${data.style.shape}${data.style.bold ? ' bold' : ''}`}
+      className={`mm-node${selected ? ' selected' : ''}${data.isRoot ? ' root' : ''}${data.hover ? ' drop-target' : ''}${data.sticky ? ' sticky' : ''}${data.flash ? ' flash' : ''} shape-${data.style.shape}${data.style.bold ? ' bold' : ''}`}
       style={{ '--node-bg': color.bg, '--node-border': color.border } as CSSProperties}
       onDoubleClick={(e) => {
         e.stopPropagation()

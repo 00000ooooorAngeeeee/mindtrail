@@ -134,3 +134,57 @@ export interface Session {
   entries?: Entry[]
   entryTotal?: number
 }
+
+// ---- 全局搜索（M4 任务一，04 §5 GET /search，结果按类型分组） ----
+
+export type SearchResultType = 'mindmap' | 'entry' | 'session'
+
+export const SEARCH_RESULT_TYPES: SearchResultType[] = ['mindmap', 'entry', 'session']
+
+export const SEARCH_RESULT_LABELS: Record<SearchResultType, string> = {
+  mindmap: '导图',
+  entry: '条目',
+  session: '会话',
+}
+
+/** 导图命中：nodeId 为命中的首个节点（D2 跳转定位）；snippet 由后端生成（04 §6.3）。 */
+export interface SearchMindmapHit {
+  id: number
+  workspaceId: number
+  workspaceName: string
+  name: string
+  snippet: string
+  nodeId: string | null
+  nodeCount: number
+  updatedAt?: string
+}
+
+/** 条目命中：seq 用于估算时间线所在页（D2 跳转定位）。 */
+export interface SearchEntryHit {
+  id: number
+  sessionId: number
+  workspaceId: number
+  workspaceName: string
+  sessionTitle: string
+  seq: number
+  type: EntryType
+  snippet: string
+  createdAt?: string
+}
+
+export interface SearchSessionHit {
+  id: number
+  workspaceId: number
+  workspaceName: string
+  title: string
+  status: 'active' | 'completed'
+  startedAt?: string | null
+  endedAt?: string | null
+}
+
+export interface SearchResults {
+  query: string
+  mindmaps: SearchMindmapHit[]
+  entries: SearchEntryHit[]
+  sessions: SearchSessionHit[]
+}

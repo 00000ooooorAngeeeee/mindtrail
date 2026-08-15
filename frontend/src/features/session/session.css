@@ -475,3 +475,17 @@
   gap: 8px;
   margin-top: 10px;
 }
+
+/* 搜索跳转定位闪烁（PRD D2「跳转后目标高亮闪烁」）：1s 呼吸 2 次后消失 */
+.entry-item.entry-flash {
+  animation: entry-flash 1s ease-in-out 2;
+}
+
+@keyframes entry-flash {
+  0%, 100% {
+    background: transparent;
+  }
+  50% {
+    background: rgba(79, 107, 255, 0.12);
+  }
+}

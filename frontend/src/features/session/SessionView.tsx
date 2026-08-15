@@ -29,17 +29,30 @@ import { useInfiniteScroll } from './useInfiniteScroll'
 import { formatTime } from './time'
 import './session.css'
 
-const PAGE_SIZE = 50
+export const PAGE_SIZE = 50
 const GIT_COMMIT_PAGE_LIMIT = 50
 
 /**
- * 会话详情页（时间线，07 §6 任务二/三/四）：
+ * 会话详情页（时间线，07 §6 任务二/三/四 + M4 任务一搜索跳转）：
  * 头部（标题/状态/时间跨度/条目数 + 导出 Markdown + 结束会话）、垂直时间线（memo 化条目卡片：Markdown 渲染 +
  * 类型着色 + 图标 + 时间戳列，无限滚动每页 50）、底部常驻快速记录框（Enter 提交、Shift+Enter 换行、类型记忆、Ctrl+E 聚焦）、
  * 条目编辑/删除、commit 徽标点击打开详情弹层（PRD C3.5，含解绑）、
  * Git：5s 轮询新提交感知 + 未绑定缓冲 + 建议卡片（同会话最多 3 次提醒）+ Git 时间线面板（绑定/解绑）。
+ * 搜索跳转（PRD D2）：initialPage 定位条目所在页（按 seq 估算），initialHighlightEntryId 命中后滚动并闪烁。
  */
-export function SessionView({ sessionId, onBack }: { sessionId: number; onBack: () => void }) {
+export function SessionView({
+  sessionId,
+  onBack,
+  initialPage = 1,
+  initialHighlightEntryId = null,
+}: {
+  sessionId: number
+  onBack: () => void
+  /** 搜索跳转：初始加载页（按条目 seq 估算，PAGE_SIZE 分页）。 */
+  initialPage?: number
+  /** 搜索跳转：加载后闪烁定位的目标条目 id；本页不存在则静默忽略。 */
+  initialHighlightEntryId?: number | null
+}) {
   const [session, setSession] = useState<Session | null>(null)
   const [entries, setEntries] = useState<Entry[]>([])
   const [page, setPage] = useState(1)
@@ -54,6 +67,11 @@ export function SessionView({ sessionId, onBack }: { sessionId: number; onBack: 
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editType, setEditType] = useState<EntryType>('action')
   const [editContent, setEditContent] = useState('')
+
+  // 搜索跳转定位（PRD D2）：闪烁中的条目 id；highlightHandledRef 保证同一目标只处理一次。
+  const [flashEntryId, setFlashEntryId] = useState<number | null>(null)
+  const highlightHandledRef = useRef(false)
+  const highlightRowRef = useRef<HTMLLIElement | null>(null)
 
   const [completing, setCompleting] = useState(false)
   const [summaryDraft, setSummaryDraft] = useState('')
@@ -93,8 +111,20 @@ export function SessionView({ sessionId, onBack }: { sessionId: number; onBack: 
   )
 
   useEffect(() => {
-    void load(1)
-  }, [load])
+    void load(initialPage)
+  }, [load]) // eslint-disable-line react-hooks/exhaustive-deps -- initialPage 仅初始加载一次
+
+  // 搜索跳转定位：目标条目出现在已加载列表后滚动到视野并闪烁 2s。
+  useEffect(() => {
+    if (initialHighlightEntryId == null || highlightHandledRef.current) return
+    const found = entries.some((e) => e.id === initialHighlightEntryId)
+    if (!found) return
+    highlightHandledRef.current = true
+    setFlashEntryId(initialHighlightEntryId)
+    highlightRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const timer = setTimeout(() => setFlashEntryId(null), 2000)
+    return () => clearTimeout(timer)
+  }, [entries, initialHighlightEntryId])
 
   // Git 轮询（07 §6 任务三）：会话带仓库时拉取提交与绑定关系；
   // active 会话每 5s 轮询感知新提交（PRD C3.2），completed 会话仅拉取一次（04 §6.2「下次打开可继续检测」）。
@@ -451,7 +481,11 @@ export function SessionView({ sessionId, onBack }: { sessionId: number; onBack: 
       ) : (
         <ul className="entry-list">
           {entries.map((entry) => (
-            <li key={entry.id} className={`entry-item entry-type-${entry.type}`}>
+            <li
+              key={entry.id}
+              ref={entry.id === initialHighlightEntryId ? highlightRowRef : undefined}
+              className={`entry-item entry-type-${entry.type}${flashEntryId === entry.id ? ' entry-flash' : ''}`}
+            >
               <div className="entry-time-col">
                 <span className="entry-time">{formatTime(entry.createdAt)}</span>
                 <span className="entry-dot" aria-hidden="true" />

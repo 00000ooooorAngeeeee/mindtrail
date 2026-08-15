@@ -60,6 +60,7 @@ function buildNodes(
   childCount: Map<string, number>,
   selectedIds: string[],
   mode: MindmapMode,
+  flashId: string | null,
 ): MindmapRFNode[] {
   const out: MindmapRFNode[] = []
   for (const [id, pos] of positions) {
@@ -83,6 +84,8 @@ function buildNodes(
         // 画布模式：渲染连接手柄；position 供工具栏「加子节点」在节点旁落点。
         connectable: mode === 'canvas',
         position: pos,
+        // 搜索跳转定位（PRD D2）：目标节点闪烁提示。
+        flash: id === flashId,
       },
     })
   }
@@ -153,7 +156,16 @@ function findDropTarget(
   return best
 }
 
-export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack: () => void }) {
+export function MindMapEditor({
+  mindmapId,
+  onBack,
+  highlightNodeId = null,
+}: {
+  mindmapId: number
+  onBack: () => void
+  /** 搜索跳转定位（PRD D2）：加载后选中该节点并闪烁。 */
+  highlightNodeId?: string | null
+}) {
   const load = useMindmapStore((s) => s.load)
   const select = useMindmapStore((s) => s.select)
   const setSelectedIds = useMindmapStore((s) => s.setSelectedIds)
@@ -188,6 +200,8 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
   const [zoom, setZoom] = useState(1)
   // 画布→树遇非树边时的三选一对话框（07 §5）。
   const [dialogOpen, setDialogOpen] = useState(false)
+  // 搜索跳转定位（PRD D2）：闪烁中的节点 id，闪烁结束清空。
+  const [flashId, setFlashId] = useState<string | null>(null)
   const dragging = useRef(false)
   const dropTargetRef = useRef<string | null>(null)
   const fittedRef = useRef(false)
@@ -210,6 +224,23 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
     return m
   }, [content, mode])
 
+  // 搜索跳转定位：内容就绪后选中目标节点、居中视口并闪烁 2s（PRD D2「跳转后目标高亮闪烁」）。
+  // highlightedRef 保证同一目标节点只处理一次（内容/坐标变化不重复触发）。
+  const highlightedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!highlightNodeId || !content || !content.nodes[highlightNodeId]) return
+    if (highlightedRef.current === highlightNodeId) return
+    highlightedRef.current = highlightNodeId
+    select(highlightNodeId)
+    setFlashId(highlightNodeId)
+    const pos = positions.get(highlightNodeId)
+    if (pos) {
+      rfRef.current?.setCenter(pos.x + NODE_W / 2, pos.y + NODE_H / 2, { zoom: 1, duration: 300 })
+    }
+    const timer = setTimeout(() => setFlashId(null), 2000)
+    return () => clearTimeout(timer)
+  }, [content, positions, highlightNodeId, select])
+
   const childCount = useMemo(() => {
     const m = new Map<string, number>()
     if (!content) return m
@@ -222,7 +253,7 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
   // 布局/内容变化时同步节点与边（拖拽中跳过，避免打断拖拽）。
   useEffect(() => {
     if (!content || dragging.current) return
-    setNodes(buildNodes(content, positions, childCount, selectedIds, mode))
+    setNodes(buildNodes(content, positions, childCount, selectedIds, mode, flashId))
     // 函数式更新保留当前边选中态：点击选中边会联动取消节点选中（selectedIds 变化触发本 effect），
     // 直接重建会把刚选中的边洗掉，导致「选中边按 Delete 断开」失效（人工验收反馈修复）。
     setEdges((current) =>
@@ -233,7 +264,7 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
       // 双 rAF 等 React Flow 完成首轮测量后再 fit，避免按 0 尺寸计算。
       requestAnimationFrame(() => requestAnimationFrame(() => void rfRef.current?.fitView({ padding: 0.2 })))
     }
-  }, [content, positions, childCount, selectedIds, mode, setNodes, setEdges])
+  }, [content, positions, childCount, selectedIds, mode, flashId, setNodes, setEdges])
 
   // 切换模式后坐标来源变化（平铺/重排），重新适应视图。
   useEffect(() => {
