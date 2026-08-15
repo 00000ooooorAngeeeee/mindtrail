@@ -355,3 +355,123 @@
   color: #166534;
   cursor: pointer;
 }
+
+/* ---- 任务四：头部操作、Markdown 渲染、commit 详情弹层 ---- */
+.session-header-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* 条目卡片 GFM 渲染（06 §9：代码块/列表/引用/粗斜体） */
+.entry-md {
+  white-space: normal;
+}
+
+.entry-md > :first-child {
+  margin-top: 0;
+}
+
+.entry-md > :last-child {
+  margin-bottom: 0;
+}
+
+.entry-md p {
+  margin: 4px 0;
+}
+
+.entry-md ul,
+.entry-md ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+
+.entry-md pre {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 6px 10px;
+  overflow-x: auto;
+  font-size: 13px;
+}
+
+.entry-md code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 13px;
+  background: #f1f5f9;
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.entry-md pre code {
+  background: none;
+  padding: 0;
+}
+
+.entry-md blockquote {
+  margin: 4px 0;
+  padding-left: 10px;
+  border-left: 3px solid #cbd5e1;
+  color: #475569;
+}
+
+/* commit 详情弹层（PRD C3.5） */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: #fff;
+  border-radius: 12px;
+  padding: 14px 18px;
+  max-width: 560px;
+  width: calc(100% - 40px);
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.25);
+}
+
+.modal h3 {
+  margin: 0 0 8px;
+}
+
+.commit-detail-hash code {
+  word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  background: #f1f5f9;
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.commit-msg-full {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  margin: 4px 0;
+}
+
+.commit-files {
+  margin: 4px 0;
+  padding-left: 20px;
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}

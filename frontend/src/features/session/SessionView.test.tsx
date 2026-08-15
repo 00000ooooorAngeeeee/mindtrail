@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { SessionView } from './SessionView'
-import { getSession, updateSession } from '../../api/sessions'
+import { exportSessionMarkdown, getSession, updateSession } from '../../api/sessions'
 import { addEntry, deleteEntry, updateEntry } from '../../api/entries'
-import { bindCommits, getCommits, getSessionCommits, unbindCommit } from '../../api/git'
+import { bindCommits, getCommitDetail, getCommits, getSessionCommits, unbindCommit } from '../../api/git'
 import { MockIntersectionObserver } from '../../test/intersectionObserver'
 import { ENTRY_TYPE_STORAGE_KEY } from './typeMemory'
 import { gitSuggestKey } from './gitTimeline'
@@ -12,6 +12,7 @@ import type { Entry, GitCommit, Session } from '../../api/types'
 vi.mock('../../api/sessions', () => ({
   getSession: vi.fn(),
   updateSession: vi.fn(),
+  exportSessionMarkdown: vi.fn(),
 }))
 vi.mock('../../api/entries', () => ({
   addEntry: vi.fn(),
@@ -23,10 +24,12 @@ vi.mock('../../api/git', () => ({
   getSessionCommits: vi.fn(),
   bindCommits: vi.fn(),
   unbindCommit: vi.fn(),
+  getCommitDetail: vi.fn(),
 }))
 
 const getMock = vi.mocked(getSession)
 const updateSessionMock = vi.mocked(updateSession)
+const exportMock = vi.mocked(exportSessionMarkdown)
 const addMock = vi.mocked(addEntry)
 const updateEntryMock = vi.mocked(updateEntry)
 const deleteEntryMock = vi.mocked(deleteEntry)
@@ -34,6 +37,7 @@ const getCommitsMock = vi.mocked(getCommits)
 const getSessionCommitsMock = vi.mocked(getSessionCommits)
 const bindMock = vi.mocked(bindCommits)
 const unbindMock = vi.mocked(unbindCommit)
+const detailMock = vi.mocked(getCommitDetail)
 
 const H1 = '1'.repeat(40)
 const H2 = '2'.repeat(40)
@@ -83,6 +87,8 @@ describe('SessionView 会话详情页（时间线条目）', () => {
     getMock.mockResolvedValue(activeSession())
     getCommitsMock.mockResolvedValue([])
     getSessionCommitsMock.mockResolvedValue([])
+    detailMock.mockReset()
+    exportMock.mockReset()
   })
 
   afterEach(() => {
@@ -312,7 +318,7 @@ describe('SessionView 会话详情页（时间线条目）', () => {
 
     await waitFor(() => expect(bindMock).toHaveBeenCalledWith(12, [H2]))
     await waitFor(() => expect(screen.queryAllByText(/检测到新提交/).length).toBe(0))
-    expect(screen.getByTitle(`点击解绑 ${H2}`)).toHaveTextContent(H2.slice(0, 7))
+    expect(screen.getByTitle(`查看提交详情 ${H2}`)).toHaveTextContent(H2.slice(0, 7))
 
     // 绑定生效后继续轮询：不再重复弹出建议
     await act(async () => {
@@ -338,7 +344,7 @@ describe('SessionView 会话详情页（时间线条目）', () => {
     expect(state.seenHashes).toContain(H1)
   })
 
-  it('条目 commit 徽标：展示短 hash，点击确认后解绑', async () => {
+  it('条目 commit 徽标：展示短 hash，点击打开详情弹层（缓存优先）并支持解绑', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     const s = gitSession()
     s.entries = [
@@ -346,15 +352,89 @@ describe('SessionView 会话详情页（时间线条目）', () => {
       { id: 13, sessionId: 1, seq: 3, type: 'artifact', contentMd: '构建产物 13', tags: [], commits: [H1], createdAt: '2025-06-01T09:20:00' },
     ]
     getMock.mockResolvedValue(s)
+    // 提交在 Git 面板缓存中 → 弹层直接展示，不再调详情接口
+    getCommitsMock.mockResolvedValue([
+      commit(H1, 'feat: 缓存提交\n\n正文第二行', ['a.txt', 'b.txt']),
+    ])
+    getSessionCommitsMock.mockResolvedValue([{ entryId: 13, commitHash: H1, repoPath: 'D:/repo' }])
     unbindMock.mockResolvedValue(undefined)
     render(<SessionView sessionId={1} onBack={() => {}} />)
     await screen.findByText('构建产物 13')
 
-    const badge = screen.getByTitle(`点击解绑 ${H1}`)
+    const badge = screen.getByTitle(`查看提交详情 ${H1}`)
     expect(badge).toHaveTextContent(H1.slice(0, 7))
     fireEvent.click(badge)
 
+    const dialog = await screen.findByRole('dialog', { name: '提交详情' })
+    expect(within(dialog).getByText(H1)).toBeInTheDocument()
+    expect(within(dialog).getByText(/验证者/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/feat: 缓存提交/)).toBeInTheDocument()
+    expect(within(dialog).getByText('（2）')).toBeInTheDocument() // 变更文件数
+    expect(within(dialog).getByText('a.txt')).toBeInTheDocument()
+    expect(detailMock).not.toHaveBeenCalled() // 缓存命中
+
+    fireEvent.click(within(dialog).getByText('解绑'))
+
     await waitFor(() => expect(unbindMock).toHaveBeenCalledWith(13, H1))
-    await waitFor(() => expect(screen.queryByTitle(`点击解绑 ${H1}`)).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.queryByTitle(`查看提交详情 ${H1}`)).not.toBeInTheDocument()
+  })
+
+  it('commit 详情弹层：缓存未命中时走详情接口（绑定提交超出面板 50 条窗口）', async () => {
+    const s = gitSession()
+    s.entries = [
+      ...(s.entries ?? []),
+      { id: 13, sessionId: 1, seq: 3, type: 'artifact', contentMd: '构建产物 13', tags: [], commits: [H1], createdAt: '2025-06-01T09:20:00' },
+    ]
+    getMock.mockResolvedValue(s)
+    detailMock.mockResolvedValue(commit(H1, 'feat: 历史提交', ['old.txt']))
+    render(<SessionView sessionId={1} onBack={() => {}} />)
+    await screen.findByText('构建产物 13')
+
+    fireEvent.click(screen.getByTitle(`查看提交详情 ${H1}`))
+
+    const dialog = await screen.findByRole('dialog', { name: '提交详情' })
+    await waitFor(() => expect(detailMock).toHaveBeenCalledWith('D:/repo', H1))
+    expect(await within(dialog).findByText(/feat: 历史提交/)).toBeInTheDocument()
+    expect(within(dialog).getByText('old.txt')).toBeInTheDocument()
+  })
+
+  it('条目卡片 Markdown 渲染：粗体/列表/代码块（06 §9）', async () => {
+    const s = activeSession()
+    s.entries = [
+      ...(s.entries ?? []),
+      { id: 13, sessionId: 1, seq: 3, type: 'note', contentMd: '**加粗文本** 与\n\n- 列表项甲\n- 列表项乙\n\n```js\nconst x = 1\n```', tags: [], createdAt: '2025-06-01T09:20:00' },
+    ]
+    getMock.mockResolvedValue(s)
+    render(<SessionView sessionId={1} onBack={() => {}} />)
+
+    const strong = await screen.findByText('加粗文本')
+    expect(strong.tagName).toBe('STRONG')
+    expect(screen.getByText('列表项甲').tagName).toBe('LI')
+    expect(screen.getByText('const x = 1')).toBeInTheDocument()
+  })
+
+  it('导出 Markdown：调用导出接口并触发浏览器下载（03 §3.5 头部导出入口）', async () => {
+    // jsdom 未实现 createObjectURL/revokeObjectURL：直接装桩并还原
+    const origCreate = URL.createObjectURL
+    const origRevoke = URL.revokeObjectURL
+    const createSpy = vi.fn(() => 'blob:mock')
+    const revokeSpy = vi.fn()
+    URL.createObjectURL = createSpy
+    URL.revokeObjectURL = revokeSpy
+    try {
+      exportMock.mockResolvedValue('---\nformat: trailmind-session\n---')
+      render(<SessionView sessionId={1} onBack={() => {}} />)
+      await screen.findByText('测试会话')
+
+      fireEvent.click(screen.getByText('导出 Markdown'))
+
+      await waitFor(() => expect(exportMock).toHaveBeenCalledWith(1))
+      expect(createSpy).toHaveBeenCalled()
+      expect(revokeSpy).toHaveBeenCalled()
+    } finally {
+      URL.createObjectURL = origCreate
+      URL.revokeObjectURL = origRevoke
+    }
   })
 })

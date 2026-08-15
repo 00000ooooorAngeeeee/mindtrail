@@ -26,3 +26,8 @@ export function updateSession(
 export function deleteSession(id: number): Promise<void> {
   return del<void>(`/sessions/${id}`)
 }
+
+/** 会话导出 Markdown（严格 06 §4 协议；data 为 Markdown 文本）。 */
+export function exportSessionMarkdown(id: number): Promise<string> {
+  return get<string>(`/sessions/${id}/export/markdown`)
+}

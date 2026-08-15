@@ -23,6 +23,11 @@ export function getSessionCommits(sessionId: number): Promise<BoundCommit[]> {
   return get<BoundCommit[]>(`/sessions/${sessionId}/commits`)
 }
 
+/** 单个提交详情（PRD C3.5 详情弹层：hash/作者/时间/完整 message/变更文件）。 */
+export function getCommitDetail(path: string, hash: string): Promise<GitCommit> {
+  return get<GitCommit>(`/git/repo/commits/${encodeURIComponent(hash)}?path=${encodeURIComponent(path)}`)
+}
+
 /** 绑定提交到条目（04 §5 POST /entries/{id}/commits）：返回本次新增绑定的 hash。 */
 export function bindCommits(entryId: number, commitHashes: string[]): Promise<string[]> {
   return post<string[]>(`/entries/${entryId}/commits`, { commitHashes })

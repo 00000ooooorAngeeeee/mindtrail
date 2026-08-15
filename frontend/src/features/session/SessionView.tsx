@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { addEntry, deleteEntry, updateEntry } from '../../api/entries'
-import { bindCommits, getCommits, getSessionCommits, unbindCommit } from '../../api/git'
-import { getSession, updateSession } from '../../api/sessions'
+import { bindCommits, getCommitDetail, getCommits, getSessionCommits, unbindCommit } from '../../api/git'
+import { exportSessionMarkdown, getSession, updateSession } from '../../api/sessions'
 import {
   ENTRY_TYPE_ICONS,
   ENTRY_TYPE_LABELS,
@@ -12,6 +12,8 @@ import {
   type GitCommit,
   type Session,
 } from '../../api/types'
+import { CommitDetailModal } from './CommitDetailModal'
+import { EntryCard } from './EntryCard'
 import {
   GIT_POLL_INTERVAL_MS,
   dismissSuggestion,
@@ -31,12 +33,11 @@ const PAGE_SIZE = 50
 const GIT_COMMIT_PAGE_LIMIT = 50
 
 /**
- * 会话详情页（时间线，07 §6 任务二 + 任务三）：
- * 头部（标题/状态/时间跨度/条目数）、垂直时间线（类型着色 + 图标 + 时间戳列，无限滚动每页 50）、
- * 底部常驻快速记录框（Enter 提交、Shift+Enter 换行、类型记忆、Ctrl+E 聚焦）、
- * 条目编辑/删除、结束会话（总结写入 review 条目）、
- * Git（任务三）：5s 轮询新提交感知 + 未绑定缓冲 + 建议卡片（同会话最多 3 次提醒）、
- * 会话 Git 时间线面板（绑定/解绑）、条目 commit 徽标。
+ * 会话详情页（时间线，07 §6 任务二/三/四）：
+ * 头部（标题/状态/时间跨度/条目数 + 导出 Markdown + 结束会话）、垂直时间线（memo 化条目卡片：Markdown 渲染 +
+ * 类型着色 + 图标 + 时间戳列，无限滚动每页 50）、底部常驻快速记录框（Enter 提交、Shift+Enter 换行、类型记忆、Ctrl+E 聚焦）、
+ * 条目编辑/删除、commit 徽标点击打开详情弹层（PRD C3.5，含解绑）、
+ * Git：5s 轮询新提交感知 + 未绑定缓冲 + 建议卡片（同会话最多 3 次提醒）+ Git 时间线面板（绑定/解绑）。
  */
 export function SessionView({ sessionId, onBack }: { sessionId: number; onBack: () => void }) {
   const [session, setSession] = useState<Session | null>(null)
@@ -56,6 +57,7 @@ export function SessionView({ sessionId, onBack }: { sessionId: number; onBack: 
 
   const [completing, setCompleting] = useState(false)
   const [summaryDraft, setSummaryDraft] = useState('')
+  const [exporting, setExporting] = useState(false)
 
   // Git 状态（任务三）：提交列表、绑定关系、建议卡片（提交 hash）、面板开关、防重叠轮询标志
   const [gitCommits, setGitCommits] = useState<GitCommit[]>([])
@@ -65,6 +67,11 @@ export function SessionView({ sessionId, onBack }: { sessionId: number; onBack: 
   const [gitError, setGitError] = useState<string | null>(null)
   const [binding, setBinding] = useState(false)
   const pollingRef = useRef(false)
+
+  // commit 详情弹层（任务四）：{ entryId, hash } 定位绑定关系；detailData 为展示数据
+  const [detailTarget, setDetailTarget] = useState<{ entryId: number; hash: string } | null>(null)
+  const [detailData, setDetailData] = useState<GitCommit | null>(null)
+  const [detailError, setDetailError] = useState<string | null>(null)
 
   const load = useCallback(
     async (p: number) => {
@@ -177,6 +184,78 @@ export function SessionView({ sessionId, onBack }: { sessionId: number; onBack: 
     }
   }
 
+  /** 打开 commit 详情弹层（PRD C3.5）：优先用 Git 面板缓存，缓存没有（绑定提交超出 50 条窗口）再走详情接口。 */
+  const openCommitDetail = useCallback(
+    (entry: Entry, hash: string) => {
+      setDetailTarget({ entryId: entry.id, hash })
+      setDetailError(null)
+      const cached = gitCommits.find((c) => c.hash === hash)
+      if (cached) {
+        setDetailData(cached)
+        return
+      }
+      const repoPath = session?.repoPath
+      if (!repoPath) {
+        setDetailError('会话未关联 Git 仓库，无法读取提交详情')
+        setDetailData(null)
+        return
+      }
+      setDetailData(null)
+      getCommitDetail(repoPath, hash)
+        .then(setDetailData)
+        .catch((e: unknown) => {
+          setDetailError(e instanceof Error ? e.message : '读取提交详情失败')
+        })
+    },
+    [gitCommits, session?.repoPath],
+  )
+
+  const closeCommitDetail = useCallback(() => {
+    setDetailTarget(null)
+    setDetailData(null)
+    setDetailError(null)
+  }, [])
+
+  /** 弹层内解绑：确认 → 解绑 → 本地回填移除徽标 → 关闭弹层。 */
+  const unbindFromDetail = async () => {
+    if (!detailTarget) return
+    if (!confirm('解除该提交与条目的绑定？')) return
+    try {
+      await unbindCommit(detailTarget.entryId, detailTarget.hash)
+      setEntries((prev) =>
+        prev.map((e) =>
+          e.id === detailTarget.entryId
+            ? { ...e, commits: (e.commits ?? []).filter((h) => h !== detailTarget.hash) }
+            : e,
+        ),
+      )
+      setBoundCommits((prev) => prev.filter((b) => !(b.entryId === detailTarget.entryId && b.commitHash === detailTarget.hash)))
+      closeCommitDetail()
+    } catch (e) {
+      setDetailError(e instanceof Error ? e.message : '解绑失败')
+    }
+  }
+
+  /** 导出会话 Markdown（严格 06 §4，03 §3.5 头部导出入口）：下载为 <标题>.md。 */
+  const handleExport = async () => {
+    if (!session || exporting) return
+    setExporting(true)
+    try {
+      const md = await exportSessionMarkdown(sessionId)
+      const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${session.title}.md`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '导出失败')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   // Ctrl+E 聚焦快速记录框（03 §5 快捷键全集）
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -284,9 +363,12 @@ export function SessionView({ sessionId, onBack }: { sessionId: number; onBack: 
           {formatTime(session.startedAt)}–{completed ? formatTime(session.endedAt) : '进行中'} · 条目 {total} 条
           {session.repoPath ? ` · 仓库 ${session.repoPath}` : ''}
         </p>
-        {!completed && (
-          <button onClick={() => setCompleting(true)}>结束会话</button>
-        )}
+        <div className="session-header-actions">
+          <button onClick={() => void handleExport()} disabled={exporting}>
+            {exporting ? '导出中…' : '导出 Markdown'}
+          </button>
+          {!completed && <button onClick={() => setCompleting(true)}>结束会话</button>}
+        </div>
         {completing && (
           <div className="complete-panel">
             <textarea
@@ -374,15 +456,15 @@ export function SessionView({ sessionId, onBack }: { sessionId: number; onBack: 
                 <span className="entry-time">{formatTime(entry.createdAt)}</span>
                 <span className="entry-dot" aria-hidden="true" />
               </div>
-              <div className="entry-card">
-                <div className="entry-meta">
-                  <span className="entry-icon" aria-hidden="true">
-                    {ENTRY_TYPE_ICONS[entry.type]}
-                  </span>
-                  <span className="entry-chip">{ENTRY_TYPE_LABELS[entry.type]}</span>
-                  <span className="entry-seq">#{entry.seq}</span>
-                </div>
-                {editingId === entry.id ? (
+              {editingId === entry.id ? (
+                <div className="entry-card">
+                  <div className="entry-meta">
+                    <span className="entry-icon" aria-hidden="true">
+                      {ENTRY_TYPE_ICONS[entry.type]}
+                    </span>
+                    <span className="entry-chip">{ENTRY_TYPE_LABELS[entry.type]}</span>
+                    <span className="entry-seq">#{entry.seq}</span>
+                  </div>
                   <div className="entry-edit">
                     <select
                       aria-label="编辑类型"
@@ -403,49 +485,19 @@ export function SessionView({ sessionId, onBack }: { sessionId: number; onBack: 
                     <button onClick={() => void submitEdit(entry)}>保存</button>
                     <button onClick={() => setEditingId(null)}>取消</button>
                   </div>
-                ) : (
-                  <>
-                    <pre className="entry-content">{entry.contentMd}</pre>
-                    {entry.tags && entry.tags.length > 0 && (
-                      <div className="entry-tags">
-                        {entry.tags.map((t) => (
-                          <span key={t} className="tag-chip">
-                            {t}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {entry.commits && entry.commits.length > 0 && (
-                      <div className="entry-commits">
-                        {entry.commits.map((h) => (
-                          <button
-                            key={h}
-                            className="commit-badge"
-                            title={`点击解绑 ${h}`}
-                            onClick={() => void handleUnbind(entry.id, h)}
-                          >
-                            {shortHash(h)}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    <div className="entry-actions">
-                      <button
-                        onClick={() => {
-                          setEditingId(entry.id)
-                          setEditType(entry.type)
-                          setEditContent(entry.contentMd)
-                        }}
-                      >
-                        编辑
-                      </button>
-                      <button className="danger" onClick={() => void handleDelete(entry)}>
-                        删除
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
+                </div>
+              ) : (
+                <EntryCard
+                  entry={entry}
+                  onEdit={(e) => {
+                    setEditingId(e.id)
+                    setEditType(e.type)
+                    setEditContent(e.contentMd)
+                  }}
+                  onDelete={(e) => void handleDelete(e)}
+                  onCommitClick={(e, hash) => openCommitDetail(e, hash)}
+                />
+              )}
             </li>
           ))}
         </ul>
@@ -489,6 +541,15 @@ export function SessionView({ sessionId, onBack }: { sessionId: number; onBack: 
           </button>
         </div>
       </div>
+
+      {detailTarget && (
+        <CommitDetailModal
+          commit={detailData}
+          error={detailError}
+          onClose={closeCommitDetail}
+          onUnbind={() => void unbindFromDetail()}
+        />
+      )}
     </section>
   )
 }
