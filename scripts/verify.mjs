@@ -1,4 +1,5 @@
-// 验收冒烟（docs/10 §10/§12 起）：/health → schema 表齐全 → workspace 往返 → mindmap 往返（M2 总验收补充）→ 输出 ALL PASS。
+// 验收冒烟（docs/10 §10/§12 起）：/health → schema 表齐全 → workspace 往返 → mindmap 往返（M2 总验收补充）
+// → session/entry 往返（M3 任务一：start_head、seq 1/2/3、标签、分页、编辑、结束写 review、追加限制、级联删除）→ 输出 ALL PASS。
 // 仅依赖 Node 内建（http/child_process），无第三方依赖。前置：后端已在 127.0.0.1:17860 运行、MySQL 可连（DB_PASS/MYSQL_PWD）。
 import http from 'node:http'
 import path from 'node:path'
@@ -241,8 +242,111 @@ export async function runChecks(deps = {}) {
     results.push({ ok: false, name: 'mindmap 往返', error: e.message })
   }
 
-  // 5. workspace 级联删除（连同第 4 步创建的导图）
+  // 5. session/entry 往返（M3 任务一）：开始（start_head）→ 条目追加（seq 1/2/3 + 标签）→ 详情分页 → 编辑 →
+  //    非法类型 400 → 结束（review 条目 + summary）→ 结束后追加限制 → 删除条目（关联清理）→ 删除会话（级联）
+  let sessionId = null
   try {
+    if (!workspaceId) throw new Error('依赖第 3 步的 workspace id')
+    const created = await request(`${BASE}/api/v1/workspaces/${workspaceId}/sessions`, {
+      method: 'POST',
+      body: { title: '验收会话' },
+    })
+    sessionId = created?.json?.data?.id
+    if (created?.json?.code !== 0 || !sessionId) throw new Error(`会话创建失败：${JSON.stringify(created?.json)}`)
+    if (created?.json?.data?.status !== 'active') throw new Error('新会话状态应为 active')
+    if (created?.json?.data?.startHead != null) throw new Error('无仓库会话 start_head 应为 null')
+
+    const add1 = await request(`${BASE}/api/v1/sessions/${sessionId}/entries`, {
+      method: 'POST',
+      body: { type: 'goal', contentMd: '目标', tags: ['验收标签'] },
+    })
+    const add2 = await request(`${BASE}/api/v1/sessions/${sessionId}/entries`, {
+      method: 'POST',
+      body: { type: 'action', contentMd: '动作' },
+    })
+    const add3 = await request(`${BASE}/api/v1/sessions/${sessionId}/entries`, {
+      method: 'POST',
+      body: { type: 'test', contentMd: '验证' },
+    })
+    const seqs = [add1?.json?.data?.seq, add2?.json?.data?.seq, add3?.json?.data?.seq]
+    if (seqs.join(',') !== '1,2,3') throw new Error(`seq 应为 1/2/3，实际 ${seqs.join(',')}`)
+    if (add1?.json?.data?.tags?.[0] !== '验收标签') throw new Error('条目标签未回填')
+
+    const page1 = await request(`${BASE}/api/v1/sessions/${sessionId}?page=1&size=2`)
+    const page2 = await request(`${BASE}/api/v1/sessions/${sessionId}?page=2&size=2`)
+    if (page1?.json?.data?.entries?.length !== 2 || page1?.json?.data?.entryTotal !== 3) {
+      throw new Error(`第一页分页错误：${JSON.stringify(page1?.json?.data)}`)
+    }
+    if (page2?.json?.data?.entries?.[0]?.seq !== 3) throw new Error('第二页应为 seq=3')
+
+    const edited = await request(`${BASE}/api/v1/entries/${add2?.json?.data?.id}`, {
+      method: 'PUT',
+      body: { contentMd: '改后' },
+    })
+    if (edited?.json?.data?.contentMd !== '改后') throw new Error('条目编辑未生效')
+
+    const bad = await request(`${BASE}/api/v1/sessions/${sessionId}/entries`, {
+      method: 'POST',
+      body: { type: 'todo', contentMd: 'x' },
+    })
+    if (bad?.json?.code !== 400) throw new Error('非法条目类型应返回 400')
+
+    const done = await request(`${BASE}/api/v1/sessions/${sessionId}`, {
+      method: 'PATCH',
+      body: { status: 'completed', summary: '验收总结' },
+    })
+    if (done?.json?.code !== 0 || done?.json?.data?.status !== 'completed' || !done?.json?.data?.endedAt) {
+      throw new Error(`结束会话失败：${JSON.stringify(done?.json)}`)
+    }
+    const detail = await request(`${BASE}/api/v1/sessions/${sessionId}`)
+    const last = detail?.json?.data?.entries?.at(-1)
+    if (last?.type !== 'review' || last?.contentMd !== '验收总结') throw new Error('结束总结未写入 review 条目')
+
+    const blocked = await request(`${BASE}/api/v1/sessions/${sessionId}/entries`, {
+      method: 'POST',
+      body: { type: 'action', contentMd: 'x' },
+    })
+    if (blocked?.json?.code !== 400) throw new Error('已结束会话追加 action 应被拒绝')
+    const note = await request(`${BASE}/api/v1/sessions/${sessionId}/entries`, {
+      method: 'POST',
+      body: { type: 'note', contentMd: '备注' },
+    })
+    if (note?.json?.code !== 0) throw new Error('已结束会话追加 note 应允许')
+
+    const delEntry = await request(`${BASE}/api/v1/entries/${add1?.json?.data?.id}`, { method: 'DELETE' })
+    if (delEntry?.json?.code !== 0) throw new Error('删除条目失败')
+    const tagLeft = await mysql(
+      `SELECT COUNT(*) FROM trailmind.entry_tag WHERE entry_id=${add1?.json?.data?.id}`,
+      deps,
+    )
+    if (tagLeft !== '0') throw new Error(`删除条目后 entry_tag 残留 ${tagLeft}`)
+
+    const delSession = await request(`${BASE}/api/v1/sessions/${sessionId}`, { method: 'DELETE' })
+    if (delSession?.json?.code !== 0) throw new Error('删除会话失败')
+    const entryLeft = await mysql(
+      `SELECT COUNT(*) FROM trailmind.entry WHERE session_id=${sessionId}`,
+      deps,
+    )
+    if (entryLeft !== '0') throw new Error(`删除会话后条目残留 ${entryLeft}`)
+    sessionId = null
+
+    results.push({
+      ok: true,
+      name: 'session 往返（start_head/seq 1-3/标签/分页/编辑/结束写 review/追加限制/级联删除）',
+    })
+  } catch (e) {
+    results.push({ ok: false, name: 'session 往返', error: e.message })
+  }
+
+  // 6. workspace 级联删除（连同第 4 步创建的导图 + 本步补建的会话与标签）
+  try {
+    // 补建一个会话，验证工作区删除时会话/标签级联（条目级联见第 5 步）
+    const s2 = await request(`${BASE}/api/v1/workspaces/${workspaceId}/sessions`, {
+      method: 'POST',
+      body: { title: '级联会话' },
+    })
+    if (s2?.json?.code !== 0) throw new Error(`补建会话失败：${JSON.stringify(s2?.json)}`)
+
     const deleted = await request(`${BASE}/api/v1/workspaces/${workspaceId}`, { method: 'DELETE' })
     if (deleted?.json?.code !== 0) throw new Error(`删除失败：${JSON.stringify(deleted?.json)}`)
     const leftovers = await mysql(
@@ -250,7 +354,17 @@ export async function runChecks(deps = {}) {
       deps,
     )
     if (leftovers !== '0') throw new Error(`级联删除后残留 ${leftovers} 张导图`)
-    results.push({ ok: true, name: 'workspace 级联删除（导图随之清理）' })
+    const sessionLeft = await mysql(
+      `SELECT COUNT(*) FROM trailmind.session WHERE workspace_id=${workspaceId}`,
+      deps,
+    )
+    if (sessionLeft !== '0') throw new Error(`级联删除后残留 ${sessionLeft} 个会话`)
+    const tagLeftover = await mysql(
+      `SELECT COUNT(*) FROM trailmind.tag WHERE workspace_id=${workspaceId}`,
+      deps,
+    )
+    if (tagLeftover !== '0') throw new Error(`级联删除后残留 ${tagLeftover} 个标签`)
+    results.push({ ok: true, name: 'workspace 级联删除（导图/会话/标签随之清理）' })
   } catch (e) {
     results.push({ ok: false, name: 'workspace 级联删除', error: e.message })
   }
