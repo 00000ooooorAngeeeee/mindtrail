@@ -1,8 +1,8 @@
 // 验收冒烟脚本关键逻辑单测（node:test，无第三方依赖）。
-// 覆盖纯决策函数：缺失表检测、通过/失败汇总（docs/08 §6 DoD「关键逻辑补单测」）。
+// 覆盖纯决策函数：缺失表检测、通过/失败汇总、保存内容比对（docs/08 §6 DoD「关键逻辑补单测」）。
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { EXPECTED_TABLES, missingTables, summarize } from '../verify.mjs'
+import { EXPECTED_TABLES, missingTables, summarize, checkSavedContent } from '../verify.mjs'
 
 test('EXPECTED_TABLES：固定 8 张表，与 schema.sql 一致', () => {
   assert.strictEqual(EXPECTED_TABLES.length, 8)
@@ -25,7 +25,7 @@ test('summarize：全部通过输出 ALL PASS 且 pass=true', () => {
     { ok: true, name: 'B' },
   ])
   assert.strictEqual(pass, true)
-  assert.match(message, /M0 SMOKE: ALL PASS/)
+  assert.match(message, /SMOKE: ALL PASS/)
   assert.match(message, /✓ A/)
 })
 
@@ -35,6 +35,69 @@ test('summarize：任一失败输出 FAILED 且 pass=false，含失败项', () =
     { ok: false, name: 'B', error: '原因' },
   ])
   assert.strictEqual(pass, false)
-  assert.match(message, /M0 SMOKE: FAILED/)
+  assert.match(message, /SMOKE: FAILED/)
   assert.match(message, /✗ B — 原因/)
+})
+
+const savedFixture = () =>
+  JSON.stringify({
+    version: 1,
+    rootNodeId: 'n1',
+    nodes: {
+      n1: {
+        id: 'n1',
+        text: '根',
+        style: { color: 'indigo', bold: true, shape: 'diamond' },
+        parentId: null,
+        layout: { x: 120, y: 80 },
+        collapsed: false,
+        sticky: false,
+      },
+      n2: {
+        id: 'n2',
+        text: '',
+        style: { color: 'amber', bold: false, shape: 'rounded' },
+        parentId: 'n1',
+        layout: { x: 900, y: 60 },
+        collapsed: false,
+        sticky: true,
+      },
+    },
+    edges: [{ id: 'e1', source: 'n1', target: 'n2', type: 'free', label: '自由连线' }],
+  })
+
+test('checkSavedContent：坐标/样式/便签/自由边全部一致返回 ok', () => {
+  const r = checkSavedContent(savedFixture(), {
+    nodeCount: 2,
+    nodes: {
+      n1: { layout: { x: 120, y: 80 }, style: { color: 'indigo', bold: true, shape: 'diamond' }, sticky: false },
+      n2: { layout: { x: 900, y: 60 }, sticky: true },
+    },
+    edges: [{ id: 'e1', type: 'free', source: 'n1', target: 'n2', label: '自由连线' }],
+  })
+  assert.strictEqual(r.ok, true)
+})
+
+test('checkSavedContent：非法 JSON 返回失败', () => {
+  const r = checkSavedContent('{{{', { nodeCount: 1, nodes: {}, edges: [] })
+  assert.strictEqual(r.ok, false)
+  assert.match(r.error, /不是合法 JSON/)
+})
+
+test('checkSavedContent：坐标漂移返回失败并指明节点', () => {
+  const c = JSON.parse(savedFixture())
+  c.nodes.n1.layout.x = 121
+  const r = checkSavedContent(c, {
+    nodeCount: 2,
+    nodes: { n1: { layout: { x: 120, y: 80 } }, n2: { layout: { x: 900, y: 60 } } },
+    edges: [{ id: 'e1', type: 'free', source: 'n1', target: 'n2' }],
+  })
+  assert.strictEqual(r.ok, false)
+  assert.match(r.error, /n1 layout/)
+})
+
+test('checkSavedContent：节点数不符返回失败', () => {
+  const r = checkSavedContent(savedFixture(), { nodeCount: 1, nodes: {}, edges: [] })
+  assert.strictEqual(r.ok, false)
+  assert.match(r.error, /节点数/)
 })
