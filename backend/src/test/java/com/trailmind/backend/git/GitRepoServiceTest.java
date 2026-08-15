@@ -1,6 +1,7 @@
 package com.trailmind.backend.git;
 
 import com.trailmind.backend.common.BadRequestException;
+import com.trailmind.backend.common.NotFoundException;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.PersonIdent;
 import org.eclipse.jgit.revwalk.RevCommit;
@@ -208,5 +209,37 @@ class GitRepoServiceTest {
     void hasCommit_invalid_repo_throws() {
         assertThrows(BadRequestException.class,
                 () -> service.hasCommit(tempDir.resolve("no-repo2").toString(), "a".repeat(40)));
+    }
+
+    // ---------- commitDetail ----------
+
+    @Test
+    void commitDetail_returns_full_info() throws Exception {
+        List<String> hashes = initRepoWithCommits("detail-repo", 2);
+        String path = tempDir.resolve("detail-repo").toString();
+
+        GitRepoService.CommitInfo c = service.commitDetail(path, hashes.get(1));
+
+        assertEquals(hashes.get(1), c.hash());
+        assertEquals("提交 1", c.message());
+        assertEquals("验证者", c.author());
+        assertEquals("verify@trailmind.local", c.authorEmail());
+        assertNotNull(c.time());
+        assertEquals(List.of("file1.txt"), c.files());
+    }
+
+    @Test
+    void commitDetail_unknown_hash_throws_404() throws Exception {
+        List<String> hashes = initRepoWithCommits("detail2-repo", 1);
+        String path = tempDir.resolve("detail2-repo").toString();
+
+        assertThrows(NotFoundException.class, () -> service.commitDetail(path, "a".repeat(40)));
+        assertTrue(service.commitDetail(path, hashes.get(0)).hash().equals(hashes.get(0)));
+    }
+
+    @Test
+    void commitDetail_invalid_repo_throws() {
+        assertThrows(BadRequestException.class,
+                () -> service.commitDetail(tempDir.resolve("no-repo3").toString(), "a".repeat(40)));
     }
 }

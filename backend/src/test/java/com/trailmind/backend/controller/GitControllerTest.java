@@ -99,4 +99,20 @@ class GitControllerTest {
 
         verify(gitRepoService).commits(eq("D:/repo"), eq(null), eq(null), any());
     }
+
+    @Test
+    void commitDetail_routes_to_single_commit() throws Exception {
+        LocalDateTime time = LocalDateTime.of(2025, 6, 1, 9, 0, 0);
+        when(gitRepoService.commitDetail("D:/repo", "a".repeat(40)))
+                .thenReturn(new GitRepoService.CommitInfo(
+                        "a".repeat(40), "验证者", "v@trailmind.local", time, "完整提交信息", List.of("x.txt", "y.txt")));
+
+        mockMvc.perform(get("/api/v1/git/repo/commits/{hash}", "a".repeat(40)).param("path", "D:/repo"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.hash").value("a".repeat(40)))
+                .andExpect(jsonPath("$.data.files[1]").value("y.txt"));
+
+        verify(gitRepoService).commitDetail("D:/repo", "a".repeat(40));
+    }
 }

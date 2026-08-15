@@ -1,6 +1,7 @@
 package com.trailmind.backend.git;
 
 import com.trailmind.backend.common.BadRequestException;
+import com.trailmind.backend.common.NotFoundException;
 import org.eclipse.jgit.errors.IncorrectObjectTypeException;
 import org.eclipse.jgit.errors.MissingObjectException;
 import org.eclipse.jgit.lib.ObjectId;
@@ -90,6 +91,23 @@ public class GitRepoService {
                 return true;
             } catch (MissingObjectException | IncorrectObjectTypeException e) {
                 return false;
+            }
+        } catch (IOException | IllegalArgumentException e) {
+            throw new BadRequestException("路径不是有效的 Git 仓库：" + path, e);
+        }
+    }
+
+    /** 单个提交详情（M3 任务四 commit 详情弹层，PRD C3.5：hash/作者/时间/完整 message/变更文件列表）。 */
+    public CommitInfo commitDetail(String path, String hash) {
+        try (Repository repo = open(path)) {
+            ObjectId id = repo.resolve(hash);
+            if (id == null) {
+                throw new NotFoundException("提交不存在：" + hash);
+            }
+            try (RevWalk walk = new RevWalk(repo)) {
+                return toCommitInfo(repo, walk.parseCommit(id));
+            } catch (MissingObjectException | IncorrectObjectTypeException e) {
+                throw new NotFoundException("提交不存在：" + hash);
             }
         } catch (IOException | IllegalArgumentException e) {
             throw new BadRequestException("路径不是有效的 Git 仓库：" + path, e);
