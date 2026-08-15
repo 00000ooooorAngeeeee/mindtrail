@@ -585,6 +585,97 @@ export async function runChecks(deps = {}) {
     }
   }
 
+  // 6.6 标签往返（M4 任务二）：创建（重复 400）→ 条目打标签 → 列表计数 → 重命名（条目读回新名=全局生效）→
+  //     按标签筛（含会话内过滤）→ 合并（条目重挂目标、源删除）→ 删除（entry_tag 级联清理）
+  try {
+    if (!workspaceId) throw new Error('依赖第 3 步的 workspace id')
+    const tagKw = `标验${process.pid}${Date.now()}`
+    const t1 = await request(`${BASE}/api/v1/tags`, {
+      method: 'POST',
+      body: { workspaceId, name: `${tagKw}甲` },
+    })
+    const t2 = await request(`${BASE}/api/v1/tags`, {
+      method: 'POST',
+      body: { workspaceId, name: `${tagKw}乙` },
+    })
+    const t1Id = t1?.json?.data?.id
+    const t2Id = t2?.json?.data?.id
+    if (t1?.json?.code !== 0 || t2?.json?.code !== 0 || !t1Id || !t2Id) {
+      throw new Error(`标签创建失败：${JSON.stringify(t1?.json)} / ${JSON.stringify(t2?.json)}`)
+    }
+    const dup = await request(`${BASE}/api/v1/tags`, { method: 'POST', body: { workspaceId, name: `${tagKw}甲` } })
+    if (dup?.json?.code !== 400) throw new Error('重复标签应返回 400')
+
+    const tsess = await request(`${BASE}/api/v1/workspaces/${workspaceId}/sessions`, {
+      method: 'POST',
+      body: { title: '标签验收会话' },
+    })
+    const tsid = tsess?.json?.data?.id
+    if (tsess?.json?.code !== 0 || !tsid) throw new Error('标签会话创建失败')
+    const te = await request(`${BASE}/api/v1/sessions/${tsid}/entries`, {
+      method: 'POST',
+      body: { type: 'action', contentMd: '标签条目', tags: [`${tagKw}甲`, `${tagKw}乙`] },
+    })
+    if (te?.json?.code !== 0) throw new Error('打标签条目创建失败')
+
+    const tagsList = await request(`${BASE}/api/v1/tags?workspaceId=${workspaceId}`)
+    const t1row = tagsList?.json?.data?.find((t) => t.id === t1Id)
+    if (!t1row || t1row.entryCount !== 1) throw new Error(`标签计数错误：${JSON.stringify(t1row)}`)
+
+    // 重命名全局生效：条目读回新名
+    const renamed = await request(`${BASE}/api/v1/tags/${t1Id}`, {
+      method: 'PUT',
+      body: { name: `${tagKw}甲改` },
+    })
+    if (renamed?.json?.code !== 0 || renamed?.json?.data?.name !== `${tagKw}甲改`) {
+      throw new Error(`重命名失败：${JSON.stringify(renamed?.json)}`)
+    }
+    const tsessDetail = await request(`${BASE}/api/v1/sessions/${tsid}`)
+    const entryTags = tsessDetail?.json?.data?.entries?.[0]?.tags ?? []
+    if (!entryTags.includes(`${tagKw}甲改`)) throw new Error(`重命名未全局生效：${JSON.stringify(entryTags)}`)
+
+    // 按标签筛（会话内过滤命中 1 条，tagId 不存在的 404）
+    const filtered = await request(`${BASE}/api/v1/entries?tagId=${t1Id}&sessionId=${tsid}`)
+    if (filtered?.json?.data?.length !== 1 || filtered?.json?.data?.[0]?.sessionTitle !== '标签验收会话') {
+      throw new Error(`按标签筛错误：${JSON.stringify(filtered?.json)}`)
+    }
+    const missingTag = await request(`${BASE}/api/v1/entries?tagId=99999999`)
+    if (missingTag?.json?.code !== 404) throw new Error('不存在的标签筛条目应 404')
+
+    // 合并：乙合并进甲改 → 源删除、条目归目标
+    const merged = await request(`${BASE}/api/v1/tags/${t2Id}/merge`, {
+      method: 'POST',
+      body: { targetId: t1Id },
+    })
+    if (merged?.json?.code !== 0 || merged?.json?.data?.id !== t1Id) {
+      throw new Error(`合并失败：${JSON.stringify(merged?.json)}`)
+    }
+    const tagsAfter = await request(`${BASE}/api/v1/tags?workspaceId=${workspaceId}`)
+    const tagNames = (tagsAfter?.json?.data ?? []).map((t) => t.name)
+    if (tagNames.includes(`${tagKw}乙`)) throw new Error('合并后源标签应删除')
+    if (!tagNames.includes(`${tagKw}甲改`)) throw new Error('合并后目标标签应保留')
+    const afterFilter = await request(`${BASE}/api/v1/entries?tagId=${t1Id}`)
+    if (afterFilter?.json?.data?.length !== 1 || afterFilter?.json?.data?.[0]?.tags?.length !== 1) {
+      throw new Error(`合并后条目标签错误：${JSON.stringify(afterFilter?.json?.data)}`)
+    }
+
+    // 删除：entry_tag 级联清理
+    const delTag = await request(`${BASE}/api/v1/tags/${t1Id}`, { method: 'DELETE' })
+    if (delTag?.json?.code !== 0) throw new Error('删除标签失败')
+    const tagLeft = await mysql(
+      `SELECT COUNT(*) FROM trailmind.entry_tag WHERE tag_id=${t1Id}`,
+      deps,
+    )
+    if (tagLeft !== '0') throw new Error(`删除标签后 entry_tag 残留 ${tagLeft}`)
+
+    results.push({
+      ok: true,
+      name: '标签往返（创建/重复 400/计数/重命名全局生效/按标签筛/合并/删除级联）',
+    })
+  } catch (e) {
+    results.push({ ok: false, name: '标签往返', error: e.message })
+  }
+
   // 7. M3 总验收：10 条不同类型条目计时（单条 ≤10s，NFR）+ 会话 Markdown 导出往返（06 §4 解析 → 与库中数据逐一比对）
   let acceptSessionId = null
   try {
