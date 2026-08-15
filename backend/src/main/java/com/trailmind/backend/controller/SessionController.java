@@ -66,4 +66,9 @@ public class SessionController {
     public ApiResponse<String> exportMarkdown(@PathVariable Long id) {
         return ApiResponse.ok(exportService.exportMarkdown(id));
     }
+
+    @GetMapping("/sessions/{id}/export/json")
+    public ApiResponse<SessionExportService.SessionJsonExport> exportJson(@PathVariable Long id) {
+        return ApiResponse.ok(exportService.exportJson(id));
+    }
 }

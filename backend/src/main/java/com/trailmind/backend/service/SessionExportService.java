@@ -41,6 +41,9 @@ public class SessionExportService {
 
     private static final DateTimeFormatter HM = DateTimeFormatter.ofPattern("HH:mm");
 
+    /** JSON 导出时间：固定到秒（LocalDateTime.toString 会在秒为 0 时省略，机器协议需字段形态稳定）。 */
+    private static final DateTimeFormatter ISO_SECONDS = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
+
     private final SessionMapper sessionMapper;
     private final WorkspaceMapper workspaceMapper;
     private final EntryService entryService;
@@ -53,10 +56,7 @@ public class SessionExportService {
     }
 
     public String exportMarkdown(Long sessionId) {
-        Session s = sessionMapper.selectById(sessionId);
-        if (s == null) {
-            throw new NotFoundException("会话不存在");
-        }
+        Session s = requireSession(sessionId);
         Workspace ws = workspaceMapper.selectById(s.getWorkspaceId());
         List<Entry> entries = entryService.page(sessionId, 1, EXPORT_ENTRY_CAP).entries();
 
@@ -102,6 +102,69 @@ public class SessionExportService {
         return sb.toString();
     }
 
+    /**
+     * 导出会话为机器可读 JSON（M4 任务三，PRD C5）：格式标识 {@code trailmind-session-json}、version 1，
+     * 含完整会话字段 + 全部条目（类型/正文/标签/绑定提交/ISO-8601 时间），可直接被外部工具按 06 §4 附录协议解析。
+     * 与 Markdown 导出共用同一分页数据源，保证两种导出内容一致。
+     */
+    public SessionJsonExport exportJson(Long sessionId) {
+        Session s = requireSession(sessionId);
+        Workspace ws = workspaceMapper.selectById(s.getWorkspaceId());
+        List<Entry> entries = entryService.page(sessionId, 1, EXPORT_ENTRY_CAP).entries();
+
+        SessionJson sessionJson = new SessionJson(
+                s.getId(),
+                s.getTitle(),
+                s.getStatus(),
+                s.getWorkspaceId(),
+                ws == null ? null : ws.getName(),
+                s.getRepoPath(),
+                s.getStartHead(),
+                s.getEndHead(),
+                s.getSummary(),
+                fmtJson(s.getStartedAt()),
+                fmtJson(s.getEndedAt()),
+                fmtJson(s.getCreatedAt()),
+                fmtJson(s.getUpdatedAt()));
+        List<EntryJson> entryList = entries.stream()
+                .map(e -> new EntryJson(
+                        e.getId(),
+                        e.getSessionId(),
+                        e.getSeq(),
+                        e.getType(),
+                        e.getContentMd(),
+                        e.getTags() == null ? List.of() : List.copyOf(e.getTags()),
+                        e.getCommits() == null ? List.of() : List.copyOf(e.getCommits()),
+                        fmtJson(e.getCreatedAt()),
+                        fmtJson(e.getUpdatedAt())))
+                .toList();
+        return new SessionJsonExport("trailmind-session-json", 1, sessionJson, entryList, entryList.size());
+    }
+
+    /** 会话 JSON 导出协议（06 §4 附录）：format/version 为格式标识，条目数组与 Markdown 导出逐项对应。 */
+    public record SessionJsonExport(String format, int version, SessionJson session,
+                                    List<EntryJson> entries, int entryCount) {
+    }
+
+    /** 会话级字段；时间为 ISO-8601 本地时间字符串（08 §4.2），可选字段为 null。 */
+    public record SessionJson(Long id, String title, String status, Long workspaceId, String workspace,
+                              String repoPath, String startHead, String endHead, String summary,
+                              String startedAt, String endedAt, String createdAt, String updatedAt) {
+    }
+
+    /** 条目级字段；tags/commits 永为数组（无则为空数组），与 06 §3 存储结构一致。 */
+    public record EntryJson(Long id, Long sessionId, Integer seq, String type, String contentMd,
+                            List<String> tags, List<String> commits, String createdAt, String updatedAt) {
+    }
+
+    private Session requireSession(Long sessionId) {
+        Session s = sessionMapper.selectById(sessionId);
+        if (s == null) {
+            throw new NotFoundException("会话不存在");
+        }
+        return s;
+    }
+
     /** YAML 字符串值：加引号并转义；null 输出裸 null（与 06 §4 可选字段语义一致）。 */
     private String yamlValue(String v) {
         if (v == null) {
@@ -112,6 +175,10 @@ public class SessionExportService {
 
     private String fmt(LocalDateTime t) {
         return t == null ? null : t.toString();
+    }
+
+    private String fmtJson(LocalDateTime t) {
+        return t == null ? null : t.format(ISO_SECONDS);
     }
 
     private String fmtHm(LocalDateTime t) {

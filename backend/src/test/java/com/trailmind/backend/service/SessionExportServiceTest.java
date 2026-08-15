@@ -159,4 +159,70 @@ class SessionExportServiceTest {
 
         assertEquals(true, service.exportMarkdown(7L).contains("## [todo] 09:05 · todo\n"));
     }
+
+    @Test
+    void exportJson_returns_versioned_machine_readable_protocol() {
+        when(sessionMapper.selectById(7L)).thenReturn(session());
+        when(workspaceMapper.selectById(3L)).thenAnswer(inv -> {
+            Workspace ws = new Workspace();
+            ws.setId(3L);
+            ws.setName("TrailMind");
+            return ws;
+        });
+        when(entryService.page(7L, 1, 100_000)).thenReturn(new EntryService.EntryPage(List.of(
+                entry(11L, 1, "goal", "搭建可运行的前后端骨架", List.of("技术选型"), List.of()),
+                entry(12L, 2, "action", "初始化 Spring Boot 工程", List.of(), List.of(H1))), 2));
+
+        SessionExportService.SessionJsonExport json = service.exportJson(7L);
+
+        assertEquals("trailmind-session-json", json.format());
+        assertEquals(1, json.version());
+        assertEquals(2, json.entryCount());
+        assertEquals("从 0 到 1 搭建 TrailMind 骨架", json.session().title());
+        assertEquals("completed", json.session().status());
+        assertEquals("TrailMind", json.session().workspace());
+        assertEquals("D:/projects/trailmind", json.session().repoPath());
+        assertEquals(H1, json.session().startHead());
+        assertEquals(H2, json.session().endHead());
+        assertEquals("2025-06-01T09:00:00", json.session().startedAt());
+        assertEquals("2025-06-01T11:30:00", json.session().endedAt());
+
+        assertEquals(2, json.entries().size());
+        SessionExportService.EntryJson first = json.entries().get(0);
+        assertEquals(11L, first.id());
+        assertEquals(1, first.seq());
+        assertEquals("goal", first.type());
+        assertEquals("搭建可运行的前后端骨架", first.contentMd());
+        assertEquals(List.of("技术选型"), first.tags());
+        assertEquals(List.of(), first.commits());
+        assertEquals("2025-06-01T09:05:00", first.createdAt());
+        assertEquals(List.of(H1), json.entries().get(1).commits());
+    }
+
+    @Test
+    void exportJson_nullable_fields_and_empty_arrays_stay_machine_readable() {
+        Session s = session();
+        s.setRepoPath(null);
+        s.setStartHead(null);
+        s.setEndHead(null);
+        s.setEndedAt(null);
+        when(sessionMapper.selectById(7L)).thenReturn(s);
+        when(workspaceMapper.selectById(3L)).thenReturn(null);
+        Entry e = entry(11L, 1, "note", "内容", null, null);
+        when(entryService.page(7L, 1, 100_000)).thenReturn(new EntryService.EntryPage(List.of(e), 1));
+
+        SessionExportService.SessionJsonExport json = service.exportJson(7L);
+
+        assertEquals(null, json.session().workspace());
+        assertEquals(null, json.session().endedAt());
+        assertEquals(null, json.session().repoPath());
+        assertEquals(List.of(), json.entries().get(0).tags());
+        assertEquals(List.of(), json.entries().get(0).commits());
+    }
+
+    @Test
+    void exportJson_session_not_found_throws() {
+        when(sessionMapper.selectById(99L)).thenReturn(null);
+        assertThrows(NotFoundException.class, () -> service.exportJson(99L));
+    }
 }
