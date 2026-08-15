@@ -5,7 +5,7 @@ import {
   addFreeEdge,
   flattenLayout,
   isStrictTree,
-  moveNodeLayout,
+  moveNodesLayout,
   removeAllFreeEdges,
   removeFreeEdge,
 } from './canvas'
@@ -83,15 +83,21 @@ describe('isStrictTree（画布→树严格树判定）', () => {
   })
 })
 
-describe('moveNodeLayout（画布拖拽坐标持久化）', () => {
-  it('更新节点 layout 坐标', () => {
-    const c = moveNodeLayout(threeNodeTree(), 'n2', 320, 96)
-    expect(c.nodes.n2.layout).toEqual({ x: 320, y: 96 })
+describe('moveNodesLayout（画布移动坐标持久化，PRD B2.1/B2.6）', () => {
+  it('批量更新多个节点 layout', () => {
+    const c = threeNodeTree()
+    const out = moveNodesLayout(c, [
+      { id: 'n2', x: 100, y: 200 },
+      { id: 'n3', x: 300, y: 400 },
+    ])
+    expect(out.nodes.n2.layout).toEqual({ x: 100, y: 200 })
+    expect(out.nodes.n3.layout).toEqual({ x: 300, y: 400 })
+    expect(out.nodes.n1.layout).toBeNull()
   })
 
-  it('节点不存在时返回原内容', () => {
+  it('节点不存在跳过；全无变化返回原内容', () => {
     const c = threeNodeTree()
-    expect(moveNodeLayout(c, 'n99', 1, 1)).toBe(c)
+    expect(moveNodesLayout(c, [{ id: 'n99', x: 1, y: 2 }])).toBe(c)
   })
 })
 

@@ -68,11 +68,21 @@ export function isStrictTree(content: MindmapContent): boolean {
   return seen.size === Object.keys(nodes).length
 }
 
-/** 画布拖拽：更新节点 layout 坐标（写入 content_json 持久化，PRD B2.1）。节点不存在返回原内容。 */
-export function moveNodeLayout(content: MindmapContent, id: string, x: number, y: number): MindmapContent {
-  const node = content.nodes[id]
-  if (!node) return content
-  return { ...content, nodes: { ...content.nodes, [id]: { ...node, layout: { x, y } } } }
+/** 画布移动节点 layout 坐标（写入 content_json 持久化，PRD B2.1；多选拖拽带动全体 B2.6）。节点不存在跳过，无变化返回原内容。 */
+export function moveNodesLayout(
+  content: MindmapContent,
+  updates: { id: string; x: number; y: number }[],
+): MindmapContent {
+  let changed = false
+  let nodes = content.nodes
+  for (const u of updates) {
+    const node = nodes[u.id]
+    if (!node) continue
+    if (node.layout?.x === u.x && node.layout?.y === u.y) continue
+    nodes = { ...nodes, [u.id]: { ...node, layout: { x: u.x, y: u.y } } }
+    changed = true
+  }
+  return changed ? { ...content, nodes } : content
 }
 
 /** 画布自由连线（type=free，PRD B2.2）。自环、重复连线、节点不存在时返回原内容。 */

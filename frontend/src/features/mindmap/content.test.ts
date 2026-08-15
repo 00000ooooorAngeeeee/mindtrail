@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   addChild,
+  addStickyNote,
   defaultContent,
+  deleteNodes,
   deleteSubtree,
   descendants,
   moveNode,
@@ -10,7 +12,7 @@ import {
   parseContent,
   serializeContent,
   toggleCollapse,
-  updateNodeStyle,
+  updateNodesStyle,
   updateNodeText,
 } from './content'
 
@@ -62,21 +64,6 @@ describe('节点增删改移折叠（纯函数）', () => {
     expect(c.nodes.n1.text).toBe('改后的主题')
   })
 
-  it('updateNodeStyle 合并更新样式（形状/颜色/加粗），不影响其他字段', () => {
-    let c = updateNodeStyle(defaultContent(), 'n1', { shape: 'diamond', color: 'red' })
-    expect(c.nodes.n1.style).toEqual({ color: 'red', bold: false, shape: 'diamond' })
-    // 再改加粗，形状/颜色保留
-    c = updateNodeStyle(c, 'n1', { bold: true })
-    expect(c.nodes.n1.style).toEqual({ color: 'red', bold: true, shape: 'diamond' })
-    // 原节点未被篡改（不可变）
-    expect(defaultContent().nodes.n1.style).toEqual({ color: 'default', bold: false, shape: 'rounded' })
-  })
-
-  it('updateNodeStyle 节点不存在返回原内容', () => {
-    const c = defaultContent()
-    expect(updateNodeStyle(c, 'n99', { shape: 'rect' })).toBe(c)
-  })
-
   it('deleteSubtree 删除节点及其后代，根不可删', () => {
     let c = defaultContent()
     c = addChild(c, 'n1', 'a') // n2
@@ -120,5 +107,84 @@ describe('节点增删改移折叠（纯函数）', () => {
     c = addChild(c, 'n1', 'a') // n2
     c = addChild(c, 'n2', 'b') // n3
     expect(descendants(c, 'n2')).toEqual(new Set(['n3']))
+  })
+})
+
+describe('addStickyNote（自由便签，PRD B2.5）', () => {
+  it('新增便签：text 为空、sticky 标记、挂根节点、默认琥珀色、可带坐标', () => {
+    const c = addStickyNote(defaultContent(), { x: 100, y: 200 })
+    const n = c.nodes.n2
+    expect(n.text).toBe('')
+    expect(n.sticky).toBe(true)
+    expect(n.parentId).toBe('n1')
+    expect(n.style.color).toBe('amber')
+    expect(n.layout).toEqual({ x: 100, y: 200 })
+  })
+
+  it('缺省坐标为 null', () => {
+    expect(addStickyNote(defaultContent()).nodes.n2.layout).toBeNull()
+  })
+})
+
+describe('deleteNodes（批量删除，PRD B2.6）', () => {
+  it('删除多个节点及其子树，根跳过', () => {
+    let c = defaultContent()
+    c = addChild(c, 'n1', 'a') // n2
+    c = addChild(c, 'n2', 'b') // n3（n2 子树）
+    c = addChild(c, 'n1', 'c') // n4
+    const out = deleteNodes(c, ['n2', 'n4'])
+    expect(out.nodes.n2).toBeUndefined()
+    expect(out.nodes.n3).toBeUndefined() // 子树级联
+    expect(out.nodes.n4).toBeUndefined()
+    expect(out.nodes.n1).toBeDefined()
+  })
+
+  it('选中子树根与后代时按并集只删一次', () => {
+    let c = defaultContent()
+    c = addChild(c, 'n1', 'a') // n2
+    c = addChild(c, 'n2', 'b') // n3
+    const out = deleteNodes(c, ['n2', 'n3'])
+    expect(out.nodes.n2).toBeUndefined()
+    expect(out.nodes.n3).toBeUndefined()
+  })
+
+  it('空列表或全为根返回原内容', () => {
+    const c = defaultContent()
+    expect(deleteNodes(c, [])).toBe(c)
+    expect(deleteNodes(c, ['n1'])).toBe(c) // 根不可删
+  })
+})
+
+describe('updateNodesStyle（批量设色/设形，PRD B2.6）', () => {
+  it('批量合并更新多个节点样式，未选中不变', () => {
+    let c = defaultContent()
+    c = addChild(c, 'n1', 'a') // n2
+    c = addChild(c, 'n1', 'b') // n3
+    const out = updateNodesStyle(c, ['n2', 'n3'], { shape: 'diamond', color: 'red' })
+    expect(out.nodes.n2.style).toEqual({ color: 'red', bold: false, shape: 'diamond' })
+    expect(out.nodes.n3.style).toEqual({ color: 'red', bold: false, shape: 'diamond' })
+    expect(out.nodes.n1.style.shape).toBe('rounded')
+  })
+
+  it('节点不存在跳过', () => {
+    const c = defaultContent()
+    expect(updateNodesStyle(c, ['n99'], { shape: 'rect' })).toBe(c)
+  })
+})
+
+describe('parseContent 归一化 sticky 字段（旧数据缺省 false）', () => {
+  it('缺省为 false，显式 true 保留', () => {
+    const legacy = parseContent(
+      JSON.stringify({ rootNodeId: 'n1', nodes: { n1: { id: 'n1', text: 'x', style: {}, parentId: null } }, edges: [] }),
+    )
+    expect(legacy.nodes.n1.sticky).toBe(false)
+    const withSticky = parseContent(
+      JSON.stringify({
+        rootNodeId: 'n1',
+        nodes: { n1: { id: 'n1', text: '', sticky: true, style: {}, parentId: null } },
+        edges: [],
+      }),
+    )
+    expect(withSticky.nodes.n1.sticky).toBe(true)
   })
 })

@@ -19,6 +19,8 @@ export interface MindmapNode {
   parentId: string | null
   layout: { x: number; y: number } | null
   collapsed: boolean
+  /** 自由便签（无文本纯形状，PRD B2.5）。 */
+  sticky: boolean
 }
 
 export type MindmapEdgeType = 'parent-child' | 'free'
@@ -55,6 +57,7 @@ export function defaultContent(): MindmapContent {
         parentId: null,
         layout: null,
         collapsed: false,
+        sticky: false,
       },
     },
     edges: [],
@@ -86,6 +89,7 @@ function normalize(raw: Partial<MindmapContent>): MindmapContent {
       parentId: n.parentId ?? null,
       layout: n.layout ?? null,
       collapsed: n.collapsed ?? false,
+      sticky: n.sticky ?? false,
     }
   }
   return {
@@ -162,6 +166,23 @@ export function addChild(
     parentId,
     layout,
     collapsed: false,
+    sticky: false,
+  }
+  return { ...content, nodes: { ...content.nodes, [id]: node } }
+}
+
+/** 新增自由便签（无文本纯形状/备注卡，PRD B2.5）：text 空、sticky 标记、默认琥珀色，父挂根节点以便删除与树结构有效。 */
+export function addStickyNote(content: MindmapContent, layout: { x: number; y: number } | null = null): MindmapContent {
+  const id = nextNodeId(content)
+  const node: MindmapNode = {
+    id,
+    text: '',
+    style: { ...DEFAULT_NODE_STYLE, color: 'amber' },
+    tags: [],
+    parentId: content.rootNodeId,
+    layout,
+    collapsed: false,
+    sticky: true,
   }
   return { ...content, nodes: { ...content.nodes, [id]: node } }
 }
@@ -173,15 +194,21 @@ export function updateNodeText(content: MindmapContent, id: string, text: string
   return { ...content, nodes: { ...content.nodes, [id]: { ...node, text } } }
 }
 
-/** 更新节点样式（形状/颜色/加粗，按 Partial 合并，PRD B2.4）。节点不存在返回原内容。 */
-export function updateNodeStyle(
+/** 更新节点样式（形状/颜色/加粗，按 Partial 合并，PRD B2.4/B2.6 批量设色）；节点不存在跳过，无变化返回原内容。 */
+export function updateNodesStyle(
   content: MindmapContent,
-  id: string,
+  ids: string[],
   style: Partial<MindmapNodeStyle>,
 ): MindmapContent {
-  const node = content.nodes[id]
-  if (!node) return content
-  return { ...content, nodes: { ...content.nodes, [id]: { ...node, style: { ...node.style, ...style } } } }
+  let changed = false
+  let nodes = content.nodes
+  for (const id of ids) {
+    const node = nodes[id]
+    if (!node) continue
+    nodes = { ...nodes, [id]: { ...node, style: { ...node.style, ...style } } }
+    changed = true
+  }
+  return changed ? { ...content, nodes } : content
 }
 
 /** 删除子树（含自身）；根节点不可删，返回原内容。 */
@@ -191,6 +218,24 @@ export function deleteSubtree(content: MindmapContent, id: string): MindmapConte
   const toRemove = descendants(content, id)
   toRemove.add(id)
 
+  const nodes: Record<string, MindmapNode> = {}
+  for (const [nid, n] of Object.entries(content.nodes)) {
+    if (!toRemove.has(nid)) nodes[nid] = n
+  }
+  const edges = content.edges.filter((e) => !toRemove.has(e.source) && !toRemove.has(e.target))
+  return { ...content, nodes, edges }
+}
+
+/** 批量删除多个节点（含各自子树，PRD B2.6）；根节点跳过；选中子树的父与后代按并集只删一次。 */
+export function deleteNodes(content: MindmapContent, ids: string[]): MindmapContent {
+  const toRemove = new Set<string>()
+  for (const id of ids) {
+    const node = content.nodes[id]
+    if (!node || node.parentId === null) continue
+    toRemove.add(id)
+    for (const d of descendants(content, id)) toRemove.add(d)
+  }
+  if (toRemove.size === 0) return content
   const nodes: Record<string, MindmapNode> = {}
   for (const [nid, n] of Object.entries(content.nodes)) {
     if (!toRemove.has(nid)) nodes[nid] = n
