@@ -616,3 +616,26 @@ M2 总验收是 M2 五段会话里信息密度最高的一段：一次验收抓�
 - [ ] 遗留：M1 验收清单性能项——20 节点 ≤100ms/操作 与 500 节点 ≥45fps 仍未实测（需实机人工或未来 GUI 脚本补场景）
 - [ ] 遗留：导图重命名（PRD B4，补 PUT 携带 name 并同步 search_text 的 name 部分）
 - [ ] 遗留：M2 GUI 验证脚本可作 Playwright 级回归资产，M3 会话重跑一遍防回归（成本约 5 分钟）
+
+## 会话 17 · M2 人工验收反馈修复（编辑态交互劫持）
+
+### [goal] 14:00 · 目标
+修复人工验收反馈的两个编辑态问题：① 编辑文本时左键拖选会拖动节点而非选择文本；② 新建节点进入编辑后无法正常输入文本。表现为：编辑态内拖选文本不移动节点、输入提交正常，GUI 回归脚本新增场景全绿。
+
+### [error] 14:02 · 错误
+编辑态 textarea 的鼠标交互被节点拖拽/画布平移处理器劫持：mousedown 落在编辑框内时，节点 d3-drag 与画布 d3-zoom 的处理器执行 preventDefault + stopImmediatePropagation，导致 textarea 无法获得焦点（问题②：点击后输入无反应）、左键拖选被当作节点拖动（问题①：无法框选文本）。根因：编辑框没有 XYFlow 的交互排除类 nodrag/nopan。修复：编辑态给 `.mm-node-body` 加 `nodrag nopan`（排除类作用于整棵目标祖先链，textarea 及其内边距全部覆盖），mousedown 正常冒泡后编辑框回归标准输入行为。
+
+### [test] 14:05 · 验证
+- GUI 验收脚本新增 S7 回归：进入编辑态 → 在 textarea 内拖拽 → 断言节点坐标零位移且编辑框存活 → 输入文本并回车 → 断言文本提交。
+- `node scripts/verify-m2-gui.mjs` 输出 `M2 GUI: ALL PASS（25/25）`（原 23 项 + S7 两项）。
+- 前端单测 64/64、构建通过。
+
+### [artifact] 14:06 · 产出
+- `b98c881`：编辑态 textarea 加 nodrag/nopan + GUI 脚本 S7 回归场景
+
+### [review] 14:07 · 复盘
+人工验收立刻抓出了自动脚本没覆盖的「编辑体验」层面问题——自动验收验证的是机制（能输入、能提交），人工验收验证的是体感（能框选、焦点不被劫持）。教训：① XYFlow 自定义节点的可编辑区域必须显式加 nodrag/nopan（这是官方交互排除机制，不是 hack）；② 下一轮 GUI 脚本扩充应补「焦点与文本选择」类断言（document.activeElement、getSelection），把这类体感问题也自动化。本项已勾入 M3 会话的回归清单。
+
+### [next] 14:08 · 下一步
+- [ ] M3 任务一：会话管理 + 时间线条目（07 §6）
+- [ ] GUI 脚本补焦点/选区断言（document.activeElement / getSelection）
