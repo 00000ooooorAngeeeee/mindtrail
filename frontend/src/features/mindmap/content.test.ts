@@ -10,6 +10,7 @@ import {
   parseContent,
   serializeContent,
   toggleCollapse,
+  updateNodeStyle,
   updateNodeText,
 } from './content'
 
@@ -59,6 +60,21 @@ describe('节点增删改移折叠（纯函数）', () => {
   it('updateNodeText 更新文本', () => {
     const c = updateNodeText(defaultContent(), 'n1', '改后的主题')
     expect(c.nodes.n1.text).toBe('改后的主题')
+  })
+
+  it('updateNodeStyle 合并更新样式（形状/颜色/加粗），不影响其他字段', () => {
+    let c = updateNodeStyle(defaultContent(), 'n1', { shape: 'diamond', color: 'red' })
+    expect(c.nodes.n1.style).toEqual({ color: 'red', bold: false, shape: 'diamond' })
+    // 再改加粗，形状/颜色保留
+    c = updateNodeStyle(c, 'n1', { bold: true })
+    expect(c.nodes.n1.style).toEqual({ color: 'red', bold: true, shape: 'diamond' })
+    // 原节点未被篡改（不可变）
+    expect(defaultContent().nodes.n1.style).toEqual({ color: 'default', bold: false, shape: 'rounded' })
+  })
+
+  it('updateNodeStyle 节点不存在返回原内容', () => {
+    const c = defaultContent()
+    expect(updateNodeStyle(c, 'n99', { shape: 'rect' })).toBe(c)
   })
 
   it('deleteSubtree 删除节点及其后代，根不可删', () => {

@@ -173,6 +173,17 @@ export function updateNodeText(content: MindmapContent, id: string, text: string
   return { ...content, nodes: { ...content.nodes, [id]: { ...node, text } } }
 }
 
+/** 更新节点样式（形状/颜色/加粗，按 Partial 合并，PRD B2.4）。节点不存在返回原内容。 */
+export function updateNodeStyle(
+  content: MindmapContent,
+  id: string,
+  style: Partial<MindmapNodeStyle>,
+): MindmapContent {
+  const node = content.nodes[id]
+  if (!node) return content
+  return { ...content, nodes: { ...content.nodes, [id]: { ...node, style: { ...node.style, ...style } } } }
+}
+
 /** 删除子树（含自身）；根节点不可删，返回原内容。 */
 export function deleteSubtree(content: MindmapContent, id: string): MindmapContent {
   const node = content.nodes[id]

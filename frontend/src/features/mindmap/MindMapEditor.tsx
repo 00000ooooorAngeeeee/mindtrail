@@ -24,6 +24,7 @@ import { descendants } from './content'
 import type { MindmapContent } from './content'
 import { computeTreeLayout, type LayoutPoint } from './treeLayout'
 import { MindmapNode, type MindmapRFNode } from './MindmapNode'
+import { NODE_COLORS, NODE_SHAPES } from './nodeStyle'
 import './mindmap.css'
 
 // 节点估宽/高（用于拖拽落点中心判定；节点宽随文本变化，估算足够命中）。
@@ -52,6 +53,7 @@ function buildNodes(
       selected: id === selectedId,
       data: {
         text: n.text,
+        style: n.style,
         isRoot: id === content.rootNodeId,
         hasChildren: (childCount.get(id) ?? 0) > 0,
         childCount: childCount.get(id) ?? 0,
@@ -124,6 +126,7 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
   const load = useMindmapStore((s) => s.load)
   const select = useMindmapStore((s) => s.select)
   const addChild = useMindmapStore((s) => s.addChild)
+  const updateStyle = useMindmapStore((s) => s.updateStyle)
   const deleteNode = useMindmapStore((s) => s.deleteNode)
   const moveNode = useMindmapStore((s) => s.moveNode)
   const moveNodeLayout = useMindmapStore((s) => s.moveNodeLayout)
@@ -304,6 +307,7 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
   }, [save, undo, redo, addNodeShortcut, deleteSelected, selectedId, trySwitch])
 
   const nodeCount = content ? Object.keys(content.nodes).length : 0
+  const selectedNode = content && selectedId ? (content.nodes[selectedId] ?? null) : null
 
   return (
     <div className="mm-editor">
@@ -335,6 +339,45 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
           </button>
         </div>
       </div>
+
+      {selectedNode && (
+        <div className="mm-style-panel" role="group" aria-label="节点样式">
+          <div className="mm-style-group">
+            <span className="mm-style-label">形状</span>
+            {NODE_SHAPES.map((s) => (
+              <button
+                key={s.id}
+                className={selectedNode.style.shape === s.id ? 'active' : ''}
+                title={s.label}
+                onClick={() => updateStyle(selectedNode.id, { shape: s.id })}
+              >
+                <span className={`mm-shape-icon shape-${s.id}`} />
+              </button>
+            ))}
+          </div>
+          <div className="mm-style-group">
+            <span className="mm-style-label">颜色</span>
+            {NODE_COLORS.map((c) => (
+              <button
+                key={c.id}
+                className={`mm-color-swatch${selectedNode.style.color === c.id ? ' active' : ''}`}
+                title={c.label}
+                style={{ background: c.bg, borderColor: c.border }}
+                onClick={() => updateStyle(selectedNode.id, { color: c.id })}
+              />
+            ))}
+          </div>
+          <div className="mm-style-group">
+            <button
+              className={selectedNode.style.bold ? 'active' : ''}
+              title="加粗"
+              onClick={() => updateStyle(selectedNode.id, { bold: !selectedNode.style.bold })}
+            >
+              <strong>B</strong>
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && content && (
         <div className="mm-toast" role="alert">

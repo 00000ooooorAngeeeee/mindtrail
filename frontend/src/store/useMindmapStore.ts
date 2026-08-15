@@ -11,9 +11,10 @@ import {
   parseContent,
   serializeContent,
   toggleCollapse as toggleCollapsePure,
+  updateNodeStyle as updateNodeStylePure,
   updateNodeText,
 } from '../features/mindmap/content'
-import type { MindmapContent } from '../features/mindmap/content'
+import type { MindmapContent, MindmapNodeStyle } from '../features/mindmap/content'
 import {
   addFreeEdge as addFreeEdgePure,
   flattenLayout,
@@ -50,6 +51,7 @@ interface MindmapState {
   select: (id: string | null) => void
   addChild: (parentId: string, layout?: { x: number; y: number } | null) => void
   updateText: (id: string, text: string) => void
+  updateStyle: (id: string, style: Partial<MindmapNodeStyle>) => void
   deleteNode: (id: string) => void
   moveNode: (id: string, newParentId: string) => void
   toggleCollapse: (id: string) => void
@@ -144,6 +146,12 @@ export const useMindmapStore = create<MindmapState>()((set, get) => {
       const { content } = get()
       if (!content) return
       apply(updateNodeText(content, id, text))
+    },
+
+    updateStyle: (id, style) => {
+      const { content } = get()
+      if (!content) return
+      apply(updateNodeStylePure(content, id, style))
     },
 
     deleteNode: (id) => {
