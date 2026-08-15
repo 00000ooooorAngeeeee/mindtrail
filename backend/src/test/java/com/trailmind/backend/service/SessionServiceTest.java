@@ -159,7 +159,7 @@ class SessionServiceTest {
         assertEquals("b".repeat(40), s.getEndHead());
         assertNotNull(s.getEndedAt());
         assertEquals("总结", s.getSummary());
-        verify(entryService).add(10L, "review", "总结", List.of());
+        verify(entryService).add(10L, "review", "总结", List.of(), List.of());
         verify(sessionMapper).updateById(s);
         assertSame(s, result);
     }
@@ -175,7 +175,7 @@ class SessionServiceTest {
         assertEquals("completed", s.getStatus());
         assertNull(s.getEndHead());
         assertNull(s.getSummary());
-        verify(entryService, never()).add(anyLong(), anyString(), anyString(), anyList());
+        verify(entryService, never()).add(anyLong(), anyString(), anyString(), anyList(), anyList());
     }
 
     @Test

@@ -90,7 +90,7 @@ public class SessionService {
             String sum = (summary == null || summary.isBlank()) ? null : summary.trim();
             if (sum != null) {
                 s.setSummary(sum);
-                entryService.add(s.getId(), "review", sum, List.of()); // C1.3：结束总结写入 review 条目
+                entryService.add(s.getId(), "review", sum, List.of(), List.of()); // C1.3：结束总结写入 review 条目
             }
         } else if (status != null && !"active".equals(status)) {
             throw new BadRequestException("无效的会话状态");

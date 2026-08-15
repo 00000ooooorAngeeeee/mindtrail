@@ -3,9 +3,12 @@ package com.trailmind.backend.service;
 import com.trailmind.backend.common.BadRequestException;
 import com.trailmind.backend.common.NotFoundException;
 import com.trailmind.backend.entity.Entry;
+import com.trailmind.backend.entity.EntryCommit;
 import com.trailmind.backend.entity.EntryTag;
 import com.trailmind.backend.entity.Session;
 import com.trailmind.backend.entity.Tag;
+import com.trailmind.backend.git.GitRepoService;
+import com.trailmind.backend.repository.EntryCommitMapper;
 import com.trailmind.backend.repository.EntryMapper;
 import com.trailmind.backend.repository.EntryTagMapper;
 import com.trailmind.backend.repository.SessionMapper;
@@ -28,11 +31,15 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 条目服务单测（docs/07 §6 任务一）：seq 事务分配（05 §5 MAX(seq)+1）、类型枚举校验、
- * 已结束会话仅可追加 review/note、编辑与标签重建、级联删除、分页标签回填。
+ * 条目服务单测（docs/07 §6 任务一 + 任务三）：seq 事务分配（05 §5 MAX(seq)+1）、类型枚举校验、
+ * 已结束会话仅可追加 review/note、编辑与标签重建、级联删除、分页标签/提交回填、
+ * 绑定/解绑（hash 格式校验、仓库存在性校验、幂等去重、会话无仓库拒绝）。
  */
 @ExtendWith(MockitoExtension.class)
 class EntryServiceTest {
+
+    private static final String H1 = "1".repeat(40);
+    private static final String H2 = "2".repeat(40);
 
     @Mock
     private EntryMapper entryMapper;
@@ -42,6 +49,10 @@ class EntryServiceTest {
     private TagMapper tagMapper;
     @Mock
     private EntryTagMapper entryTagMapper;
+    @Mock
+    private EntryCommitMapper entryCommitMapper;
+    @Mock
+    private GitRepoService gitRepoService;
 
     @InjectMocks
     private EntryService service;
@@ -54,11 +65,25 @@ class EntryServiceTest {
         return s;
     }
 
+    private Session sessionWithRepo(String status) {
+        Session s = session(status);
+        s.setRepoPath("D:/repo");
+        return s;
+    }
+
     private EntryTagMapper.TagName tagName(Long entryId, String name) {
         EntryTagMapper.TagName t = new EntryTagMapper.TagName();
         t.setEntryId(entryId);
         t.setName(name);
         return t;
+    }
+
+    private EntryCommitMapper.CommitRow commitRow(Long entryId, String hash) {
+        EntryCommitMapper.CommitRow r = new EntryCommitMapper.CommitRow();
+        r.setEntryId(entryId);
+        r.setCommitHash(hash);
+        r.setRepoPath("D:/repo");
+        return r;
     }
 
     @Test
@@ -68,7 +93,7 @@ class EntryServiceTest {
         when(tagMapper.selectByWorkspaceAndName(3L, "技术选型")).thenReturn(null);
         when(tagMapper.selectByWorkspaceAndName(3L, "前端")).thenReturn(null);
 
-        Entry e = service.add(7L, "action", "  做了 X  ", List.of("技术选型", " 技术选型 ", "  ", "前端"));
+        Entry e = service.add(7L, "action", "  做了 X  ", List.of("技术选型", " 技术选型 ", "  ", "前端"), List.of());
 
         assertEquals(4, e.getSeq());
         assertEquals("action", e.getType());
@@ -84,27 +109,27 @@ class EntryServiceTest {
         when(sessionMapper.selectById(7L)).thenReturn(session("active"));
         when(entryMapper.nextSeq(7L)).thenReturn(1);
 
-        assertEquals(1, service.add(7L, "goal", "目标", null).getSeq());
+        assertEquals(1, service.add(7L, "goal", "目标", null, List.of()).getSeq());
     }
 
     @Test
     void add_session_not_found_throws() {
         when(sessionMapper.selectById(99L)).thenReturn(null);
-        assertThrows(NotFoundException.class, () -> service.add(99L, "note", "内容", null));
+        assertThrows(NotFoundException.class, () -> service.add(99L, "note", "内容", null, List.of()));
         verify(entryMapper, never()).insert(any(Entry.class));
     }
 
     @Test
     void add_invalid_type_throws() {
         when(sessionMapper.selectById(7L)).thenReturn(session("active"));
-        assertThrows(BadRequestException.class, () -> service.add(7L, "todo", "内容", null));
+        assertThrows(BadRequestException.class, () -> service.add(7L, "todo", "内容", null, List.of()));
         verify(entryMapper, never()).insert(any(Entry.class));
     }
 
     @Test
     void add_blank_content_throws() {
         when(sessionMapper.selectById(7L)).thenReturn(session("active"));
-        assertThrows(BadRequestException.class, () -> service.add(7L, "note", "   ", null));
+        assertThrows(BadRequestException.class, () -> service.add(7L, "note", "   ", null, List.of()));
     }
 
     @Test
@@ -112,9 +137,9 @@ class EntryServiceTest {
         when(sessionMapper.selectById(7L)).thenReturn(session("completed"));
         when(entryMapper.nextSeq(7L)).thenReturn(5);
 
-        assertThrows(BadRequestException.class, () -> service.add(7L, "action", "内容", null));
-        assertEquals("review", service.add(7L, "review", "复盘", null).getType());
-        assertEquals("note", service.add(7L, "note", "备注", null).getType());
+        assertThrows(BadRequestException.class, () -> service.add(7L, "action", "内容", null, List.of()));
+        assertEquals("review", service.add(7L, "review", "复盘", null, List.of()).getType());
+        assertEquals("note", service.add(7L, "note", "备注", null, List.of()).getType());
         verify(entryMapper, times(2)).insert(any(Entry.class));
     }
 
@@ -210,6 +235,7 @@ class EntryServiceTest {
         when(entryMapper.countBySession(7L)).thenReturn(95L);
         when(entryTagMapper.selectTagNamesBySession(7L))
                 .thenReturn(List.of(tagName(11L, "A"), tagName(11L, "B"), tagName(12L, "C")));
+        when(entryCommitMapper.selectBySession(7L)).thenReturn(List.of());
 
         EntryService.EntryPage page = service.page(7L, 2, 50);
 
@@ -219,13 +245,162 @@ class EntryServiceTest {
     }
 
     @Test
+    void page_backfills_bound_commits_by_entry() {
+        Entry e1 = new Entry();
+        e1.setId(11L);
+        when(entryMapper.listBySession(7L, 0, 50)).thenReturn(List.of(e1));
+        when(entryMapper.countBySession(7L)).thenReturn(1L);
+        when(entryTagMapper.selectTagNamesBySession(7L)).thenReturn(List.of());
+        when(entryCommitMapper.selectBySession(7L))
+                .thenReturn(List.of(commitRow(11L, H1), commitRow(11L, H2)));
+
+        EntryService.EntryPage page = service.page(7L, 1, 50);
+
+        assertEquals(List.of(H1, H2), page.entries().get(0).getCommits());
+    }
+
+    @Test
     void page_offset_is_calculated_from_page_and_size() {
         when(entryMapper.listBySession(7L, 150, 75)).thenReturn(List.of());
         when(entryMapper.countBySession(7L)).thenReturn(0L);
         when(entryTagMapper.selectTagNamesBySession(7L)).thenReturn(List.of());
+        when(entryCommitMapper.selectBySession(7L)).thenReturn(List.of());
 
         service.page(7L, 3, 75);
 
         verify(entryMapper).listBySession(7L, 150, 75);
+    }
+
+    // ---------- Git 绑定（M3 任务三） ----------
+
+    @Test
+    void add_with_commit_hashes_binds_and_backfills() {
+        when(sessionMapper.selectById(7L)).thenReturn(sessionWithRepo("active"));
+        when(entryMapper.nextSeq(7L)).thenReturn(3);
+        // 模拟 MyBatis-Plus insert 回填自增 id（keyProperty 行为）
+        org.mockito.stubbing.Answer<Integer> fillId = inv -> {
+            ((Entry) inv.getArgument(0)).setId(5L);
+            return 1;
+        };
+        org.mockito.Mockito.doAnswer(fillId).when(entryMapper).insert(any(Entry.class));
+        when(entryMapper.selectById(5L)).thenAnswer(inv -> {
+            Entry e = new Entry();
+            e.setId(5L);
+            e.setSessionId(7L);
+            return e;
+        });
+        when(entryCommitMapper.selectHashesByEntry(5L)).thenReturn(List.of());
+        when(gitRepoService.hasCommit("D:/repo", H1)).thenReturn(true);
+
+        Entry e = service.add(7L, "artifact", "产出", List.of(), List.of(H1));
+
+        assertEquals(List.of(H1), e.getCommits());
+        verify(entryCommitMapper).insert(any(EntryCommit.class));
+    }
+
+    @Test
+    void bind_validates_hash_format_and_repo() {
+        when(entryMapper.selectById(5L)).thenAnswer(inv -> {
+            Entry e = new Entry();
+            e.setId(5L);
+            e.setSessionId(7L);
+            return e;
+        });
+
+        // 会话无仓库 → 400
+        when(sessionMapper.selectById(7L)).thenReturn(session("active"));
+        assertThrows(BadRequestException.class, () -> service.bind(5L, List.of(H1)));
+
+        // 非法 hash 格式 → 400
+        when(sessionMapper.selectById(7L)).thenReturn(sessionWithRepo("active"));
+        assertThrows(BadRequestException.class, () -> service.bind(5L, List.of("xyz")));
+
+        // 仓库中不存在的提交 → 400（08 §10.6 防造假）
+        when(gitRepoService.hasCommit("D:/repo", H1)).thenReturn(false);
+        assertThrows(BadRequestException.class, () -> service.bind(5L, List.of(H1)));
+        verify(entryCommitMapper, never()).insert(any(EntryCommit.class));
+    }
+
+    @Test
+    void bind_normalizes_dedupes_and_skips_existing() {
+        when(entryMapper.selectById(5L)).thenAnswer(inv -> {
+            Entry e = new Entry();
+            e.setId(5L);
+            e.setSessionId(7L);
+            return e;
+        });
+        when(sessionMapper.selectById(7L)).thenReturn(sessionWithRepo("active"));
+        when(entryCommitMapper.selectHashesByEntry(5L)).thenReturn(List.of(H1)); // 已绑定 H1
+        when(gitRepoService.hasCommit("D:/repo", H2)).thenReturn(true);
+
+        List<String> bound = service.bind(5L, List.of(H1, "  " + H2 + "  ", H2));
+
+        assertEquals(List.of(H2), bound); // H1 幂等跳过，H2 去重一次
+        verify(entryCommitMapper, times(1)).insert(any(EntryCommit.class));
+    }
+
+    @Test
+    void bind_skips_verification_when_repo_unreadable() {
+        when(entryMapper.selectById(5L)).thenAnswer(inv -> {
+            Entry e = new Entry();
+            e.setId(5L);
+            e.setSessionId(7L);
+            return e;
+        });
+        when(sessionMapper.selectById(7L)).thenReturn(sessionWithRepo("active"));
+        when(entryCommitMapper.selectHashesByEntry(5L)).thenReturn(List.of());
+        when(gitRepoService.hasCommit("D:/repo", H1))
+                .thenThrow(new BadRequestException("路径不是有效的 Git 仓库")); // 仓库已移动
+
+        assertEquals(List.of(H1), service.bind(5L, List.of(H1))); // 无法校验 → 放行（记录不因仓库移动而丢失）
+    }
+
+    @Test
+    void bind_entry_or_session_not_found_throws() {
+        when(entryMapper.selectById(9L)).thenReturn(null);
+        assertThrows(NotFoundException.class, () -> service.bind(9L, List.of(H1)));
+
+        when(entryMapper.selectById(5L)).thenAnswer(inv -> {
+            Entry e = new Entry();
+            e.setId(5L);
+            e.setSessionId(7L);
+            return e;
+        });
+        when(sessionMapper.selectById(7L)).thenReturn(null);
+        assertThrows(NotFoundException.class, () -> service.bind(5L, List.of(H1)));
+    }
+
+    @Test
+    void unbind_removes_relation_or_404() {
+        when(entryMapper.selectById(5L)).thenReturn(new Entry());
+        when(entryCommitMapper.deleteByEntryAndHash(5L, H1)).thenReturn(1);
+
+        service.unbind(5L, "  " + H1 + "  "); // 归一化后删除
+
+        verify(entryCommitMapper).deleteByEntryAndHash(5L, H1);
+
+        when(entryCommitMapper.deleteByEntryAndHash(5L, H2)).thenReturn(0);
+        assertThrows(NotFoundException.class, () -> service.unbind(5L, H2));
+    }
+
+    @Test
+    void unbind_invalid_hash_format_throws() {
+        when(entryMapper.selectById(5L)).thenReturn(new Entry());
+        assertThrows(BadRequestException.class, () -> service.unbind(5L, "abc"));
+        verify(entryCommitMapper, never()).deleteByEntryAndHash(anyLong(), any());
+    }
+
+    @Test
+    void session_commits_lists_bound_rows() {
+        when(sessionMapper.selectById(7L)).thenReturn(session("active"));
+        when(entryCommitMapper.selectBySession(7L))
+                .thenReturn(List.of(commitRow(11L, H1), commitRow(12L, H2)));
+
+        List<EntryService.BoundCommit> list = service.sessionCommits(7L);
+
+        assertEquals(2, list.size());
+        assertEquals(11L, list.get(0).entryId());
+        assertEquals(H2, list.get(1).commitHash());
+        assertEquals("D:/repo", list.get(1).repoPath());
     }
 }

@@ -30,6 +30,13 @@ public class Entry {
     @TableField(exist = false)
     private List<String> tags;
 
+    @TableField(exist = false)
+    private List<String> commits;
+
+    /** 仅请求体字段（04 §5：追加条目可携带 commitHashes 一次性绑定）；响应侧回填用 commits。 */
+    @TableField(exist = false)
+    private List<String> commitHashes;
+
     public Long getId() {
         return id;
     }
@@ -92,5 +99,21 @@ public class Entry {
 
     public void setTags(List<String> tags) {
         this.tags = tags;
+    }
+
+    public List<String> getCommits() {
+        return commits;
+    }
+
+    public void setCommits(List<String> commits) {
+        this.commits = commits;
+    }
+
+    public List<String> getCommitHashes() {
+        return commitHashes;
+    }
+
+    public void setCommitHashes(List<String> commitHashes) {
+        this.commitHashes = commitHashes;
     }
 }
