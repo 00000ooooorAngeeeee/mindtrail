@@ -1,5 +1,6 @@
-// 导图编辑器状态（08 §4.3：画布节点/边变更必须走统一 store action，保证后续撤销/重做与保存一致性）。
-// content 为唯一事实源；所有变更走纯函数（features/mindmap/content.ts）生成新对象，置 dirty。
+// 导图编辑器状态（08 §4.3：画布节点/边变更必须走统一 store action，保证撤销/重做与保存一致性）。
+// content 为唯一事实源；所有变更走纯函数（features/mindmap/content.ts）生成新对象，置 dirty 并记录历史。
+// 保存策略（04 §6.1）：变更后 800ms 防抖自动保存；手动 Ctrl+S / 按钮保存；乐观锁冲突经 error 透出提示。
 import { create } from 'zustand'
 import { getMindmap, saveMindmap } from '../api/mindmaps'
 import type { Mindmap } from '../api/types'
@@ -13,10 +14,20 @@ import {
   updateNodeText,
 } from '../features/mindmap/content'
 import type { MindmapContent } from '../features/mindmap/content'
+import {
+  record as recordHistory,
+  redo as redoHistory,
+  undo as undoHistory,
+  type History,
+} from '../features/mindmap/history'
+
+/** 防抖保存间隔（04 §6.1：800ms 无操作即保存）。 */
+const SAVE_DEBOUNCE_MS = 800
 
 interface MindmapState {
   mindmap: Mindmap | null
   content: MindmapContent | null
+  history: History
   selectedId: string | null
   loading: boolean
   saving: boolean
@@ -29,77 +40,151 @@ interface MindmapState {
   deleteNode: (id: string) => void
   moveNode: (id: string, newParentId: string) => void
   toggleCollapse: (id: string) => void
+  undo: () => void
+  redo: () => void
+  clearError: () => void
   save: () => Promise<void>
 }
 
-export const useMindmapStore = create<MindmapState>()((set, get) => ({
-  mindmap: null,
-  content: null,
-  selectedId: null,
-  loading: false,
-  saving: false,
-  dirty: false,
-  error: null,
+/** 选中节点在内容变更后可能已不存在（如撤销了删除它的那一步），回退为 null。 */
+function fixSelection(content: MindmapContent, selectedId: string | null): string | null {
+  return selectedId && content.nodes[selectedId] ? selectedId : null
+}
 
-  load: async (id) => {
-    set({ loading: true, error: null })
-    try {
-      const mindmap = await getMindmap(id)
+export const useMindmapStore = create<MindmapState>()((set, get) => {
+  // 防抖定时器挂在闭包中，随 store 单例生命周期存在。
+  let saveTimer: ReturnType<typeof setTimeout> | null = null
+  const clearTimer = () => {
+    if (saveTimer !== null) {
+      clearTimeout(saveTimer)
+      saveTimer = null
+    }
+  }
+  const scheduleSave = () => {
+    clearTimer()
+    saveTimer = setTimeout(() => void get().save(), SAVE_DEBOUNCE_MS)
+  }
+
+  /** 统一变更入口：记录历史、置 dirty、调度防抖保存；无变化（next===content）则跳过。 */
+  const apply = (next: MindmapContent, selectedId?: string | null) => {
+    const { content, history } = get()
+    if (!content || next === content) return
+    set({
+      content: next,
+      history: recordHistory(history, content),
+      dirty: true,
+      ...(selectedId !== undefined ? { selectedId } : {}),
+    })
+    scheduleSave()
+  }
+
+  return {
+    mindmap: null,
+    content: null,
+    history: { past: [], future: [] },
+    selectedId: null,
+    loading: false,
+    saving: false,
+    dirty: false,
+    error: null,
+
+    load: async (id) => {
+      clearTimer()
+      set({ loading: true, error: null })
+      try {
+        const mindmap = await getMindmap(id)
+        set({
+          mindmap,
+          content: parseContent(mindmap.contentJson),
+          history: { past: [], future: [] },
+          selectedId: null,
+          loading: false,
+          dirty: false,
+        })
+      } catch (e) {
+        set({ loading: false, error: e instanceof Error ? e.message : '加载导图失败' })
+      }
+    },
+
+    select: (id) => set({ selectedId: id }),
+
+    addChild: (parentId) => {
+      const { content } = get()
+      if (!content) return
+      const next = addChildPure(content, parentId)
+      const newId = Object.keys(next.nodes).find((id) => !(id in content.nodes))
+      apply(next, newId ?? parentId)
+    },
+
+    updateText: (id, text) => {
+      const { content } = get()
+      if (!content) return
+      apply(updateNodeText(content, id, text))
+    },
+
+    deleteNode: (id) => {
+      const { content, selectedId } = get()
+      if (!content) return
+      apply(deleteSubtree(content, id), selectedId === id ? null : selectedId)
+    },
+
+    moveNode: (id, newParentId) => {
+      const { content } = get()
+      if (!content) return
+      apply(moveNodePure(content, id, newParentId))
+    },
+
+    toggleCollapse: (id) => {
+      const { content } = get()
+      if (!content) return
+      apply(toggleCollapsePure(content, id))
+    },
+
+    undo: () => {
+      const { content, history, selectedId } = get()
+      if (!content) return
+      const r = undoHistory(history, content)
+      if (!r) return
       set({
-        mindmap,
-        content: parseContent(mindmap.contentJson),
-        selectedId: null,
-        loading: false,
-        dirty: false,
+        content: r.content,
+        history: r.history,
+        dirty: true,
+        selectedId: fixSelection(r.content, selectedId),
       })
-    } catch (e) {
-      set({ loading: false, error: e instanceof Error ? e.message : '加载导图失败' })
-    }
-  },
+      scheduleSave()
+    },
 
-  select: (id) => set({ selectedId: id }),
+    redo: () => {
+      const { content, history, selectedId } = get()
+      if (!content) return
+      const r = redoHistory(history, content)
+      if (!r) return
+      set({
+        content: r.content,
+        history: r.history,
+        dirty: true,
+        selectedId: fixSelection(r.content, selectedId),
+      })
+      scheduleSave()
+    },
 
-  addChild: (parentId) => {
-    const { content } = get()
-    if (!content) return
-    const next = addChildPure(content, parentId)
-    const newId = Object.keys(next.nodes).find((id) => !(id in content.nodes))
-    set({ content: next, dirty: true, selectedId: newId ?? parentId })
-  },
+    clearError: () => set({ error: null }),
 
-  updateText: (id, text) => {
-    const { content } = get()
-    if (!content) return
-    set({ content: updateNodeText(content, id, text), dirty: true })
-  },
-
-  deleteNode: (id) => {
-    const { content, selectedId } = get()
-    if (!content) return
-    set({ content: deleteSubtree(content, id), dirty: true, selectedId: selectedId === id ? null : selectedId })
-  },
-
-  moveNode: (id, newParentId) => {
-    const { content } = get()
-    if (!content) return
-    set({ content: moveNodePure(content, id, newParentId), dirty: true })
-  },
-
-  toggleCollapse: (id) => {
-    const { content } = get()
-    if (!content) return
-    set({ content: toggleCollapsePure(content, id), dirty: true })
-  },
-
-  save: async () => {
-    const { mindmap, content, saving } = get()
-    if (!mindmap || !content || saving) return
-    set({ saving: true, error: null })
-    try {
-      const updated = await saveMindmap(mindmap.id, serializeContent(content), mindmap.updatedAt)
-      set({ mindmap: updated, dirty: false, saving: false })
-    } catch (e) {
-      set({ saving: false, error: e instanceof Error ? e.message : '保存失败' })
-    }
-  },
-}))
+    save: async () => {
+      clearTimer()
+      const { mindmap, content, saving } = get()
+      if (!mindmap || !content || saving) return
+      set({ saving: true, error: null })
+      try {
+        const updated = await saveMindmap(mindmap.id, serializeContent(content), mindmap.updatedAt)
+        // 保存期间若内容又变了，保持 dirty 并继续调度下一次防抖保存；否则清 dirty。
+        const unchanged = get().content === content
+        set({ mindmap: updated, saving: false, ...(unchanged ? { dirty: false } : {}) })
+        if (!unchanged) scheduleSave()
+      } catch (e) {
+        // 失败（含 409 乐观锁冲突）保留 dirty，不自动重试，由用户重试/刷新。
+        set({ saving: false, error: e instanceof Error ? e.message : '保存失败' })
+      }
+    },
+  }
+})

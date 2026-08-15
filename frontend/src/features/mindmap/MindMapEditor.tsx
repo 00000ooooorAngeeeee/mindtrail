@@ -101,9 +101,13 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
   const deleteNode = useMindmapStore((s) => s.deleteNode)
   const moveNode = useMindmapStore((s) => s.moveNode)
   const save = useMindmapStore((s) => s.save)
+  const undo = useMindmapStore((s) => s.undo)
+  const redo = useMindmapStore((s) => s.redo)
+  const clearError = useMindmapStore((s) => s.clearError)
 
   const mindmap = useMindmapStore((s) => s.mindmap)
   const content = useMindmapStore((s) => s.content)
+  const history = useMindmapStore((s) => s.history)
   const selectedId = useMindmapStore((s) => s.selectedId)
   const loading = useMindmapStore((s) => s.loading)
   const error = useMindmapStore((s) => s.error)
@@ -186,7 +190,7 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
     }
   }, [selectedId, content, deleteNode])
 
-  // 快捷键（08 §4.3 / 03 §5）：Ctrl+N 加节点、Delete 删除、Ctrl+S 保存。
+  // 快捷键（08 §4.3 / 03 §5）：Ctrl+N 加节点、Delete 删除、Ctrl+S 保存、Ctrl+Z 撤销、Ctrl+Shift+Z/Ctrl+Y 重做。
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
       const t = e.target as HTMLElement | null
@@ -194,6 +198,13 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault()
         void save()
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) redo()
+        else undo()
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault()
+        redo()
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
         e.preventDefault()
         addNodeShortcut()
@@ -204,7 +215,7 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [save, addNodeShortcut, deleteSelected])
+  }, [save, undo, redo, addNodeShortcut, deleteSelected])
 
   const nodeCount = content ? Object.keys(content.nodes).length : 0
 
@@ -214,12 +225,27 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
         <button onClick={onBack}>← 返回</button>
         <span className="mm-title">{mindmap?.name ?? '加载中…'}</span>
         <div className="mm-toolbar-actions">
+          <button onClick={undo} disabled={history.past.length === 0} title="撤销 (Ctrl+Z)">
+            ↶ 撤销
+          </button>
+          <button onClick={redo} disabled={history.future.length === 0} title="重做 (Ctrl+Shift+Z)">
+            ↷ 重做
+          </button>
           <button onClick={() => void rfRef.current?.fitView({ padding: 0.2 })}>适应视图</button>
           <button onClick={() => void save()} disabled={saving || !dirty}>
             {saving ? '保存中…' : dirty ? '保存*' : '已保存'}
           </button>
         </div>
       </div>
+
+      {error && content && (
+        <div className="mm-toast" role="alert">
+          <span>{error}</span>
+          <button onClick={clearError} title="关闭">
+            ×
+          </button>
+        </div>
+      )}
 
       {loading && !content ? (
         <div className="mm-center muted">加载中…</div>

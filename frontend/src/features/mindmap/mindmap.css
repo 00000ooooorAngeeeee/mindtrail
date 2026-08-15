@@ -68,6 +68,35 @@
   color: var(--muted);
 }
 
+/* 保存失败 / 乐观锁冲突提示（04 §6.1：冲突时提示「本地与他人修改冲突」） */
+.mm-toast {
+  position: fixed;
+  top: 56px;
+  right: 16px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 360px;
+  padding: 10px 14px;
+  background: var(--card);
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(31, 36, 48, 0.15);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.mm-toast button {
+  border: none;
+  background: transparent;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  color: inherit;
+  padding: 0;
+}
+
 /* 节点卡片 */
 .react-flow__node {
   border: none;
