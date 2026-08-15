@@ -188,3 +188,28 @@ export interface SearchResults {
   entries: SearchEntryHit[]
   sessions: SearchSessionHit[]
 }
+
+// ---- 标签（M4 任务二，PRD D3/D4） ----
+
+/** 工作区级标签（GET /tags，含条目使用计数）。 */
+export interface TagInfo {
+  id: number
+  workspaceId: number
+  name: string
+  createdAt?: string
+  entryCount: number
+}
+
+/** 按标签筛出的条目（GET /entries?tagId=&sessionId=，含会话上下文供跳转）。 */
+export interface TaggedEntry {
+  id: number
+  sessionId: number
+  seq: number
+  type: EntryType
+  contentMd: string
+  createdAt?: string
+  sessionTitle: string
+  workspaceId: number
+  workspaceName: string
+  tags: string[]
+}

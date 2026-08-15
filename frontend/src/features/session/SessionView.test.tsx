@@ -4,6 +4,7 @@ import { SessionView } from './SessionView'
 import { exportSessionMarkdown, getSession, updateSession } from '../../api/sessions'
 import { addEntry, deleteEntry, updateEntry } from '../../api/entries'
 import { bindCommits, getCommitDetail, getCommits, getSessionCommits, unbindCommit } from '../../api/git'
+import { filterEntriesByTag, listTags } from '../../api/tags'
 import { MockIntersectionObserver } from '../../test/intersectionObserver'
 import { ENTRY_TYPE_STORAGE_KEY } from './typeMemory'
 import { gitSuggestKey } from './gitTimeline'
@@ -26,6 +27,10 @@ vi.mock('../../api/git', () => ({
   unbindCommit: vi.fn(),
   getCommitDetail: vi.fn(),
 }))
+vi.mock('../../api/tags', () => ({
+  listTags: vi.fn(),
+  filterEntriesByTag: vi.fn(),
+}))
 
 const getMock = vi.mocked(getSession)
 const updateSessionMock = vi.mocked(updateSession)
@@ -38,6 +43,8 @@ const getSessionCommitsMock = vi.mocked(getSessionCommits)
 const bindMock = vi.mocked(bindCommits)
 const unbindMock = vi.mocked(unbindCommit)
 const detailMock = vi.mocked(getCommitDetail)
+const listTagsMock = vi.mocked(listTags)
+const filterEntriesMock = vi.mocked(filterEntriesByTag)
 
 const H1 = '1'.repeat(40)
 const H2 = '2'.repeat(40)
@@ -89,6 +96,10 @@ describe('SessionView 会话详情页（时间线条目）', () => {
     getSessionCommitsMock.mockResolvedValue([])
     detailMock.mockReset()
     exportMock.mockReset()
+    listTagsMock.mockReset()
+    filterEntriesMock.mockReset()
+    listTagsMock.mockResolvedValue([])
+    filterEntriesMock.mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -436,5 +447,42 @@ describe('SessionView 会话详情页（时间线条目）', () => {
       URL.createObjectURL = origCreate
       URL.revokeObjectURL = origRevoke
     }
+  })
+
+  it('按标签过滤：选择标签后展示该标签命中条目，清除过滤恢复时间线（M4 任务二 D4）', async () => {
+    const s = activeSession()
+    s.workspaceId = 3
+    getMock.mockResolvedValue(s)
+    listTagsMock.mockResolvedValue([{ id: 7, workspaceId: 3, name: '技术选型', entryCount: 1 }])
+    filterEntriesMock.mockResolvedValue([
+      {
+        id: 11,
+        sessionId: 1,
+        seq: 1,
+        type: 'goal',
+        contentMd: '完成目标',
+        createdAt: '2025-06-01T09:02:00',
+        sessionTitle: '测试会话',
+        workspaceId: 3,
+        workspaceName: '项目',
+        tags: ['技术选型'],
+      },
+    ])
+    render(<SessionView sessionId={1} onBack={() => {}} />)
+    await screen.findByText('测试会话')
+
+    // 时间线默认可见
+    expect(screen.getByText('报错了')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('标签过滤'), { target: { value: '7' } })
+
+    await waitFor(() => expect(filterEntriesMock).toHaveBeenCalledWith(7, 1))
+    expect(await screen.findByTestId('session-tag-filtered')).toBeInTheDocument()
+    expect(within(screen.getByTestId('session-tag-filtered')).getByText('完成目标')).toBeInTheDocument()
+    // 原时间线被替换
+    expect(screen.queryByText('报错了')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('清除过滤'))
+    await waitFor(() => expect(screen.getByText('报错了')).toBeInTheDocument())
   })
 })

@@ -489,3 +489,20 @@
     background: rgba(79, 107, 255, 0.12);
   }
 }
+
+/* 会话内标签过滤（M4 任务二，PRD D4「会话页按标签过滤」）。 */
+.session-tag-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.session-tag-filter select {
+  padding: 4px 8px;
+  border: 1px solid #d9dbe2;
+  border-radius: 6px;
+  background: #fff;
+}

@@ -5,6 +5,7 @@ import { fetchHealth } from './api/health'
 import { deleteWorkspace, fetchWorkspaces, updateWorkspace } from './api/workspaces'
 import { createMindmap, deleteMindmap, listMindmaps } from './api/mindmaps'
 import { createSession, deleteSession, getSession, listSessions } from './api/sessions'
+import { listTags } from './api/tags'
 
 vi.mock('./api/health', () => ({ fetchHealth: vi.fn() }))
 vi.mock('./api/workspaces', () => ({
@@ -25,6 +26,14 @@ vi.mock('./api/sessions', () => ({
   getSession: vi.fn(),
   updateSession: vi.fn(),
 }))
+vi.mock('./api/tags', () => ({
+  listTags: vi.fn(),
+  createTag: vi.fn(),
+  renameTag: vi.fn(),
+  mergeTag: vi.fn(),
+  deleteTag: vi.fn(),
+  filterEntriesByTag: vi.fn(),
+}))
 
 const healthMock = vi.mocked(fetchHealth)
 const workspacesMock = vi.mocked(fetchWorkspaces)
@@ -37,6 +46,7 @@ const listSessionsMock = vi.mocked(listSessions)
 const createSessionMock = vi.mocked(createSession)
 const deleteSessionMock = vi.mocked(deleteSession)
 const getSessionMock = vi.mocked(getSession)
+const listTagsMock = vi.mocked(listTags)
 
 const ws = { id: 1, name: '项目A', mindmapCount: 2, sessionCount: 1 }
 
@@ -53,6 +63,8 @@ describe('App 首页', () => {
     createSessionMock.mockReset()
     deleteSessionMock.mockReset()
     getSessionMock.mockReset()
+    listTagsMock.mockReset()
+    listTagsMock.mockResolvedValue([])
     healthMock.mockResolvedValue({ status: 'ok', app: 'trailmind', version: '0.0.1' })
     workspacesMock.mockResolvedValue([])
     updateMock.mockResolvedValue({ ...ws })

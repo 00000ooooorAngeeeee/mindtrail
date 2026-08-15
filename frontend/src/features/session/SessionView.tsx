@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { addEntry, deleteEntry, updateEntry } from '../../api/entries'
 import { bindCommits, getCommitDetail, getCommits, getSessionCommits, unbindCommit } from '../../api/git'
 import { exportSessionMarkdown, getSession, updateSession } from '../../api/sessions'
+import { filterEntriesByTag, listTags } from '../../api/tags'
 import {
   ENTRY_TYPE_ICONS,
   ENTRY_TYPE_LABELS,
@@ -11,6 +12,8 @@ import {
   type EntryType,
   type GitCommit,
   type Session,
+  type TagInfo,
+  type TaggedEntry,
 } from '../../api/types'
 import { CommitDetailModal } from './CommitDetailModal'
 import { EntryCard } from './EntryCard'
@@ -24,6 +27,7 @@ import {
   shortHash,
   unboundCommits,
 } from './gitTimeline'
+import { renderMarkdown } from './markdown'
 import { loadEntryType, saveEntryType } from './typeMemory'
 import { useInfiniteScroll } from './useInfiniteScroll'
 import { formatTime } from './time'
@@ -73,6 +77,12 @@ export function SessionView({
   const highlightHandledRef = useRef(false)
   const highlightRowRef = useRef<HTMLLIElement | null>(null)
 
+  // 标签过滤（M4 任务二，PRD D4「会话页按标签过滤」）：工作区标签下拉 + 过滤结果列表（只读）。
+  const [workspaceTags, setWorkspaceTags] = useState<TagInfo[]>([])
+  const [filterTagId, setFilterTagId] = useState<number | null>(null)
+  const [filteredEntries, setFilteredEntries] = useState<TaggedEntry[]>([])
+  const [filterLoading, setFilterLoading] = useState(false)
+
   const [completing, setCompleting] = useState(false)
   const [summaryDraft, setSummaryDraft] = useState('')
   const [exporting, setExporting] = useState(false)
@@ -113,6 +123,31 @@ export function SessionView({
   useEffect(() => {
     void load(initialPage)
   }, [load]) // eslint-disable-line react-hooks/exhaustive-deps -- initialPage 仅初始加载一次
+
+  // 工作区标签（过滤下拉数据源）。
+  useEffect(() => {
+    const wid = session?.workspaceId
+    if (wid == null) return
+    listTags(wid)
+      .then(setWorkspaceTags)
+      .catch(() => setWorkspaceTags([]))
+  }, [session?.workspaceId])
+
+  // 标签过滤（D4「过滤即时生效」）：选择标签即拉取该标签条目（本会话范围）。
+  useEffect(() => {
+    if (filterTagId == null) {
+      setFilteredEntries([])
+      return
+    }
+    setFilterLoading(true)
+    filterEntriesByTag(filterTagId, sessionId)
+      .then((list) => {
+        setFilteredEntries(list)
+        setError(null)
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : '按标签过滤失败'))
+      .finally(() => setFilterLoading(false))
+  }, [filterTagId, sessionId])
 
   // 搜索跳转定位：目标条目出现在已加载列表后滚动到视野并闪烁 2s。
   useEffect(() => {
@@ -399,6 +434,23 @@ export function SessionView({
           </button>
           {!completed && <button onClick={() => setCompleting(true)}>结束会话</button>}
         </div>
+        <div className="session-tag-filter">
+          <label htmlFor="session-tag-select">按标签过滤</label>
+          <select
+            id="session-tag-select"
+            aria-label="标签过滤"
+            value={filterTagId ?? ''}
+            onChange={(e) => setFilterTagId(e.target.value ? Number(e.target.value) : null)}
+          >
+            <option value="">不过滤</option>
+            {workspaceTags.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+          {filterTagId != null && <button onClick={() => setFilterTagId(null)}>清除过滤</button>}
+        </div>
         {completing && (
           <div className="complete-panel">
             <textarea
@@ -476,7 +528,50 @@ export function SessionView({
         </section>
       )}
 
-      {entries.length === 0 && !loading ? (
+      {filterTagId != null ? (
+        <div className="session-filtered" data-testid="session-tag-filtered">
+          {filterLoading ? (
+            <p className="muted">过滤中…</p>
+          ) : filteredEntries.length === 0 ? (
+            <p className="muted">该标签在本会话暂无条目</p>
+          ) : (
+            <ul className="entry-list">
+              {filteredEntries.map((e) => (
+                <li key={e.id} className={`entry-item entry-type-${e.type}`}>
+                  <div className="entry-time-col">
+                    <span className="entry-time">{formatTime(e.createdAt)}</span>
+                    <span className="entry-dot" aria-hidden="true" />
+                  </div>
+                  <div className="entry-card">
+                    <div className="entry-meta">
+                      <span className="entry-icon" aria-hidden="true">
+                        {ENTRY_TYPE_ICONS[e.type]}
+                      </span>
+                      <span className="entry-chip">{ENTRY_TYPE_LABELS[e.type]}</span>
+                      <span className="entry-seq">#{e.seq}</span>
+                    </div>
+                    <div
+                      className="entry-content entry-md"
+                      data-testid={`filtered-md-${e.id}`}
+                      // renderMarkdown 以 html:false 禁用原始 HTML，输出安全（markdown.ts）
+                      dangerouslySetInnerHTML={{ __html: renderMarkdown(e.contentMd) }}
+                    />
+                    {e.tags.length > 0 && (
+                      <div className="entry-tags">
+                        {e.tags.map((t) => (
+                          <span key={t} className="tag-chip">
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : entries.length === 0 && !loading ? (
         <p className="muted">暂无条目</p>
       ) : (
         <ul className="entry-list">

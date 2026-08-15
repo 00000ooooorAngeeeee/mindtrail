@@ -6,6 +6,7 @@ import { MindMapEditor } from './features/mindmap/MindMapEditor'
 import { SessionSection } from './features/session/SessionSection'
 import { PAGE_SIZE, SessionView } from './features/session/SessionView'
 import { SearchOverlay, type SearchNavigateTarget } from './features/search/SearchOverlay'
+import { TagSection } from './features/tag/TagSection'
 import './App.css'
 
 export default function App() {
@@ -54,6 +55,13 @@ export default function App() {
       setOpenMindmapId(null)
       setOpenSessionId(t.sessionId)
     }
+  }
+
+  // 标签过滤条目跳转（M4 任务二，PRD D2 同款定位：seq 估算分页 + 闪烁）。
+  const handleOpenSessionEntry = (sessionId: number, entryId: number, seq: number) => {
+    setOpenMindmapId(null)
+    setSessionJump({ page: Math.floor((seq - 1) / PAGE_SIZE) + 1, entryId })
+    setOpenSessionId(sessionId)
   }
 
   const handleCreate = async () => {
@@ -115,6 +123,7 @@ export default function App() {
             onBack={() => setOpen(null)}
             onOpenMindmap={setOpenMindmapId}
             onOpenSession={setOpenSessionId}
+            onOpenSessionEntry={handleOpenSessionEntry}
           />
         ) : (
           <section className="workspace-panel">
@@ -203,11 +212,13 @@ function WorkspaceHome({
   onBack,
   onOpenMindmap,
   onOpenSession,
+  onOpenSessionEntry,
 }: {
   ws: Workspace
   onBack: () => void
   onOpenMindmap: (id: number) => void
   onOpenSession: (id: number) => void
+  onOpenSessionEntry: (sessionId: number, entryId: number, seq: number) => void
 }) {
   const [mindmaps, setMindmaps] = useState<Mindmap[]>([])
   const [name, setName] = useState('')
@@ -298,6 +309,9 @@ function WorkspaceHome({
 
       <h3>会话</h3>
       <SessionSection ws={ws} onOpenSession={onOpenSession} />
+
+      <h3>标签</h3>
+      <TagSection ws={ws} onOpenSessionEntry={onOpenSessionEntry} />
     </section>
   )
 }
