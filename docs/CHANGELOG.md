@@ -639,3 +639,35 @@ M2 总验收是 M2 五段会话里信息密度最高的一段：一次验收抓�
 ### [next] 14:08 · 下一步
 - [ ] M3 任务一：会话管理 + 时间线条目（07 §6）
 - [ ] GUI 脚本补焦点/选区断言（document.activeElement / getSelection）
+
+## 会话 18 · M2 人工验收反馈修复（断线删除 + 便签挂载）
+
+### [goal] 14:15 · 目标
+修复人工验收第二轮反馈：① 无法断开两点之间的连线；② 「＋便签」应给选中节点添加子便签，而实际恒挂根节点。表现为：GUI 回归脚本新增 S2f（选中边 + Delete 断开）与 S4c（便签父节点断言）全绿，全量 26/26 通过。
+
+### [error] 14:18 · 错误
+「无法断开连线」是**两个缺陷叠加**：
+1. 边选中被自己的节点同步 effect 洗掉：点击边会联动取消节点选中 → `selectedIds` 变化触发 effect → `setEdges(buildEdges(...))` 重建边时未带 `selected` 标记，刚选中的边立即回到未选中态。修复：`buildEdges` 增加 `selectedEdgeIds` 参数，effect 改函数式 `setEdges` 带入当前边选中态。
+2. Delete 键拦截未考虑边选中：只要有节点选中就 `preventDefault` 接管（弹确认删节点），选中的边永远等不到删除。修复：仅「有选中节点且未选中自由边」时接管；边选中时放行给 React Flow 删除链路（`useKeyPress` 监听 document 级键盘）。
+
+### [error] 14:20 · 错误
+「便签恒挂根节点」：`addStickyNote` 纯函数把 `parentId` 硬编码为 `rootNodeId`（会话 15 为「树结构有效」做的简化）。修复：纯函数增加 `parentId` 参数（无效时回退根），store 传入 `selectedIds[0]`。补充单测「指定父节点挂载 + 回退」。
+
+### [note] 14:22 · 备注
+调试期发现注入侧两个坑：① XYFlow `useKeyPress` 默认监听 document，合成键盘事件从 window 分发到不了（真实键盘无此问题），脚本 key() 改从 document.body 分发；② 边是 SVG `<g>`，单独合成 click 不触发 React onClick，完整 mousedown+mouseup+click 序列（真实点击等价）才行——脚本新增 clickMouseFull。另：自动化里 Delete 前的边选中态在首轮实验中被「节点选中集变化触发 effect 重建」洗掉，正是缺陷 1 的实锤。
+
+### [test] 14:24 · 验证
+- `node scripts/verify-m2-gui.mjs`：`M2 GUI: ALL PASS（26/26）`（原 23 + S7 两项 + S2f 一项；S4c 升级便签父节点断言）。
+- 前端单测 65/65（新增便签父节点挂载 1 条），构建通过。
+
+### [artifact] 14:25 · 产出
+- `e2a92a0`：自由便签挂到选中节点（纯函数 + store + 单测）
+- `b6f8cfc`：修复选中边按 Delete 无法断开连线（边选中保留 + Delete 拦截放行）
+- `958fdb3`：GUI 验收回归场景（S2f/S4c）+ 事件注入修正
+
+### [review] 14:26 · 复盘
+第二轮人工反馈再次证明「真实用户操作路径」与「自动化注入路径」的差异是双向的：用户抓出了自动化没覆盖的语义缺陷（Delete 拦截优先级、便签挂载预期），调试过程中也发现自动化自己的注入方式（window 按键、单发 click）与真实输入不等价，差点把「真缺陷」误判成「注入问题」。教训：① 键盘/点击注入一律按真实事件序列（body 分发 + mousedown/up/click 全序列）；② 受控组件模式（useEdgesState + 自建 effect）里，任何「重建」都要显式保留运行时状态（selected 等非数据字段），这是受控同步的通用陷阱；③ 产品语义预期（便签=子标签）应以用户为准，实现时的简化（挂根）要写清楚边界，别让「结构有效」掩盖「语义不对」。
+
+### [next] 14:27 · 下一步
+- [ ] M3 任务一：会话管理 + 时间线条目（07 §6）
+- [ ] GUI 脚本补焦点/选区断言（document.activeElement / getSelection）
