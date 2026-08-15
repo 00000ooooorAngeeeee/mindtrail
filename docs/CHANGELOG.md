@@ -671,3 +671,28 @@ M2 总验收是 M2 五段会话里信息密度最高的一段：一次验收抓�
 ### [next] 14:27 · 下一步
 - [ ] M3 任务一：会话管理 + 时间线条目（07 §6）
 - [ ] GUI 脚本补焦点/选区断言（document.activeElement / getSelection）
+
+## 会话 19 · M2 人工验收复测修复（连线命中带 + 选中高亮）
+
+### [goal] 14:40 · 目标
+修复复测反馈：「自由连线依旧无法删除，单击线没有高亮」。表现为：真实命中检测（elementFromPoint）命中 20px 命中带、选中边描边变色、Delete 断开全链路绿。
+
+### [error] 14:42 · 错误
+复测仍失败，根因是**上一轮修复没有覆盖「真实点击的命中检测路径」**——自动化把事件直接投递到元素上，绕过了浏览器 hit-testing；而真实点击走 pointer-events 命中：
+1. **命中带失效**：XYFlow v12 基样式 `.react-flow__edge { pointer-events: visibleStroke }`，而交互路径渲染为 `stroke-opacity: 0`（透明描边不计为可见）→ 命中区只剩约 1.5px 的可见细线，点击几乎必失。修复：`.react-flow__edge-interaction { pointer-events: stroke }` 显式恢复 20px 命中带。
+2. **选中无高亮**：自由边的颜色走内联 `style`，内联样式压掉基样式的选中态变色（`.selected .react-flow__edge-path`）→ 即使选中也毫无视觉反馈。修复：颜色改走 CSS 类 `mm-free-edge`，选中时品牌色 + 2.5px 加粗。
+
+### [test] 14:44 · 验证
+- GUI 验收新增两条真实命中检测断言：S2f0（线中点四周 6px 的 elementFromPoint 命中交互路径）、S2f1（选中前后 computed stroke 变化）。
+- `node scripts/verify-m2-gui.mjs`：`M2 GUI: ALL PASS（28/28）`；前端构建通过。
+
+### [artifact] 14:45 · 产出
+- `7e1b892`：命中带恢复 + 选中高亮 + GUI 命中检测断言
+
+### [review] 14:46 · 复盘
+这次复测暴露了自动化验证最隐蔽的盲区：**「事件投递」不等于「真实可点」**——合成事件绕过 hit-testing，pointer-events 类缺陷（命中区细成一根线）在自动化里完全隐形。补救办法是给 GUI 脚本补「真实命中检测」断言（elementFromPoint），把浏览器命中路径纳入证据链，这比单纯增加场景更有价值，已作为惯例写入脚本。另：库基样式的行为（visibleStroke + 透明交互路径）与直觉相悖，读样式时要以「浏览器实际命中规则」为准，别默认库自带了交互命中。
+
+### [next] 14:47 · 下一步
+- [ ] M3 任务一：会话管理 + 时间线条目（07 §6）
+- [ ] GUI 脚本补焦点/选区断言（document.activeElement / getSelection）
+- [ ] 后续 GUI 场景凡涉及「可点击性」，一律带 elementFromPoint 命中断言
