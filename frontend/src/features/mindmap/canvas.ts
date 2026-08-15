@@ -6,13 +6,17 @@ import type { MindmapContent } from './content'
 import { nextEdgeId } from './content'
 import type { LayoutPoint } from './treeLayout'
 
-/** 树→画布：把布局结果平铺为各节点 layout 坐标（04 §6.4「布局结果平铺」）。无坐标的节点保持原 layout；坐标未变时不产生新对象。 */
+/**
+ * 树→画布：仅给无坐标（layout=null）的节点填充树布局坐标（04 §6.4「布局结果平铺」）。
+ * 已有画布坐标是用户自由摆放的成果，不覆盖——否则重启（默认树状）后切回画布会冲掉全部摆放
+ * （M2 总验收实测抓出，违反 07 §5「坐标持久化，重启不丢」）。
+ */
 export function flattenLayout(content: MindmapContent, positions: Map<string, LayoutPoint>): MindmapContent {
   let changed = false
   const nodes: MindmapContent['nodes'] = {}
   for (const [id, n] of Object.entries(content.nodes)) {
     const pos = positions.get(id)
-    if (pos && (n.layout?.x !== pos.x || n.layout?.y !== pos.y)) {
+    if (pos && n.layout == null) {
       nodes[id] = { ...n, layout: { ...pos } }
       changed = true
     } else {

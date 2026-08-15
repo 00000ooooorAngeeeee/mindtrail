@@ -49,6 +49,21 @@ describe('flattenLayout（树→画布平铺）', () => {
     const flat = flattenLayout(c, positions)
     expect(flattenLayout(flat, positions)).toBe(flat)
   })
+
+  it('已有画布坐标不被再次平铺覆盖（用户摆放成果保留，重启切回画布不丢）', () => {
+    const c = threeNodeTree()
+    const positions = new Map([
+      ['n1', { x: 0, y: 0 }],
+      ['n2', { x: 200, y: 0 }],
+      ['n3', { x: 200, y: 64 }],
+    ])
+    const flat = flattenLayout(c, positions)
+    const moved = moveNodesLayout(flat, [{ id: 'n2', x: 999, y: 888 }])
+    const again = flattenLayout(moved, positions)
+    expect(again.nodes.n2.layout).toEqual({ x: 999, y: 888 })
+    expect(again.nodes.n1.layout).toEqual({ x: 0, y: 0 })
+    expect(again.nodes.n3.layout).toEqual({ x: 200, y: 64 })
+  })
 })
 
 describe('isStrictTree（画布→树严格树判定）', () => {
