@@ -11,6 +11,7 @@ import {
   ReactFlow,
   useEdgesState,
   useNodesState,
+  useUpdateNodeInternals,
   type Connection,
   type Edge,
   type Node,
@@ -34,6 +35,24 @@ const NODE_H = 44
 const DROP_RADIUS = 120
 
 const nodeTypes = { mindmap: MindmapNode }
+
+/**
+ * 节点（重）建后显式触发 XYFlow 测量（M2 总验收 GUI 实测修复）。
+ * 本应用的节点/手柄是异步重建的（内容加载、增删改、模式切换），XYFlow 的 ResizeObserver 自动测量
+ * 在这些场景下不触发——未测量的节点保持 visibility:hidden（画布不可见）且 handleBounds 缺失（自由连线
+ * 无法完成）。必须放在 <ReactFlow> 子树内：useUpdateNodeInternals 依赖 ReactFlow 内部 store 上下文，
+ * 放在外面拿到的是外层 Provider 的空 store（本应用没有 Provider），调用会静默空转。
+ */
+function NodeMeasureTrigger({ content }: { content: MindmapContent | null }) {
+  const updateNodeInternals = useUpdateNodeInternals()
+  useEffect(() => {
+    if (!content) return
+    const ids = Object.keys(content.nodes)
+    const timer = setTimeout(() => updateNodeInternals(ids), 30)
+    return () => clearTimeout(timer)
+  }, [content, updateNodeInternals])
+  return null
+}
 
 function buildNodes(
   content: MindmapContent,
@@ -492,6 +511,7 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
             <Background variant={BackgroundVariant.Dots} gap={24} size={1} />
             <Controls showInteractive={false} />
             <MiniMap pannable zoomable />
+            <NodeMeasureTrigger content={content} />
           </ReactFlow>
         </div>
       )}
