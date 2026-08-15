@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { base64ToBytes, downloadBase64File, downloadTextFile, sanitizeFileName, triggerDownload } from './download'
+import { base64ToBytes, downloadBase64File, downloadTextFile, sanitizeFileName } from './download'
 
 describe('sanitizeFileName（Windows 文件名安全化，与后端规则一致）', () => {
   it('替换非法字符与控制字符为下划线', () => {

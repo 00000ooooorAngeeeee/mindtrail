@@ -11,7 +11,7 @@ export function sanitizeFileName(name: string | null | undefined, fallback = '�
 }
 
 /** Base64 → 字节数组（用于后端返回的 PNG 内容）。非法输入抛错，由调用方转提示。 */
-export function base64ToBytes(base64: string): Uint8Array {
+export function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
   if (!base64) return new Uint8Array(0)
   let source = base64.replace(/\s/g, '')
   const pad = source.length % 4
