@@ -1,5 +1,7 @@
 import { del, get, post, put } from './client'
-import type { Mindmap } from './types'
+import type { Mindmap, MindmapExportFile } from './types'
+
+export type MindmapExportType = 'PNG' | 'OPML'
 
 export function listMindmaps(workspaceId: number): Promise<Mindmap[]> {
   return get<Mindmap[]>(`/workspaces/${workspaceId}/mindmaps`)
@@ -20,4 +22,9 @@ export function saveMindmap(id: number, contentJson: string, updatedAt?: string)
 
 export function deleteMindmap(id: number): Promise<void> {
   return del<void>(`/mindmaps/${id}`)
+}
+
+/** 导图导出（PRD B5）：PNG 返回 Base64，OPML 返回 XML 原文；文件名由后端清理后给出。 */
+export function exportMindmap(id: number, type: MindmapExportType): Promise<MindmapExportFile> {
+  return post<MindmapExportFile>(`/mindmaps/${id}/export?type=${type}`)
 }

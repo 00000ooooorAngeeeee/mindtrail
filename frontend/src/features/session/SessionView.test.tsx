@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { SessionView } from './SessionView'
-import { exportSessionMarkdown, getSession, updateSession } from '../../api/sessions'
+import { exportSessionJson, exportSessionMarkdown, getSession, updateSession } from '../../api/sessions'
 import { addEntry, deleteEntry, updateEntry } from '../../api/entries'
 import { bindCommits, getCommitDetail, getCommits, getSessionCommits, unbindCommit } from '../../api/git'
 import { filterEntriesByTag, listTags } from '../../api/tags'
@@ -14,6 +14,7 @@ vi.mock('../../api/sessions', () => ({
   getSession: vi.fn(),
   updateSession: vi.fn(),
   exportSessionMarkdown: vi.fn(),
+  exportSessionJson: vi.fn(),
 }))
 vi.mock('../../api/entries', () => ({
   addEntry: vi.fn(),
@@ -35,6 +36,7 @@ vi.mock('../../api/tags', () => ({
 const getMock = vi.mocked(getSession)
 const updateSessionMock = vi.mocked(updateSession)
 const exportMock = vi.mocked(exportSessionMarkdown)
+const exportJsonMock = vi.mocked(exportSessionJson)
 const addMock = vi.mocked(addEntry)
 const updateEntryMock = vi.mocked(updateEntry)
 const deleteEntryMock = vi.mocked(deleteEntry)
@@ -96,6 +98,7 @@ describe('SessionView 会话详情页（时间线条目）', () => {
     getSessionCommitsMock.mockResolvedValue([])
     detailMock.mockReset()
     exportMock.mockReset()
+    exportJsonMock.mockReset()
     listTagsMock.mockReset()
     filterEntriesMock.mockReset()
     listTagsMock.mockResolvedValue([])
@@ -441,6 +444,49 @@ describe('SessionView 会话详情页（时间线条目）', () => {
       fireEvent.click(screen.getByText('导出 Markdown'))
 
       await waitFor(() => expect(exportMock).toHaveBeenCalledWith(1))
+      expect(createSpy).toHaveBeenCalled()
+      expect(revokeSpy).toHaveBeenCalled()
+    } finally {
+      URL.createObjectURL = origCreate
+      URL.revokeObjectURL = origRevoke
+    }
+  })
+
+  it('导出 JSON：调用 JSON 导出接口并以机器可读格式触发下载（PRD C5）', async () => {
+    const origCreate = URL.createObjectURL
+    const origRevoke = URL.revokeObjectURL
+    const createSpy = vi.fn(() => 'blob:mock')
+    const revokeSpy = vi.fn()
+    URL.createObjectURL = createSpy
+    URL.revokeObjectURL = revokeSpy
+    try {
+      exportJsonMock.mockResolvedValue({
+        format: 'trailmind-session-json',
+        version: 1,
+        session: {
+          id: 1,
+          title: '测试会话',
+          status: 'active',
+          workspaceId: 3,
+          workspace: null,
+          repoPath: null,
+          startHead: null,
+          endHead: null,
+          summary: null,
+          startedAt: '2025-06-01T09:00:00',
+          endedAt: null,
+          createdAt: null,
+          updatedAt: null,
+        },
+        entries: [],
+        entryCount: 0,
+      })
+      render(<SessionView sessionId={1} onBack={() => {}} />)
+      await screen.findByText('测试会话')
+
+      fireEvent.click(screen.getByText('导出 JSON'))
+
+      await waitFor(() => expect(exportJsonMock).toHaveBeenCalledWith(1))
       expect(createSpy).toHaveBeenCalled()
       expect(revokeSpy).toHaveBeenCalled()
     } finally {

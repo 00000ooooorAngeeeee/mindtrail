@@ -189,6 +189,52 @@ export interface SearchResults {
   sessions: SearchSessionHit[]
 }
 
+// ---- 导出（M4 任务三，PRD B5/C5） ----
+
+/** 会话 JSON 导出（trailmind-session-json v1，06 §4 附录协议；时间为 ISO-8601 秒级字符串）。 */
+export interface SessionJson {
+  id: number
+  title: string
+  status: 'active' | 'completed'
+  workspaceId: number
+  workspace: string | null
+  repoPath: string | null
+  startHead: string | null
+  endHead: string | null
+  summary: string | null
+  startedAt: string | null
+  endedAt: string | null
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export interface SessionJsonEntry {
+  id: number
+  sessionId: number
+  seq: number
+  type: EntryType
+  contentMd: string
+  tags: string[]
+  commits: string[]
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export interface SessionJsonExport {
+  format: 'trailmind-session-json'
+  version: number
+  session: SessionJson
+  entries: SessionJsonEntry[]
+  entryCount: number
+}
+
+/** 导图导出产物（POST /mindmaps/{id}/export）：PNG content 为 Base64，OPML content 为 XML 原文。 */
+export interface MindmapExportFile {
+  filename: string
+  contentType: string
+  content: string
+}
+
 // ---- 标签（M4 任务二，PRD D3/D4） ----
 
 /** 工作区级标签（GET /tags，含条目使用计数）。 */

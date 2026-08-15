@@ -19,8 +19,10 @@ import {
   type XYPosition,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+import { exportMindmap, type MindmapExportType } from '../../api/mindmaps'
 import { useMindmapStore } from '../../store/useMindmapStore'
 import type { MindmapMode } from '../../store/useMindmapStore'
+import { downloadBase64File, downloadTextFile } from '../../utils/download'
 import { descendants } from './content'
 import type { MindmapContent } from './content'
 import { computeTreeLayout, type LayoutPoint } from './treeLayout'
@@ -202,6 +204,9 @@ export function MindMapEditor({
   const [dialogOpen, setDialogOpen] = useState(false)
   // 搜索跳转定位（PRD D2）：闪烁中的节点 id，闪烁结束清空。
   const [flashId, setFlashId] = useState<string | null>(null)
+  // 导出（PRD B5，M4 任务三）：当前导图 → PNG/OPML；导出前若有未保存修改先保存，保证产物与画布一致。
+  const [exporting, setExporting] = useState<MindmapExportType | null>(null)
+  const [exportError, setExportError] = useState<string | null>(null)
   const dragging = useRef(false)
   const dropTargetRef = useRef<string | null>(null)
   const fittedRef = useRef(false)
@@ -354,6 +359,32 @@ export function MindMapEditor({
     addStickyNote({ x: Math.round(p.x), y: Math.round(p.y) })
   }, [content, addStickyNote])
 
+  /** 导出当前导图：先保存未落库修改（避免导出旧数据），再调后端生成产物并下载。 */
+  const handleExport = async (type: MindmapExportType) => {
+    if (!mindmap || exporting) return
+    if (useMindmapStore.getState().dirty) {
+      await useMindmapStore.getState().save()
+    }
+    if (useMindmapStore.getState().dirty) {
+      setExportError('导图尚未保存成功，无法导出')
+      return
+    }
+    setExporting(type)
+    setExportError(null)
+    try {
+      const file = await exportMindmap(mindmap.id, type)
+      if (type === 'PNG') {
+        downloadBase64File(file.filename, file.content, file.contentType)
+      } else {
+        downloadTextFile(file.filename, file.content, file.contentType)
+      }
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : '导出失败')
+    } finally {
+      setExporting(null)
+    }
+  }
+
   // 快捷键（08 §4.3 / 03 §5）：Ctrl+N 加节点、Delete 删除、Ctrl+S 保存、Ctrl+Z 撤销、Ctrl+Shift+Z/Ctrl+Y 重做、Ctrl+1/2 切换模式。
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
@@ -430,6 +461,12 @@ export function MindMapEditor({
           <button onClick={() => void save()} disabled={saving || !dirty}>
             {saving ? '保存中…' : dirty ? '保存*' : '已保存'}
           </button>
+          <button onClick={() => void handleExport('PNG')} disabled={exporting != null} title="导出整图为 PNG">
+            {exporting === 'PNG' ? 'PNG 导出中…' : '导出 PNG'}
+          </button>
+          <button onClick={() => void handleExport('OPML')} disabled={exporting != null} title="导出树状大纲为 OPML">
+            {exporting === 'OPML' ? 'OPML 导出中…' : '导出 OPML'}
+          </button>
         </div>
       </div>
 
@@ -473,10 +510,16 @@ export function MindMapEditor({
         </div>
       )}
 
-      {error && content && (
+      {(error || exportError) && content && (
         <div className="mm-toast" role="alert">
-          <span>{error}</span>
-          <button onClick={clearError} title="关闭">
+          <span>{error ?? exportError}</span>
+          <button
+            onClick={() => {
+              clearError()
+              setExportError(null)
+            }}
+            title="关闭"
+          >
             ×
           </button>
         </div>

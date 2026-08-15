@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { addEntry, deleteEntry, updateEntry } from '../../api/entries'
 import { bindCommits, getCommitDetail, getCommits, getSessionCommits, unbindCommit } from '../../api/git'
-import { exportSessionMarkdown, getSession, updateSession } from '../../api/sessions'
+import { exportSessionJson, exportSessionMarkdown, getSession, updateSession } from '../../api/sessions'
 import { filterEntriesByTag, listTags } from '../../api/tags'
 import {
   ENTRY_TYPE_ICONS,
@@ -31,6 +31,7 @@ import { renderMarkdown } from './markdown'
 import { loadEntryType, saveEntryType } from './typeMemory'
 import { useInfiniteScroll } from './useInfiniteScroll'
 import { formatTime } from './time'
+import { downloadTextFile, sanitizeFileName } from '../../utils/download'
 import './session.css'
 
 export const PAGE_SIZE = 50
@@ -301,19 +302,19 @@ export function SessionView({
     }
   }
 
-  /** 导出会话 Markdown（严格 06 §4，03 §3.5 头部导出入口）：下载为 <标题>.md。 */
-  const handleExport = async () => {
+  /** 导出会话（03 §3.5 头部导出入口，PRD C5）：Markdown 严格 06 §4；JSON 为 trailmind-session-json v1。 */
+  const handleExport = async (kind: 'markdown' | 'json') => {
     if (!session || exporting) return
     setExporting(true)
     try {
-      const md = await exportSessionMarkdown(sessionId)
-      const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${session.title}.md`
-      a.click()
-      URL.revokeObjectURL(url)
+      const base = sanitizeFileName(session.title, '会话')
+      if (kind === 'markdown') {
+        const md = await exportSessionMarkdown(sessionId)
+        downloadTextFile(`${base}.md`, md, 'text/markdown;charset=utf-8')
+      } else {
+        const json = await exportSessionJson(sessionId)
+        downloadTextFile(`${base}.json`, JSON.stringify(json, null, 2), 'application/json;charset=utf-8')
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : '导出失败')
     } finally {
@@ -429,8 +430,11 @@ export function SessionView({
           {session.repoPath ? ` · 仓库 ${session.repoPath}` : ''}
         </p>
         <div className="session-header-actions">
-          <button onClick={() => void handleExport()} disabled={exporting}>
+          <button onClick={() => void handleExport('markdown')} disabled={exporting}>
             {exporting ? '导出中…' : '导出 Markdown'}
+          </button>
+          <button onClick={() => void handleExport('json')} disabled={exporting}>
+            {exporting ? '导出中…' : '导出 JSON'}
           </button>
           {!completed && <button onClick={() => setCompleting(true)}>结束会话</button>}
         </div>
