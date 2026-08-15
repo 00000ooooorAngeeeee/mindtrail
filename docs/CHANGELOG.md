@@ -566,3 +566,53 @@ P1 项收尾，延续「纯函数 + TDD + 统一 store 入口」的路子，M2 �
 - [ ] 遗留：M1 验收清单性能项（20 节点无卡顿、500 节点 ≥45fps、刷新/重启恢复，需实机）
 - [ ] 遗留：导图重命名（PRD B4，补 PUT 携带 name 并同步 search_text 的 name 部分）
 - [ ] 遗留：verify.mjs 补导图往返冒烟
+
+## 会话 16 · M2 总验收（GUI 实机验证 + 三个验收抓出的缺陷修复）
+
+### [goal] 13:00 · 目标
+完成 M2 总验收：07 §5 六项验收清单逐项以硬证据勾选。表现为：真实 Electron 应用中完成全部 GUI 交互场景（切模式/拖拽/连线/三选一/形状颜色/便签/框选批量/重启恢复/100 节点拖拽帧率）并自动断言通过；三套单测全绿；verify.mjs 冒烟含导图往返；本会话 review 与文档同步完成。
+
+### [decision] 13:05 · 决策
+GUI 验证注入方式：CDP 连接真实 Electron 渲染进程，但交互事件用「页面内合成事件」（MouseEvent/PointerEvent/KeyboardEvent + view:window）而非 CDP Input 域。理由：实测 CDP Input.dispatchKeyEvent 在窗口失焦时不达页面、dispatchMouseEvent 的按下事件被吞；合成事件走真实 DOM 事件流水线（React 合成系统、d3-drag、XYFlow 手柄/框选链路全部真实执行），证据等价且确定。放弃 CDP Input 因交付不可靠。
+> 事件注入要点（踩坑全集）：① d3-drag 依赖 event.view 注册 move 监听，合成 MouseEvent 必须带 view:window；② 连线手柄绑的是 React onMouseDown（非 pointerdown），且手柄带 nodrag 类不会误触节点拖拽；③ selectionOnDrag 下 pane 的点击走 onPointerUp 路径，双击/框选必须发 PointerEvent 并覆写 setPointerCapture（合成指针无活动 pointerId）；④ 快捷键发 window 上的 KeyboardEvent。
+
+### [decision] 13:08 · 决策
+Electron 启动加反后台化开关（--disable-renderer-backgrounding / --disable-background-timer-throttling / --disable-features=CalculateNativeWinOcclusion）。理由：agent 环境的窗口常处于遮挡状态，Chromium 暂停 rAF 与节流定时器，导致 XYFlow 的 ResizeObserver 自动测量、fitView、useUpdateNodeInternals（内部 rAF 包装）全部冻结；开关让验证确定性，真实用户前台使用不受影响。
+
+### [decision] 13:10 · 决策
+节点测量改为「ReactFlow 子树内的 NodeMeasureTrigger + useUpdateNodeInternals 显式触发」，且必须放在 <ReactFlow> 子树内。理由：hook 依赖 ReactFlow 内部 store 上下文；放在外层 Provider（本应用无 Provider）拿到的是空 store，调用静默空转——这是第二轮修复失败的真实原因。放弃「依赖 RO 自动测量」，因其在本应用的异步节点重建/遮挡场景下不可靠。
+
+### [decision] 13:15 · 决策
+flattenLayout 语义从「用树布局覆盖全部节点坐标」改为「仅填充 layout=null 的节点」。理由：原语义下每次树→画布切换都会冲掉用户自由摆放的坐标，重启（默认树状）后切回画布即丢失，违反 07 §5「坐标持久化，重启不丢」；填充式语义同时满足 B3.2（首切平铺）与摆放成果保留。
+
+### [error] 13:20 · 错误
+GUI 首跑编辑器白屏：`Uncaught Error: Minified React error #185（Maximum update depth exceeded）`。根因：React Flow onSelectionChange 每次回填同一选中集都新建数组 → effect 重放 setNodes → 再触发 onSelectionChange 的无限循环。修复：setSelectedIds 对顺序无关的同集幂等短路（b2b2b10），新增 store 单测 3 条锁死。教训：该缺陷自会话 15 选中模型重构引入，因编辑器从未被实机渲染而潜伏至今——单测覆盖不到「组件装配层」的交互循环。
+
+### [error] 13:25 · 错误
+GUI 验收连续失败链（逐层剥出根因，共四层）：① 节点拖拽不动、事件落到 pane → CDP 按键/按下事件不达页面；② 换成合成事件后节点仍不动 → d3-drag 需 event.view；③ 节点动了但连线从不启动 → 手柄是 onMouseDown 而非 pointerdown；④ 连线启动后无法完成 + 命中检测落空 → **节点从未被 XYFlow 测量：visibility 一直是 hidden、handleBounds 一直缺失**（画布自 M1 起实机不可见！），根因是 RO 自动测量在本应用不触发 + 验证窗口遮挡冻结 rAF。修复：NodeMeasureTrigger 显式测量（3d64b92）。
+
+### [error] 13:28 · 错误
+verify.mjs 导图往返冒烟两连败：① SQL 未加库名（`FROM mindmap` → `trailmind.mindmap`）；② search_text 中文关键词「缺失」——mysql CLI Windows 默认 GBK 客户端字符集（会话 9 记录过的坑），加 `--default-character-set=utf8mb4` 后全绿。
+
+### [test] 13:30 · 验证
+- 前端 `npm test`：64/64（新增 store 幂等 3 + flatten 摆放保留 1）；`npm run build` 通过。
+- scripts `node --test`：12/12（checkSavedContent 4 + gridContent 3 + 原有 5）。
+- live 冒烟 `node scripts/verify.mjs`：`SMOKE: ALL PASS`（health/schema/workspace/mindmap 往返含中文 search_text 与 ngram MATCH/级联删除）。
+- **GUI 实机验收 `node scripts/verify-m2-gui.mjs`：`M2 GUI: ALL PASS（23/23）`**——覆盖 07 §5 全部六项：S0 导航与节点可见性、S1 树→画布平铺无重叠+自由拖拽等比变化+坐标落库、S2 自由连线持久化+三选一三分支、S3 两模式增删改同步、S4 形状/颜色/加粗/便签落库+框选多选+批量移动+批量删除（级联子树）、S5 全重启后坐标/样式/便签恢复+后端优雅退出、S6 101 节点渲染+拖拽期 rAF 帧率 ≥30fps。截图存档 scripts/out/m2-gui/。
+
+### [artifact] 13:32 · 产出
+- `b18bc7b`：verify.mjs 导图往返冒烟 + checkSavedContent 纯函数 + GUI 驱动脚本初版
+- `b2b2b10`：选中集同集幂等更新（React #185 无限循环修复）+ store 单测
+- `3d64b92`：NodeMeasureTrigger 显式节点测量（画布可见性 + 连线失效修复）
+- `4a6fb90`：flattenLayout 只填充缺失坐标（摆放成果跨切换/重启不丢）
+- `d46e5a0`：GUI 实机验证驱动终版（合成事件注入 + 反后台化开关）+ verify ngram 断言
+
+### [review] 13:35 · 复盘
+M2 总验收是 M2 五段会话里信息密度最高的一段：一次验收抓出三个真实缺陷（无限渲染循环、画布节点自 M1 起实机不可见、摆放坐标被平铺覆盖），其中「节点从未被测量」意味着此前所有「建议人工目测」的环节如果真有人目测，一眼就会发现画布是空的——**自动 GUI 验证不是锦上添花，是这类交互缺陷的唯一防线**。四点教训：① 组件装配层的交互循环（onSelectionChange 回填）单测覆盖不到，必须有无头浏览器级验证；② XYFlow 的测量/上下文机制坑位集中（RO 触发条件、hook 必须在子树内、domNode 层级），遇到「静默无效」优先怀疑上下文/异步链路而非业务逻辑；③ 合成事件驱动 GUI 要按各库的真实监听器类型投喂（d3-drag 用 mouse、手柄用 mouse、框选用 pointer），并补 view:window；④ 验收脚本自身也会犯错（本会话修了 5 处脚本断言 bug），脚本与产品代码同受「先红后绿、证据说话」约束。遗留清单见 next。
+
+### [next] 13:36 · 下一步
+- [x] M2 总验收（07 §5 六项全过；AGENTS.md/docs 进度已同步至 M3）
+- [ ] M3 任务一：会话管理 + 时间线条目（07 §6：会话开始/结束/列表/删除、start_head、条目追加/编辑/删除/seq）
+- [ ] 遗留：M1 验收清单性能项——20 节点 ≤100ms/操作 与 500 节点 ≥45fps 仍未实测（需实机人工或未来 GUI 脚本补场景）
+- [ ] 遗留：导图重命名（PRD B4，补 PUT 携带 name 并同步 search_text 的 name 部分）
+- [ ] 遗留：M2 GUI 验证脚本可作 Playwright 级回归资产，M3 会话重跑一遍防回归（成本约 5 分钟）
