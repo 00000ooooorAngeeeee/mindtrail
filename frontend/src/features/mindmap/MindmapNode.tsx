@@ -15,6 +15,8 @@ export type MindmapNodeData = {
   hasChildren: boolean
   childCount: number
   collapsed: boolean
+  /** 自由便签（无文本纯形状，PRD B2.5）。 */
+  sticky?: boolean
   /** 画布模式：渲染连接手柄。 */
   connectable?: boolean
   /** 画布模式：节点当前坐标（工具栏「加子节点」在节点旁落点用）。 */
@@ -69,7 +71,7 @@ export function MindmapNode({ id, data, selected }: NodeProps<MindmapRFNode>) {
 
   return (
     <div
-      className={`mm-node${selected ? ' selected' : ''}${data.isRoot ? ' root' : ''}${data.hover ? ' drop-target' : ''} shape-${data.style.shape}${data.style.bold ? ' bold' : ''}`}
+      className={`mm-node${selected ? ' selected' : ''}${data.isRoot ? ' root' : ''}${data.hover ? ' drop-target' : ''}${data.sticky ? ' sticky' : ''} shape-${data.style.shape}${data.style.bold ? ' bold' : ''}`}
       style={{ '--node-bg': color.bg, '--node-border': color.border } as CSSProperties}
       onDoubleClick={(e) => {
         e.stopPropagation()
@@ -85,9 +87,11 @@ export function MindmapNode({ id, data, selected }: NodeProps<MindmapRFNode>) {
 
       {selected && !editing && (
         <div className="mm-node-toolbar">
-          <button title="添加子节点" onClick={onAddChild}>
-            ＋
-          </button>
+          {!data.sticky && (
+            <button title="添加子节点" onClick={onAddChild}>
+              ＋
+            </button>
+          )}
           <button title="编辑" onClick={startEdit}>
             ✎
           </button>

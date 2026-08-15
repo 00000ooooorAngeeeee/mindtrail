@@ -253,6 +253,16 @@
   font-weight: 600;
 }
 
+/* 自由便签（PRD B2.5）：紧凑无文本备注卡（琥珀底由 style.color 提供，此处只收尺寸） */
+.mm-node.sticky {
+  min-width: 72px;
+  max-width: 160px;
+}
+
+.mm-node.sticky .mm-node-body {
+  min-height: 56px;
+}
+
 .mm-node-text {
   display: block;
   white-space: pre-wrap;

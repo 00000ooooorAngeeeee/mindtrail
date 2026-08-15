@@ -6,12 +6,14 @@ import { getMindmap, saveMindmap } from '../api/mindmaps'
 import type { Mindmap } from '../api/types'
 import {
   addChild as addChildPure,
+  addStickyNote as addStickyNotePure,
+  deleteNodes as deleteNodesPure,
   deleteSubtree,
   moveNode as moveNodePure,
   parseContent,
   serializeContent,
   toggleCollapse as toggleCollapsePure,
-  updateNodeStyle as updateNodeStylePure,
+  updateNodesStyle as updateNodesStylePure,
   updateNodeText,
 } from '../features/mindmap/content'
 import type { MindmapContent, MindmapNodeStyle } from '../features/mindmap/content'
@@ -19,7 +21,7 @@ import {
   addFreeEdge as addFreeEdgePure,
   flattenLayout,
   isStrictTree,
-  moveNodeLayout as moveNodeLayoutPure,
+  moveNodesLayout as moveNodesLayoutPure,
   removeAllFreeEdges,
   removeFreeEdge as removeFreeEdgePure,
 } from '../features/mindmap/canvas'
@@ -41,21 +43,27 @@ interface MindmapState {
   mindmap: Mindmap | null
   content: MindmapContent | null
   history: History
-  selectedId: string | null
+  /** 当前选中节点 id 集合（多选：框选/Shift+点选；单选时长度 0 或 1，PRD B2.6）。 */
+  selectedIds: string[]
   mode: MindmapMode
   loading: boolean
   saving: boolean
   dirty: boolean
   error: string | null
   load: (id: number) => Promise<void>
+  /** 单选（传 null 清空选择）。 */
   select: (id: string | null) => void
+  /** 框选/Shift 多选结果：整体替换选中集（由 React Flow onSelectionChange 回填）。 */
+  setSelectedIds: (ids: string[]) => void
   addChild: (parentId: string, layout?: { x: number; y: number } | null) => void
+  addStickyNote: (layout?: { x: number; y: number } | null) => void
   updateText: (id: string, text: string) => void
-  updateStyle: (id: string, style: Partial<MindmapNodeStyle>) => void
+  updateStyles: (ids: string[], style: Partial<MindmapNodeStyle>) => void
   deleteNode: (id: string) => void
+  deleteNodes: (ids: string[]) => void
   moveNode: (id: string, newParentId: string) => void
   toggleCollapse: (id: string) => void
-  moveNodeLayout: (id: string, x: number, y: number) => void
+  moveNodesLayout: (updates: { id: string; x: number; y: number }[]) => void
   addFreeEdge: (source: string, target: string) => void
   removeFreeEdge: (edgeId: string) => void
   /** 切换模式；画布→树遇非树边返回 'non-tree'（由 UI 弹三选一，07 §5）。 */
@@ -70,9 +78,10 @@ interface MindmapState {
   save: () => Promise<void>
 }
 
-/** 选中节点在内容变更后可能已不存在（如撤销了删除它的那一步），回退为 null。 */
-function fixSelection(content: MindmapContent, selectedId: string | null): string | null {
-  return selectedId && content.nodes[selectedId] ? selectedId : null
+/** 选中节点在内容变更后可能已不存在（如撤销了删除它的那一步），过滤掉不存在的 id；无变化返回原数组引用。 */
+function fixSelection(content: MindmapContent, selectedIds: string[]): string[] {
+  if (selectedIds.every((id) => content.nodes[id])) return selectedIds
+  return selectedIds.filter((id) => content.nodes[id])
 }
 
 export const useMindmapStore = create<MindmapState>()((set, get) => {
@@ -90,14 +99,14 @@ export const useMindmapStore = create<MindmapState>()((set, get) => {
   }
 
   /** 统一变更入口：记录历史、置 dirty、调度防抖保存；无变化（next===content）则跳过。 */
-  const apply = (next: MindmapContent, selectedId?: string | null) => {
+  const apply = (next: MindmapContent, selectedIds?: string[]) => {
     const { content, history } = get()
     if (!content || next === content) return
     set({
       content: next,
       history: recordHistory(history, content),
       dirty: true,
-      ...(selectedId !== undefined ? { selectedId } : {}),
+      ...(selectedIds !== undefined ? { selectedIds } : {}),
     })
     scheduleSave()
   }
@@ -106,7 +115,7 @@ export const useMindmapStore = create<MindmapState>()((set, get) => {
     mindmap: null,
     content: null,
     history: { past: [], future: [] },
-    selectedId: null,
+    selectedIds: [],
     mode: 'tree',
     loading: false,
     saving: false,
@@ -122,7 +131,7 @@ export const useMindmapStore = create<MindmapState>()((set, get) => {
           mindmap,
           content: parseContent(mindmap.contentJson),
           history: { past: [], future: [] },
-          selectedId: null,
+          selectedIds: [],
           mode: 'tree',
           loading: false,
           dirty: false,
@@ -132,14 +141,24 @@ export const useMindmapStore = create<MindmapState>()((set, get) => {
       }
     },
 
-    select: (id) => set({ selectedId: id }),
+    select: (id) => set({ selectedIds: id ? [id] : [] }),
+
+    setSelectedIds: (ids) => set({ selectedIds: ids }),
 
     addChild: (parentId, layout = null) => {
       const { content } = get()
       if (!content) return
       const next = addChildPure(content, parentId, '', layout)
       const newId = Object.keys(next.nodes).find((id) => !(id in content.nodes))
-      apply(next, newId ?? parentId)
+      apply(next, [newId ?? parentId])
+    },
+
+    addStickyNote: (layout = null) => {
+      const { content } = get()
+      if (!content) return
+      const next = addStickyNotePure(content, layout)
+      const newId = Object.keys(next.nodes).find((id) => !(id in content.nodes))
+      apply(next, [newId ?? content.rootNodeId])
     },
 
     updateText: (id, text) => {
@@ -148,16 +167,24 @@ export const useMindmapStore = create<MindmapState>()((set, get) => {
       apply(updateNodeText(content, id, text))
     },
 
-    updateStyle: (id, style) => {
+    updateStyles: (ids, style) => {
       const { content } = get()
       if (!content) return
-      apply(updateNodeStylePure(content, id, style))
+      apply(updateNodesStylePure(content, ids, style))
     },
 
     deleteNode: (id) => {
-      const { content, selectedId } = get()
+      const { content, selectedIds } = get()
       if (!content) return
-      apply(deleteSubtree(content, id), selectedId === id ? null : selectedId)
+      const next = deleteSubtree(content, id)
+      apply(next, fixSelection(next, selectedIds))
+    },
+
+    deleteNodes: (ids) => {
+      const { content, selectedIds } = get()
+      if (!content) return
+      const next = deleteNodesPure(content, ids)
+      apply(next, fixSelection(next, selectedIds))
     },
 
     moveNode: (id, newParentId) => {
@@ -172,11 +199,11 @@ export const useMindmapStore = create<MindmapState>()((set, get) => {
       apply(toggleCollapsePure(content, id))
     },
 
-    moveNodeLayout: (id, x, y) => {
+    moveNodesLayout: (updates) => {
       const { content } = get()
       if (!content) return
-      // 坐标取整：防抖保存序列化时避免拖拽浮点噪声（PRD B2.1 位置持久化）。
-      apply(moveNodeLayoutPure(content, id, Math.round(x), Math.round(y)))
+      // 坐标取整（防抖保存序列化时避免拖拽浮点噪声，PRD B2.1 位置持久化）。
+      apply(moveNodesLayoutPure(content, updates.map((u) => ({ id: u.id, x: Math.round(u.x), y: Math.round(u.y) }))))
     },
 
     addFreeEdge: (source, target) => {
@@ -218,7 +245,7 @@ export const useMindmapStore = create<MindmapState>()((set, get) => {
     },
 
     undo: () => {
-      const { content, history, selectedId } = get()
+      const { content, history, selectedIds } = get()
       if (!content) return
       const r = undoHistory(history, content)
       if (!r) return
@@ -226,13 +253,13 @@ export const useMindmapStore = create<MindmapState>()((set, get) => {
         content: r.content,
         history: r.history,
         dirty: true,
-        selectedId: fixSelection(r.content, selectedId),
+        selectedIds: fixSelection(r.content, selectedIds),
       })
       scheduleSave()
     },
 
     redo: () => {
-      const { content, history, selectedId } = get()
+      const { content, history, selectedIds } = get()
       if (!content) return
       const r = redoHistory(history, content)
       if (!r) return
@@ -240,7 +267,7 @@ export const useMindmapStore = create<MindmapState>()((set, get) => {
         content: r.content,
         history: r.history,
         dirty: true,
-        selectedId: fixSelection(r.content, selectedId),
+        selectedIds: fixSelection(r.content, selectedIds),
       })
       scheduleSave()
     },

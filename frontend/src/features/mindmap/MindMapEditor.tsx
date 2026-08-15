@@ -39,7 +39,7 @@ function buildNodes(
   content: MindmapContent,
   positions: Map<string, LayoutPoint>,
   childCount: Map<string, number>,
-  selectedId: string | null,
+  selectedIds: string[],
   mode: MindmapMode,
 ): MindmapRFNode[] {
   const out: MindmapRFNode[] = []
@@ -50,10 +50,13 @@ function buildNodes(
       id,
       type: 'mindmap',
       position: pos,
-      selected: id === selectedId,
+      selected: selectedIds.includes(id),
+      // 节点删除走 store + window 键处理（带确认），禁用 React Flow 内建删除避免双删（PRD B2.6 批量删除）。
+      deletable: false,
       data: {
         text: n.text,
         style: n.style,
+        sticky: n.sticky,
         isRoot: id === content.rootNodeId,
         hasChildren: (childCount.get(id) ?? 0) > 0,
         childCount: childCount.get(id) ?? 0,
@@ -125,11 +128,13 @@ function findDropTarget(
 export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack: () => void }) {
   const load = useMindmapStore((s) => s.load)
   const select = useMindmapStore((s) => s.select)
+  const setSelectedIds = useMindmapStore((s) => s.setSelectedIds)
   const addChild = useMindmapStore((s) => s.addChild)
-  const updateStyle = useMindmapStore((s) => s.updateStyle)
-  const deleteNode = useMindmapStore((s) => s.deleteNode)
+  const addStickyNote = useMindmapStore((s) => s.addStickyNote)
+  const updateStyles = useMindmapStore((s) => s.updateStyles)
+  const deleteNodes = useMindmapStore((s) => s.deleteNodes)
   const moveNode = useMindmapStore((s) => s.moveNode)
-  const moveNodeLayout = useMindmapStore((s) => s.moveNodeLayout)
+  const moveNodesLayout = useMindmapStore((s) => s.moveNodesLayout)
   const addFreeEdge = useMindmapStore((s) => s.addFreeEdge)
   const removeFreeEdge = useMindmapStore((s) => s.removeFreeEdge)
   const switchMode = useMindmapStore((s) => s.switchMode)
@@ -143,7 +148,7 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
   const mindmap = useMindmapStore((s) => s.mindmap)
   const content = useMindmapStore((s) => s.content)
   const history = useMindmapStore((s) => s.history)
-  const selectedId = useMindmapStore((s) => s.selectedId)
+  const selectedIds = useMindmapStore((s) => s.selectedIds)
   const mode = useMindmapStore((s) => s.mode)
   const loading = useMindmapStore((s) => s.loading)
   const error = useMindmapStore((s) => s.error)
@@ -189,14 +194,14 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
   // 布局/内容变化时同步节点与边（拖拽中跳过，避免打断拖拽）。
   useEffect(() => {
     if (!content || dragging.current) return
-    setNodes(buildNodes(content, positions, childCount, selectedId, mode))
+    setNodes(buildNodes(content, positions, childCount, selectedIds, mode))
     setEdges(buildEdges(content, positions, mode))
     if (!fittedRef.current) {
       fittedRef.current = true
       // 双 rAF 等 React Flow 完成首轮测量后再 fit，避免按 0 尺寸计算。
       requestAnimationFrame(() => requestAnimationFrame(() => void rfRef.current?.fitView({ padding: 0.2 })))
     }
-  }, [content, positions, childCount, selectedId, mode, setNodes, setEdges])
+  }, [content, positions, childCount, selectedIds, mode, setNodes, setEdges])
 
   // 切换模式后坐标来源变化（平铺/重排），重新适应视图。
   useEffect(() => {
@@ -228,11 +233,12 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
   )
 
   const onNodeDragStop = useCallback(
-    (_e: unknown, node: Node) => {
+    (_e: unknown, node: Node, nodes: Node[]) => {
       dragging.current = false
       if (mode === 'canvas') {
-        // 画布：自由摆放，落点坐标写入 layout 持久化（PRD B2.1）。
-        moveNodeLayout(node.id, node.position.x, node.position.y)
+        // 画布：自由摆放，落点坐标写入 layout 持久化（PRD B2.1/B2.6 批量移动：多选拖一个带动全体）。
+        const moved = nodes.filter((n) => selectedIds.includes(n.id))
+        moveNodesLayout(moved.map((n) => ({ id: n.id, x: n.position.x, y: n.position.y })))
         return
       }
       const target = dropTargetRef.current
@@ -240,7 +246,7 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
       const newParent = target ?? content?.rootNodeId
       if (newParent) moveNode(node.id, newParent)
     },
-    [mode, content, moveNode, moveNodeLayout],
+    [mode, content, moveNode, moveNodesLayout, selectedIds],
   )
 
   const onConnect = useCallback(
@@ -260,17 +266,30 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
 
   const addNodeShortcut = useCallback(() => {
     if (!content) return
-    addChild(selectedId ?? content.rootNodeId)
-  }, [content, selectedId, addChild])
+    addChild(selectedIds[0] ?? content.rootNodeId)
+  }, [content, selectedIds, addChild])
 
   const deleteSelected = useCallback(() => {
-    if (selectedId && content && selectedId !== content.rootNodeId) {
-      const count = descendants(content, selectedId).size
-      if (window.confirm(count > 0 ? `删除该节点及其 ${count} 个子节点？` : '删除该节点？')) {
-        deleteNode(selectedId)
-      }
-    }
-  }, [selectedId, content, deleteNode])
+    if (!content || selectedIds.length === 0) return
+    // 过滤根节点（不可删）；批量删除走 deleteNodes 并集去重（PRD B2.6）。
+    const deletable = selectedIds.filter((id) => content.nodes[id]?.parentId !== null)
+    if (deletable.length === 0) return
+    const subtree = deletable.reduce((sum, id) => sum + descendants(content, id).size, 0)
+    const msg =
+      deletable.length > 1
+        ? `删除 ${deletable.length} 个节点${subtree > 0 ? `及其 ${subtree} 个子节点` : ''}？`
+        : subtree > 0
+          ? `删除该节点及其 ${subtree} 个子节点？`
+          : '删除该节点？'
+    if (window.confirm(msg)) deleteNodes(deletable)
+  }, [selectedIds, content, deleteNodes])
+
+  // 自由便签（PRD B2.5）：在视口中心落一张无文本备注卡。
+  const addSticky = useCallback(() => {
+    if (!content || !rfRef.current) return
+    const p = rfRef.current.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
+    addStickyNote({ x: Math.round(p.x), y: Math.round(p.y) })
+  }, [content, addStickyNote])
 
   // 快捷键（08 §4.3 / 03 §5）：Ctrl+N 加节点、Delete 删除、Ctrl+S 保存、Ctrl+Z 撤销、Ctrl+Shift+Z/Ctrl+Y 重做、Ctrl+1/2 切换模式。
   useEffect(() => {
@@ -296,18 +315,19 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
       } else if ((e.ctrlKey || e.metaKey) && e.key === '2') {
         e.preventDefault()
         trySwitch('canvas')
-      } else if (e.key === 'Delete' && selectedId) {
-        // 仅在有选中节点时接管 Delete（带确认删子树）；选中连线时放行给 React Flow 删边。
+      } else if (e.key === 'Delete' && selectedIds.length > 0) {
+        // 仅在有选中节点时接管 Delete（带确认删子树/批量删）；选中连线时放行给 React Flow 删边。
         e.preventDefault()
         deleteSelected()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [save, undo, redo, addNodeShortcut, deleteSelected, selectedId, trySwitch])
+  }, [save, undo, redo, addNodeShortcut, deleteSelected, selectedIds, trySwitch])
 
   const nodeCount = content ? Object.keys(content.nodes).length : 0
-  const selectedNode = content && selectedId ? (content.nodes[selectedId] ?? null) : null
+  // 样式面板以「首个选中节点」样式为基准，操作批量应用到全部选中（PRD B2.6 批量设色）。
+  const selectedNode = content && selectedIds.length > 0 ? (content.nodes[selectedIds[0]] ?? null) : null
 
   return (
     <div className="mm-editor">
@@ -333,6 +353,11 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
           <button onClick={redo} disabled={history.future.length === 0} title="重做 (Ctrl+Shift+Z)">
             ↷ 重做
           </button>
+          {mode === 'canvas' && (
+            <button onClick={addSticky} title="自由便签（无文本备注卡，PRD B2.5）">
+              ＋便签
+            </button>
+          )}
           <button onClick={() => void rfRef.current?.fitView({ padding: 0.2 })}>适应视图</button>
           <button onClick={() => void save()} disabled={saving || !dirty}>
             {saving ? '保存中…' : dirty ? '保存*' : '已保存'}
@@ -342,6 +367,7 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
 
       {selectedNode && (
         <div className="mm-style-panel" role="group" aria-label="节点样式">
+          {selectedIds.length > 1 && <span className="mm-style-label">应用于 {selectedIds.length} 个节点</span>}
           <div className="mm-style-group">
             <span className="mm-style-label">形状</span>
             {NODE_SHAPES.map((s) => (
@@ -349,7 +375,7 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
                 key={s.id}
                 className={selectedNode.style.shape === s.id ? 'active' : ''}
                 title={s.label}
-                onClick={() => updateStyle(selectedNode.id, { shape: s.id })}
+                onClick={() => updateStyles(selectedIds, { shape: s.id })}
               >
                 <span className={`mm-shape-icon shape-${s.id}`} />
               </button>
@@ -363,7 +389,7 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
                 className={`mm-color-swatch${selectedNode.style.color === c.id ? ' active' : ''}`}
                 title={c.label}
                 style={{ background: c.bg, borderColor: c.border }}
-                onClick={() => updateStyle(selectedNode.id, { color: c.id })}
+                onClick={() => updateStyles(selectedIds, { color: c.id })}
               />
             ))}
           </div>
@@ -371,7 +397,7 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
             <button
               className={selectedNode.style.bold ? 'active' : ''}
               title="加粗"
-              onClick={() => updateStyle(selectedNode.id, { bold: !selectedNode.style.bold })}
+              onClick={() => updateStyles(selectedIds, { bold: !selectedNode.style.bold })}
             >
               <strong>B</strong>
             </button>
@@ -430,15 +456,16 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
             nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
-            onNodeClick={(_, node) => select(node.id)}
-            onEdgeClick={() => select(null)}
+            onSelectionChange={(p) => setSelectedIds(p.nodes.map((n) => n.id))}
+            selectionOnDrag={mode === 'canvas'}
+            panOnDrag={mode === 'canvas' ? [1, 2] : true}
             deleteKeyCode={['Backspace', 'Delete']}
             onPaneClick={(e) => {
               if (e.detail === 2) {
                 // 双击空白加节点（03 §4）：画布模式落在点击处。
                 if (mode === 'canvas' && rfRef.current) {
                   const p = rfRef.current.screenToFlowPosition({ x: e.clientX, y: e.clientY })
-                  if (content) addChild(selectedId ?? content.rootNodeId, { x: Math.round(p.x), y: Math.round(p.y) })
+                  if (content) addChild(selectedIds[0] ?? content.rootNodeId, { x: Math.round(p.x), y: Math.round(p.y) })
                 } else {
                   addNodeShortcut()
                 }
@@ -476,7 +503,7 @@ export function MindMapEditor({ mindmapId, onBack }: { mindmapId: number; onBack
         <span className="muted">
           {mode === 'tree'
             ? '双击节点编辑 · 拖拽改层级 · 双击空白加节点'
-            : '拖拽摆放 · 从节点边缘拖出连线 · 选中边按 Delete 删除'}
+            : '拖拽摆放 · 拖框/Shift 点选多选 · 从节点边缘拖出连线 · 选中边按 Delete 删除'}
         </span>
       </div>
     </div>
