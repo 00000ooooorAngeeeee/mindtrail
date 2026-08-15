@@ -39,6 +39,13 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- JGit：M3 会话 start_head/end_head 读取（04 §2 ADR 既定选型，任务三的提交感知/历史读取继续复用） -->
+        <dependency>
+            <groupId>org.eclipse.jgit</groupId>
+            <artifactId>org.eclipse.jgit</artifactId>
+            <version>6.10.0.202406032230-r</version>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
