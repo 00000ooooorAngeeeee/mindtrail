@@ -1,0 +1,117 @@
+/* 设置页样式（M4 任务四，03 §2「全局：设置（数据库/主题）」） */
+
+.settings-panel {
+  background: var(--card);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.settings-panel h2 {
+  margin: 12px 0;
+  font-size: 16px;
+}
+
+.settings-panel h3 {
+  margin: 18px 0 8px;
+  font-size: 14px;
+}
+
+.settings-panel .muted {
+  font-size: 12px;
+  margin: 0 0 8px;
+}
+
+/* 数据库连接信息（只读键值行） */
+.settings-db {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.settings-db-row {
+  display: flex;
+  gap: 12px;
+  padding: 5px 0;
+  font-size: 13px;
+}
+
+.settings-db-row dt {
+  width: 64px;
+  flex: none;
+  color: var(--muted);
+}
+
+.settings-db-row dd {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  word-break: break-all;
+}
+
+/* 主题三选一 */
+.settings-theme {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.settings-theme-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-theme-option input {
+  margin: 0;
+  accent-color: var(--brand);
+}
+
+.settings-theme-option.active {
+  border-color: var(--brand);
+  background: var(--brand-bg);
+  color: var(--brand);
+}
+
+/* 默认仓库路径 */
+.settings-repo {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-repo input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  background: var(--card);
+  color: var(--text);
+}
+
+.settings-repo button {
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-repo button:first-of-type {
+  border: none;
+  background: var(--brand);
+  color: #fff;
+}
+
+.settings-repo button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

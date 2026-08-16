@@ -21,6 +21,17 @@
   color: var(--brand);
 }
 
+.app-header .header-search,
+.app-header .header-settings {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
 .muted {
   color: var(--muted);
 }
@@ -28,7 +39,7 @@
 .error {
   padding: 10px 14px;
   border-radius: 8px;
-  background: #fdecec;
+  background: var(--danger-bg);
   color: var(--danger);
   margin-bottom: 16px;
 }
@@ -77,9 +88,10 @@
 
 .workspace-item button {
   padding: 4px 10px;
-  border: 1px solid #d9dbe2;
+  border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--card);
+  color: var(--text);
   font-size: 12px;
   cursor: pointer;
 }
@@ -97,9 +109,11 @@
 .item-edit input {
   flex: 1;
   padding: 6px 10px;
-  border: 1px solid #d9dbe2;
+  border: 1px solid var(--border);
   border-radius: 6px;
   font-size: 14px;
+  background: var(--card);
+  color: var(--text);
 }
 
 .create-form {
@@ -110,9 +124,11 @@
 .create-form input {
   flex: 1;
   padding: 8px 12px;
-  border: 1px solid #d9dbe2;
+  border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 14px;
+  background: var(--card);
+  color: var(--text);
 }
 
 .create-form button {

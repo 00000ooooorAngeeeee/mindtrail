@@ -15,13 +15,13 @@
   align-items: center;
   gap: 12px;
   padding: 10px 16px;
-  border-bottom: 1px solid #e3e5ea;
+  border-bottom: 1px solid var(--border);
   background: var(--card);
 }
 
 .mm-toolbar button {
   padding: 6px 12px;
-  border: 1px solid #d9dbe2;
+  border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--card);
   font-size: 13px;
@@ -41,7 +41,7 @@
 /* 树状/画布模式切换（03 §3.4：顶部切换按钮） */
 .mm-mode-switch {
   display: flex;
-  border: 1px solid #d9dbe2;
+  border: 1px solid var(--border);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -52,7 +52,7 @@
 }
 
 .mm-mode-switch button + button {
-  border-left: 1px solid #d9dbe2;
+  border-left: 1px solid var(--border);
 }
 
 .mm-mode-switch button.active {
@@ -81,7 +81,7 @@
 }
 
 .react-flow__edge.mm-free-edge .react-flow__edge-path {
-  stroke: #8b93a7;
+  stroke: var(--edge);
   stroke-width: 1.5;
 }
 
@@ -103,7 +103,7 @@
   gap: 16px;
   align-items: center;
   padding: 6px 16px;
-  border-top: 1px solid #e3e5ea;
+  border-top: 1px solid var(--border);
   background: var(--card);
   font-size: 12px;
   color: var(--muted);
@@ -117,7 +117,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(31, 36, 48, 0.35);
+  background: var(--overlay);
 }
 
 .mm-dialog {
@@ -146,7 +146,7 @@
 .mm-dialog-actions button {
   flex: 1;
   padding: 8px 10px;
-  border: 1px solid #d9dbe2;
+  border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--card);
   font-size: 13px;
@@ -223,11 +223,12 @@
 
 .mm-node-body {
   padding: 8px 14px;
-  background: var(--node-bg, #fff);
-  border: 1px solid var(--node-border, #d9dbe2);
+  background: var(--node-bg, var(--card));
+  border: 1px solid var(--node-border, var(--border));
   border-radius: 8px;
   font-size: 13px;
-  color: var(--text);
+  /* 节点底为内容色板（浅底），文字恒为深色保证对比度（便签效果，03 §6） */
+  color: var(--node-text);
   box-shadow: 0 1px 3px rgba(31, 36, 48, 0.08);
   transition: box-shadow 0.15s ease-out, border-color 0.15s ease-out;
 }
@@ -308,9 +309,9 @@
   transform: translateY(-50%);
   width: 18px;
   height: 18px;
-  border: 1px solid #c9cdd6;
+  border: 1px solid var(--border-strong);
   border-radius: 50%;
-  background: #fff;
+  background: var(--card);
   color: var(--muted);
   font-size: 10px;
   line-height: 1;
@@ -348,8 +349,8 @@
   display: flex;
   gap: 4px;
   padding: 3px;
-  background: #fff;
-  border: 1px solid #d9dbe2;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 6px;
   box-shadow: 0 2px 8px rgba(31, 36, 48, 0.15);
   white-space: nowrap;
@@ -386,7 +387,7 @@
   gap: 16px;
   padding: 8px 12px;
   background: var(--card);
-  border: 1px solid #d9dbe2;
+  border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 2px 12px rgba(31, 36, 48, 0.12);
 }
@@ -410,7 +411,7 @@
   min-width: 24px;
   height: 24px;
   padding: 2px;
-  border: 1px solid #d9dbe2;
+  border: 1px solid var(--border);
   border-radius: 5px;
   background: var(--card);
   font-size: 12px;
@@ -427,7 +428,7 @@
   display: inline-block;
   width: 16px;
   height: 11px;
-  background: #c9cdd6;
+  background: var(--border-strong);
   border-radius: 3px;
 }
 
@@ -449,7 +450,7 @@
   width: 20px;
   height: 20px;
   border-radius: 4px;
-  border: 1px solid #d9dbe2;
+  border: 1px solid var(--border);
   cursor: pointer;
   padding: 0;
 }

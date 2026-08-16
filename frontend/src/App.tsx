@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAppStore } from './store/useAppStore'
+import { useSettingsStore } from './store/useSettingsStore'
 import { createMindmap, deleteMindmap, listMindmaps } from './api/mindmaps'
 import type { Mindmap, Workspace } from './api/types'
 import { MindMapEditor } from './features/mindmap/MindMapEditor'
 import { SessionSection } from './features/session/SessionSection'
 import { PAGE_SIZE, SessionView } from './features/session/SessionView'
 import { SearchOverlay, type SearchNavigateTarget } from './features/search/SearchOverlay'
+import { SettingsPanel } from './features/settings/SettingsPanel'
 import { TagSection } from './features/tag/TagSection'
 import './App.css'
 
@@ -19,17 +21,32 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [mindmapHighlight, setMindmapHighlight] = useState<string | null>(null)
   const [sessionJump, setSessionJump] = useState<{ page: number; entryId: number } | null>(null)
+  // 设置页（M4 任务四）：Ctrl+, 打开（03 §5）
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   useEffect(() => {
     void load()
   }, [load])
 
-  // Ctrl+K 打开全局搜索（03 §5）。
+  // 启动加载设置并应用主题；system 模式下跟随系统深浅色变化（03 §6）
+  useEffect(() => {
+    const store = useSettingsStore.getState()
+    void store.load()
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = (e: MediaQueryListEvent) => useSettingsStore.getState().applyForSystemPreference(e.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+
+  // Ctrl+K 打开全局搜索；Ctrl+, 打开设置（03 §5）。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         setSearchOpen(true)
+      } else if ((e.ctrlKey || e.metaKey) && e.key === ',') {
+        e.preventDefault()
+        setSettingsOpen((v) => !v)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -85,6 +102,9 @@ export default function App() {
         <button className="header-search" onClick={() => setSearchOpen(true)}>
           🔍 搜索（Ctrl+K）
         </button>
+        <button className="header-settings" onClick={() => setSettingsOpen((v) => !v)}>
+          ⚙ 设置
+        </button>
       </header>
 
       {searchOpen && (
@@ -98,7 +118,9 @@ export default function App() {
       )}
 
       <main className="content">
-        {openMindmapId != null ? (
+        {settingsOpen ? (
+          <SettingsPanel onBack={() => setSettingsOpen(false)} />
+        ) : openMindmapId != null ? (
           <MindMapEditor
             mindmapId={openMindmapId}
             highlightNodeId={mindmapHighlight}

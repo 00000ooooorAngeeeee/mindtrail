@@ -246,6 +246,33 @@ export interface TagInfo {
   entryCount: number
 }
 
+// ---- 设置（M4 任务四，04 §5 GET/PUT /settings，PRD E2/E3） ----
+
+export const THEME_MODES = ['light', 'dark', 'system'] as const
+export type ThemeMode = (typeof THEME_MODES)[number]
+
+export const THEME_LABELS: Record<ThemeMode, string> = {
+  light: '浅色',
+  dark: '深色',
+  system: '跟随系统',
+}
+
+/** 数据库连接信息（只读展示；密码只给「是否已配置」，后端不返回密码本身）。 */
+export interface DatabaseInfo {
+  host: string
+  port: number
+  database: string
+  username: string
+  passwordConfigured: boolean
+}
+
+/** 应用设置视图（GET /settings / PUT /settings 响应体）。 */
+export interface AppSettings {
+  theme: ThemeMode
+  defaultRepoPath: string | null
+  database: DatabaseInfo
+}
+
 /** 按标签筛出的条目（GET /entries?tagId=&sessionId=，含会话上下文供跳转）。 */
 export interface TaggedEntry {
   id: number

@@ -111,7 +111,7 @@ function buildEdges(
       type: 'smoothstep',
       deletable: false,
       selectable: mode === 'tree',
-      style: { stroke: '#c3c8d4', strokeWidth: 1.5 },
+      style: { stroke: 'var(--edge, #c3c8d4)', strokeWidth: 1.5 },
     })
   }
   // 自由连线（type=free，PRD B2.2）：仅画布模式渲染，树视图忽略（PRD B3.3）。

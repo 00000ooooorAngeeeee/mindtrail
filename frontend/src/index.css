@@ -1,11 +1,58 @@
+/* 主题变量（M4 任务四，03 §6「浅色/深色两套，默认跟随系统（MVP 提供手动切换）」）。
+   浅色为默认；<html data-theme="dark"> 下切换深色变量（由 features/settings/theme.ts 写入）。 */
+
 :root {
   color-scheme: light;
   --brand: #4f6bff;
+  --brand-bg: #eef1ff;
   --text: #1f2430;
+  --text-secondary: #4b5563;
   --muted: #8a90a0;
+  --muted-weak: #9aa1ad;
   --bg: #f5f6f8;
   --card: #ffffff;
+  --card-soft: #fafbfd;
+  --chip-bg: #f1f5f9;
+  --code-bg: #f8fafc;
+  --code-border: #e2e8f0;
+  --border: #d9dbe2;
+  --border-strong: #c9cdd6;
+  --border-faint: #eceef3;
   --danger: #d64545;
+  --danger-bg: #fdecec;
+  --info-bg: #f0f9ff;
+  --info-border: #bae6fd;
+  --mark-bg: #fff3bf;
+  --overlay: rgba(15, 18, 26, 0.45);
+  --edge: #8b93a7;
+  /* 节点为内容色板（浅底深字，05 §4 style.color），深浅主题下均保持便签效果 */
+  --node-text: #1f2430;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --brand: #6d86ff;
+  --brand-bg: #2a3152;
+  --text: #e8eaf1;
+  --text-secondary: #b4bccd;
+  --muted: #8a93a6;
+  --muted-weak: #6b7385;
+  --bg: #15171d;
+  --card: #1f232c;
+  --card-soft: #232832;
+  --chip-bg: #2a303c;
+  --code-bg: #181c23;
+  --code-border: #2c3340;
+  --border: #343a48;
+  --border-strong: #454d5f;
+  --border-faint: #282e39;
+  --danger: #e57373;
+  --danger-bg: #3a2326;
+  --info-bg: #1d2a35;
+  --info-border: #2e4a5c;
+  --mark-bg: #5a4b1a;
+  --overlay: rgba(0, 0, 0, 0.6);
+  --edge: #4a5162;
 }
 
 * {

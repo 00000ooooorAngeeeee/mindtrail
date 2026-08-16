@@ -17,8 +17,8 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid #d9dbe2;
-  background: #f6f8fc;
+  border: 1px solid var(--border);
+  background: var(--chip-bg);
   border-radius: 999px;
   padding: 3px 10px;
   cursor: pointer;
@@ -27,30 +27,30 @@
 
 .tag-name:hover,
 .tag-name.active {
-  background: #eef1ff;
-  border-color: #4f6bff;
-  color: #4f6bff;
+  background: var(--brand-bg);
+  border-color: var(--brand);
+  color: var(--brand);
 }
 
 .tag-count {
-  background: #e3e7ef;
+  background: var(--border);
   border-radius: 999px;
   padding: 0 6px;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--text-secondary);
 }
 
 .tag-name.active .tag-count {
-  background: #4f6bff;
+  background: var(--brand);
   color: #fff;
 }
 
 .tag-filter-panel {
   margin-top: 12px;
-  border: 1px solid #e3e7ef;
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 10px 12px;
-  background: #fafbfd;
+  background: var(--card-soft);
 }
 
 .tag-filter-panel h4 {
@@ -83,18 +83,18 @@
 }
 
 .tag-filter-hit:hover {
-  background: #eef1ff;
+  background: var(--brand-bg);
 }
 
 .tag-filter-title {
   font-size: 13px;
   font-weight: 600;
-  color: #1f2430;
+  color: var(--text);
 }
 
 .tag-filter-snippet {
   font-size: 13px;
-  color: #6b7280;
+  color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -102,5 +102,5 @@
 
 .tag-filter-meta {
   font-size: 12px;
-  color: #9aa1ad;
+  color: var(--muted-weak);
 }

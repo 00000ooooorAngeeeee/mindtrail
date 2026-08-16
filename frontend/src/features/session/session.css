@@ -77,7 +77,7 @@
 
 .entry-time {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--muted-weak);
 }
 
 .entry-dot {
@@ -97,18 +97,18 @@
   left: 50%;
   width: 2px;
   margin-left: -1px;
-  background: #e2e8f0;
+  background: var(--border);
 }
 
 .entry-card {
   flex: 1;
-  border: 1px solid var(--border, #d9dee5);
+  border: 1px solid var(--border, var(--border));
   border-left-width: 4px;
   border-left-color: var(--entry-color, #64748b);
   border-radius: 8px;
   padding: 8px 12px;
   margin-bottom: 8px;
-  background: #fff;
+  background: var(--card);
 }
 
 .entry-meta {
@@ -126,13 +126,13 @@
   font-size: 12px;
   padding: 1px 8px;
   border-radius: 9px;
-  background: #f1f5f9;
-  color: #334155;
+  background: var(--chip-bg);
+  color: var(--text-secondary);
 }
 
 .entry-seq {
   font-size: 12px;
-  color: #cbd5e1;
+  color: var(--muted-weak);
   margin-left: auto;
 }
 
@@ -156,8 +156,8 @@
   font-size: 12px;
   padding: 1px 7px;
   border-radius: 9px;
-  background: #eef2ff;
-  color: #4338ca;
+  background: var(--brand-bg);
+  color: var(--brand);
 }
 
 .entry-actions {
@@ -185,9 +185,9 @@
 .quick-entry-bar {
   position: sticky;
   bottom: 0;
-  background: var(--app-bg, #fff);
+  background: var(--app-bg, var(--card));
   padding: 10px 0 12px;
-  border-top: 1px solid var(--border, #d9dee5);
+  border-top: 1px solid var(--border, var(--border));
 }
 
 .quick-entry {
@@ -235,7 +235,7 @@
 }
 
 .entry-type-context {
-  --entry-color: #6b7280;
+  --entry-color: var(--text-secondary);
 }
 
 .entry-type-prompt {
@@ -252,9 +252,9 @@
   flex-wrap: wrap;
   padding: 8px 12px;
   margin: 0 0 10px;
-  border: 1px solid #bae6fd;
+  border: 1px solid var(--info-border);
   border-radius: 8px;
-  background: #f0f9ff;
+  background: var(--info-bg);
 }
 
 .git-suggest p {
@@ -271,9 +271,9 @@
 .git-panel {
   margin: 0 0 12px;
   padding: 8px 12px;
-  border: 1px solid var(--border, #d9dee5);
+  border: 1px solid var(--border, var(--border));
   border-radius: 8px;
-  background: #fff;
+  background: var(--card);
 }
 
 .git-panel-toggle {
@@ -282,7 +282,7 @@
   padding: 2px 0;
   font-size: 13px;
   font-weight: 600;
-  color: #334155;
+  color: var(--text-secondary);
   cursor: pointer;
 }
 
@@ -298,7 +298,7 @@
   gap: 8px;
   flex-wrap: wrap;
   padding: 5px 0;
-  border-top: 1px solid #f1f5f9;
+  border-top: 1px solid var(--chip-bg);
 }
 
 .git-commit-item:first-child {
@@ -310,20 +310,20 @@
   font-size: 12px;
   padding: 1px 6px;
   border-radius: 4px;
-  background: #f1f5f9;
-  color: #475569;
+  background: var(--chip-bg);
+  color: var(--text-secondary);
 }
 
 .commit-msg {
   flex: 1;
   min-width: 160px;
   font-size: 13px;
-  color: #1e293b;
+  color: var(--text);
 }
 
 .commit-meta {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--muted-weak);
   white-space: nowrap;
 }
 
@@ -387,8 +387,8 @@
 }
 
 .entry-md pre {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
   border-radius: 6px;
   padding: 6px 10px;
   overflow-x: auto;
@@ -398,7 +398,7 @@
 .entry-md code {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 13px;
-  background: #f1f5f9;
+  background: var(--chip-bg);
   border-radius: 4px;
   padding: 0 4px;
 }
@@ -411,15 +411,15 @@
 .entry-md blockquote {
   margin: 4px 0;
   padding-left: 10px;
-  border-left: 3px solid #cbd5e1;
-  color: #475569;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-secondary);
 }
 
 /* commit 详情弹层（PRD C3.5） */
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.45);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -427,7 +427,7 @@
 }
 
 .modal {
-  background: #fff;
+  background: var(--card);
   border-radius: 12px;
   padding: 14px 18px;
   max-width: 560px;
@@ -445,7 +445,7 @@
   word-break: break-all;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 12px;
-  background: #f1f5f9;
+  background: var(--chip-bg);
   border-radius: 4px;
   padding: 2px 6px;
 }
@@ -453,8 +453,8 @@
 .commit-msg-full {
   white-space: pre-wrap;
   word-break: break-word;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
   border-radius: 6px;
   padding: 8px 10px;
   font-size: 13px;
@@ -497,12 +497,12 @@
   gap: 8px;
   margin-top: 8px;
   font-size: 13px;
-  color: #6b7280;
+  color: var(--text-secondary);
 }
 
 .session-tag-filter select {
   padding: 4px 8px;
-  border: 1px solid #d9dbe2;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--card);
 }

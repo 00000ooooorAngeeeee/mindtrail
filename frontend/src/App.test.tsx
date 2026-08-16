@@ -6,6 +6,7 @@ import { deleteWorkspace, fetchWorkspaces, updateWorkspace } from './api/workspa
 import { createMindmap, deleteMindmap, listMindmaps } from './api/mindmaps'
 import { createSession, deleteSession, getSession, listSessions } from './api/sessions'
 import { listTags } from './api/tags'
+import { fetchSettings } from './api/settings'
 
 vi.mock('./api/health', () => ({ fetchHealth: vi.fn() }))
 vi.mock('./api/workspaces', () => ({
@@ -34,6 +35,10 @@ vi.mock('./api/tags', () => ({
   deleteTag: vi.fn(),
   filterEntriesByTag: vi.fn(),
 }))
+vi.mock('./api/settings', () => ({
+  fetchSettings: vi.fn(),
+  updateSettings: vi.fn(),
+}))
 
 const healthMock = vi.mocked(fetchHealth)
 const workspacesMock = vi.mocked(fetchWorkspaces)
@@ -47,6 +52,7 @@ const createSessionMock = vi.mocked(createSession)
 const deleteSessionMock = vi.mocked(deleteSession)
 const getSessionMock = vi.mocked(getSession)
 const listTagsMock = vi.mocked(listTags)
+const settingsMock = vi.mocked(fetchSettings)
 
 const ws = { id: 1, name: '项目A', mindmapCount: 2, sessionCount: 1 }
 
@@ -65,6 +71,12 @@ describe('App 首页', () => {
     getSessionMock.mockReset()
     listTagsMock.mockReset()
     listTagsMock.mockResolvedValue([])
+    settingsMock.mockReset()
+    settingsMock.mockResolvedValue({
+      theme: 'system',
+      defaultRepoPath: null,
+      database: { host: '127.0.0.1', port: 3306, database: 'trailmind', username: 'root', passwordConfigured: true },
+    })
     healthMock.mockResolvedValue({ status: 'ok', app: 'trailmind', version: '0.0.1' })
     workspacesMock.mockResolvedValue([])
     updateMock.mockResolvedValue({ ...ws })
@@ -209,5 +221,17 @@ describe('App 首页', () => {
 
     expect(await screen.findByText('目标内容')).toBeInTheDocument()
     expect(within(screen.getByRole('list')).getByText('目标')).toBeInTheDocument()
+  })
+
+  it('Ctrl+, 打开设置页并可返回（M4 任务四）', async () => {
+    render(<App />)
+    await screen.findByText('暂无工作区')
+
+    fireEvent.keyDown(window, { key: ',', ctrlKey: true })
+    expect(await screen.findByText('数据库连接')).toBeInTheDocument()
+    expect(await screen.findByText('127.0.0.1')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('← 返回'))
+    expect(screen.getByText('暂无工作区')).toBeInTheDocument()
   })
 })
