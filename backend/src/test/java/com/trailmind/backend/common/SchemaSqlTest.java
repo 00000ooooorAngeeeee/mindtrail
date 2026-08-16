@@ -10,7 +10,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * schema.sql 完整性冒烟：确保 8 张表齐全、ngram 全文索引存在（防止误删表）。
+ * schema.sql 完整性冒烟：确保 9 张表齐全、ngram 全文索引存在（防止误删表）。
  * 真正的建库建表行为由运行时验证（见 docs/10 任务 0.3 验收）。
  */
 class SchemaSqlTest {
@@ -21,7 +21,7 @@ class SchemaSqlTest {
 
         for (String table : List.of(
                 "workspace", "mindmap", "session", "entry",
-                "tag", "entry_tag", "entry_commit", "setting")) {
+                "tag", "entry_tag", "entry_commit", "node_entry", "setting")) {
             assertTrue(sql.contains("CREATE TABLE IF NOT EXISTS " + table),
                     "schema.sql 缺少表: " + table);
         }

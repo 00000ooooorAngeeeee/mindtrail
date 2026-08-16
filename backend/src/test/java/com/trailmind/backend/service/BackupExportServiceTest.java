@@ -4,6 +4,7 @@ import com.trailmind.backend.entity.Entry;
 import com.trailmind.backend.entity.EntryCommit;
 import com.trailmind.backend.entity.EntryTag;
 import com.trailmind.backend.entity.Mindmap;
+import com.trailmind.backend.entity.NodeEntry;
 import com.trailmind.backend.entity.Session;
 import com.trailmind.backend.entity.Setting;
 import com.trailmind.backend.entity.Tag;
@@ -12,6 +13,7 @@ import com.trailmind.backend.repository.EntryCommitMapper;
 import com.trailmind.backend.repository.EntryMapper;
 import com.trailmind.backend.repository.EntryTagMapper;
 import com.trailmind.backend.repository.MindmapMapper;
+import com.trailmind.backend.repository.NodeEntryMapper;
 import com.trailmind.backend.repository.SessionMapper;
 import com.trailmind.backend.repository.SettingMapper;
 import com.trailmind.backend.repository.TagMapper;
@@ -33,8 +35,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
 /**
- * 全量备份导出单测（M4 任务六，PRD E5）：
- * 8 张表数据全部进入备份（zip 内 trailmind-backup.json），format/version/exportedAt 协议字段正确，
+ * 全量备份导出单测（M4 任务六，PRD E5；v1.1 起含 node_entry 共 9 张表）：
+ * 9 张表数据全部进入备份（zip 内 trailmind-backup.json），format/version/exportedAt 协议字段正确，
  * 时间固定到秒（06 §4A 机器协议形态稳定）、Base64 zip 可解压还原、空库导出不报错。
  */
 @ExtendWith(MockitoExtension.class)
@@ -55,6 +57,8 @@ class BackupExportServiceTest {
     @Mock
     private EntryCommitMapper entryCommitMapper;
     @Mock
+    private NodeEntryMapper nodeEntryMapper;
+    @Mock
     private SettingMapper settingMapper;
 
     private BackupExportService service;
@@ -62,11 +66,12 @@ class BackupExportServiceTest {
     @BeforeEach
     void setUp() {
         service = new BackupExportService(workspaceMapper, mindmapMapper, sessionMapper, entryMapper,
-                tagMapper, entryTagMapper, entryCommitMapper, settingMapper);
+                tagMapper, entryTagMapper, entryCommitMapper, nodeEntryMapper, settingMapper);
     }
 
     private void mockAll(List<Workspace> ws, List<Mindmap> mm, List<Session> ss, List<Entry> es,
-                         List<Tag> ts, List<EntryTag> ets, List<EntryCommit> ecs, List<Setting> st) {
+                         List<Tag> ts, List<EntryTag> ets, List<EntryCommit> ecs, List<NodeEntry> nes,
+                         List<Setting> st) {
         when(workspaceMapper.selectList(null)).thenReturn(ws);
         when(mindmapMapper.selectList(null)).thenReturn(mm);
         when(sessionMapper.selectList(null)).thenReturn(ss);
@@ -74,6 +79,7 @@ class BackupExportServiceTest {
         when(tagMapper.selectList(null)).thenReturn(ts);
         when(entryTagMapper.selectList(null)).thenReturn(ets);
         when(entryCommitMapper.selectList(null)).thenReturn(ecs);
+        when(nodeEntryMapper.selectList(null)).thenReturn(nes);
         when(settingMapper.selectList(null)).thenReturn(st);
     }
 
@@ -132,12 +138,16 @@ class BackupExportServiceTest {
         ec.setRepoPath("D:/repo");
         ec.setBoundAt(LocalDateTime.of(2025, 6, 1, 9, 20, 0));
 
+        // v1.1 联动：node_entry 挂接（节点 n1 挂条目 11）
+        NodeEntry ne = new NodeEntry(10L, "n1", 11L);
+
         Setting st = new Setting();
         st.setK("theme");
         st.setV("dark");
         st.setUpdatedAt(LocalDateTime.of(2025, 6, 1, 8, 0, 0));
 
-        mockAll(List.of(ws), List.of(mm), List.of(s), List.of(e), List.of(t), List.of(et), List.of(ec), List.of(st));
+        mockAll(List.of(ws), List.of(mm), List.of(s), List.of(e), List.of(t), List.of(et), List.of(ec),
+                List.of(ne), List.of(st));
 
         BackupExportService.ExportFile file = service.export();
 
@@ -161,7 +171,7 @@ class BackupExportServiceTest {
 
         @SuppressWarnings("unchecked")
         Map<String, Object> tables = (Map<String, Object>) root.get("tables");
-        assertEquals(8, tables.size());
+        assertEquals(9, tables.size());
         assertEquals(1, ((List<?>) tables.get("workspace")).size());
         assertEquals(1, ((List<?>) tables.get("mindmap")).size());
         assertEquals(1, ((List<?>) tables.get("session")).size());
@@ -169,9 +179,10 @@ class BackupExportServiceTest {
         assertEquals(1, ((List<?>) tables.get("tag")).size());
         assertEquals(1, ((List<?>) tables.get("entry_tag")).size());
         assertEquals(1, ((List<?>) tables.get("entry_commit")).size());
+        assertEquals(1, ((List<?>) tables.get("node_entry")).size());
         assertEquals(1, ((List<?>) tables.get("setting")).size());
 
-        // 关键字段往返（名称/正文/hash/时间格式）
+        // 关键字段往返（名称/正文/hash/时间格式/联动挂接）
         Map<String, Object> wsJson = (Map<String, Object>) ((List<?>) tables.get("workspace")).get(0);
         assertEquals("项目A", wsJson.get("name"));
         Map<String, Object> entryJson = (Map<String, Object>) ((List<?>) tables.get("entry")).get(0);
@@ -179,11 +190,15 @@ class BackupExportServiceTest {
         assertEquals("2025-06-01T09:02:00", entryJson.get("createdAt"));
         Map<String, Object> ecJson = (Map<String, Object>) ((List<?>) tables.get("entry_commit")).get(0);
         assertEquals("c".repeat(40), ecJson.get("commitHash"));
+        Map<String, Object> neJson = (Map<String, Object>) ((List<?>) tables.get("node_entry")).get(0);
+        assertEquals(10, neJson.get("mindmapId")); // Jackson 反序列化为 Integer
+        assertEquals("n1", neJson.get("nodeId"));
+        assertEquals(11, neJson.get("entryId"));
     }
 
     @Test
     void 空库导出_返回合法zip且各表为空数组() throws Exception {
-        mockAll(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+        mockAll(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
 
         BackupExportService.ExportFile file = service.export();
         String jsonStr = BackupExportService.unzipJson(Base64.getDecoder().decode(file.content()));
@@ -208,7 +223,7 @@ class BackupExportServiceTest {
         // 备份走 mapper.selectList 全量查询：非表字段（entries/entryTotal/entryCount/mindmapCount 等）
         // 在查询结果中恒为 null，经全局 NON_NULL 配置不进入备份 JSON（避免与真实列混淆、协议形态稳定）。
 
-        mockAll(List.of(), List.of(), List.of(s), List.of(), List.of(), List.of(), List.of(), List.of());
+        mockAll(List.of(), List.of(), List.of(s), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
 
         String jsonStr = BackupExportService.unzipJson(Base64.getDecoder().decode(service.export().content()));
         Map<String, Object> root = BackupExportService.parseBackup(jsonStr);

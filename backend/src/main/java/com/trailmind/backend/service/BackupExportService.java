@@ -9,6 +9,7 @@ import com.trailmind.backend.entity.Entry;
 import com.trailmind.backend.entity.EntryCommit;
 import com.trailmind.backend.entity.EntryTag;
 import com.trailmind.backend.entity.Mindmap;
+import com.trailmind.backend.entity.NodeEntry;
 import com.trailmind.backend.entity.Session;
 import com.trailmind.backend.entity.Setting;
 import com.trailmind.backend.entity.Tag;
@@ -17,6 +18,7 @@ import com.trailmind.backend.repository.EntryCommitMapper;
 import com.trailmind.backend.repository.EntryMapper;
 import com.trailmind.backend.repository.EntryTagMapper;
 import com.trailmind.backend.repository.MindmapMapper;
+import com.trailmind.backend.repository.NodeEntryMapper;
 import com.trailmind.backend.repository.SessionMapper;
 import com.trailmind.backend.repository.SettingMapper;
 import com.trailmind.backend.repository.TagMapper;
@@ -35,8 +37,8 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 /**
- * 全量备份导出（M4 任务六，PRD E5 / 04 §5「POST /backup/export」/ 05 §8）：
- * 全部 8 张表（workspace/mindmap/session/entry/tag/entry_tag/entry_commit/setting）导出为
+ * 全量备份导出（M4 任务六，PRD E5 / 04 §5「POST /backup/export」/ 05 §8；v1.1 起含 node_entry 共 9 张表）：
+ * workspace/mindmap/session/entry/tag/entry_tag/entry_commit/node_entry/setting 导出为
  * 「trailmind-backup」v1 JSON，压缩为 zip（JDK 内置 ZipOutputStream，零依赖）后 Base64 返回。
  * 格式与 06 §4A 会话 JSON 同风格：format/version 标识 + 时间固定到秒的 ISO-8601，供 P2 导入恢复。
  */
@@ -65,12 +67,13 @@ public class BackupExportService {
     private final TagMapper tagMapper;
     private final EntryTagMapper entryTagMapper;
     private final EntryCommitMapper entryCommitMapper;
+    private final NodeEntryMapper nodeEntryMapper;
     private final SettingMapper settingMapper;
 
     public BackupExportService(WorkspaceMapper workspaceMapper, MindmapMapper mindmapMapper,
                                SessionMapper sessionMapper, EntryMapper entryMapper, TagMapper tagMapper,
                                EntryTagMapper entryTagMapper, EntryCommitMapper entryCommitMapper,
-                               SettingMapper settingMapper) {
+                               NodeEntryMapper nodeEntryMapper, SettingMapper settingMapper) {
         this.workspaceMapper = workspaceMapper;
         this.mindmapMapper = mindmapMapper;
         this.sessionMapper = sessionMapper;
@@ -78,6 +81,7 @@ public class BackupExportService {
         this.tagMapper = tagMapper;
         this.entryTagMapper = entryTagMapper;
         this.entryCommitMapper = entryCommitMapper;
+        this.nodeEntryMapper = nodeEntryMapper;
         this.settingMapper = settingMapper;
     }
 
@@ -85,7 +89,7 @@ public class BackupExportService {
     public record ExportFile(String filename, String contentType, String content) {
     }
 
-    /** 备份表数据（与 schema.sql 8 张表一一对应，key 为表名）。 */
+    /** 备份表数据（与 schema.sql 9 张表一一对应，key 为表名；v1.1 起含 node_entry）。 */
     public record BackupTables(
             List<Workspace> workspace,
             List<Mindmap> mindmap,
@@ -94,6 +98,7 @@ public class BackupExportService {
             List<Tag> tag,
             @com.fasterxml.jackson.annotation.JsonProperty("entry_tag") List<EntryTag> entryTag,
             @com.fasterxml.jackson.annotation.JsonProperty("entry_commit") List<EntryCommit> entryCommit,
+            @com.fasterxml.jackson.annotation.JsonProperty("node_entry") List<NodeEntry> nodeEntry,
             List<Setting> setting) {
     }
 
@@ -115,6 +120,7 @@ public class BackupExportService {
                         tagMapper.selectList(null),
                         entryTagMapper.selectList(null),
                         entryCommitMapper.selectList(null),
+                        nodeEntryMapper.selectList(null),
                         settingMapper.selectList(null)));
         try {
             byte[] json = MAPPER.writeValueAsBytes(doc);
