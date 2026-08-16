@@ -41,6 +41,7 @@ vi.mock('./api/settings', () => ({
   updateSettings: vi.fn(),
 }))
 vi.mock('./api/search', () => ({ searchGlobal: vi.fn() }))
+vi.mock('./api/backup', () => ({ exportBackup: vi.fn() }))
 
 const healthMock = vi.mocked(fetchHealth)
 const workspacesMock = vi.mocked(fetchWorkspaces)

@@ -6,6 +6,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import zlib from 'node:zlib'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { execFile } from 'node:child_process'
 import { parseSessionMarkdown } from './session-export.mjs'
@@ -72,6 +73,58 @@ export function checkSavedContent(contentJson, expected) {
     }
   }
   return { ok: true }
+}
+
+/**
+ * 从备份 zip 字节中解出 trailmind-backup.json 并解析为对象（纯函数，单测覆盖）。
+ * 仅支持单条目 zip（后端 ZipOutputStream 只写一个 JSON），deflate 解压走 Node 内建 zlib。
+ * 参考 ZIP 规范：EOCD（0x06054b50）→ 中央目录（0x02014b50，取文件名/压缩方式/本地头偏移）→
+ * 本地文件头（0x04034b50，跳过文件名+扩展长度取数据）→ 按方法 0（stored）/8（deflate）解压。
+ * @param {Buffer} buf zip 字节
+ * @returns {object} 备份 JSON（含 format/version/tables）
+ */
+export function unzipBackupJson(buf) {
+  // 1. 定位 EOCD：文件尾 22 字节起向前扫（最大注释长度 65535）
+  const eocdStart = Math.max(0, buf.length - 22 - 0xffff)
+  let eocd = -1
+  for (let i = buf.length - 22; i >= eocdStart; i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) {
+      eocd = i
+      break
+    }
+  }
+  if (eocd < 0) throw new Error('备份 zip 缺少 EOCD 记录')
+  const entryCount = buf.readUInt16LE(eocd + 10)
+  let cdOffset = buf.readUInt32LE(eocd + 16)
+
+  // 2. 遍历中央目录找 trailmind-backup.json
+  let found = null
+  for (let n = 0; n < entryCount; n++) {
+    if (buf.readUInt32LE(cdOffset) !== 0x02014b50) throw new Error('备份 zip 中央目录签名错误')
+    const method = buf.readUInt16LE(cdOffset + 10)
+    const compressedSize = buf.readUInt32LE(cdOffset + 20)
+    const nameLen = buf.readUInt16LE(cdOffset + 28)
+    const extraLen = buf.readUInt16LE(cdOffset + 30)
+    const commentLen = buf.readUInt16LE(cdOffset + 32)
+    const localOffset = buf.readUInt32LE(cdOffset + 42)
+    const name = buf.toString('utf8', cdOffset + 46, cdOffset + 46 + nameLen)
+    if (name === 'trailmind-backup.json') {
+      found = { method, compressedSize, localOffset }
+      break
+    }
+    cdOffset += 46 + nameLen + extraLen + commentLen
+  }
+  if (!found) throw new Error('备份 zip 中未找到 trailmind-backup.json')
+
+  // 3. 读本地文件头，取数据区
+  const { method, compressedSize, localOffset } = found
+  if (buf.readUInt32LE(localOffset) !== 0x04034b50) throw new Error('备份 zip 本地文件头签名错误')
+  const lNameLen = buf.readUInt16LE(localOffset + 26)
+  const lExtraLen = buf.readUInt16LE(localOffset + 28)
+  const dataStart = localOffset + 30 + lNameLen + lExtraLen
+  const data = buf.subarray(dataStart, dataStart + compressedSize)
+  const raw = method === 0 ? data : zlib.inflateRawSync(data)
+  return JSON.parse(raw.toString('utf8'))
 }
 
 // HTTP 请求（内建 http），返回 { status, json }
@@ -868,6 +921,34 @@ export async function runChecks(deps = {}) {
     if (settingsRepoDir != null) {
       await fs.promises.rm(settingsRepoDir, { recursive: true, force: true }).catch(() => {})
     }
+  }
+
+  // 6.9 备份往返（M4 任务六，PRD E5 / 04 §5 POST /backup/export）：
+  //     导出全量 zip → Base64 解码 → 解析 trailmind-backup.json → format/version/8 表齐全且含当前工作区数据
+  try {
+    const bk = await request(`${BASE}/api/v1/backup/export`, { method: 'POST' })
+    if (bk?.json?.code !== 0) throw new Error(`备份导出失败：${JSON.stringify(bk?.json)}`)
+    const file = bk?.json?.data
+    if (!file?.filename?.endsWith('.zip') || file?.contentType !== 'application/zip') {
+      throw new Error(`备份产物元信息错误：${JSON.stringify(file)}`)
+    }
+    const buf = Buffer.from(file.content, 'base64')
+    const doc = unzipBackupJson(buf)
+    if (doc?.format !== 'trailmind-backup' || doc?.version !== 1) {
+      throw new Error(`备份格式标识错误：format=${doc?.format} version=${doc?.version}`)
+    }
+    const tables = doc?.tables || {}
+    const expectedTables = EXPECTED_TABLES.filter((t) => t !== 'entry_tag' && t !== 'entry_commit')
+      .concat(['entry_tag', 'entry_commit'])
+    for (const t of expectedTables) {
+      if (!Array.isArray(tables[t])) throw new Error(`备份缺少表 ${t}`)
+    }
+    // 当前工作区（本段之前各往返创建的数据）应包含在备份中
+    const inBackup = (tables.workspace || []).some((w) => w.id === workspaceId)
+    if (!inBackup) throw new Error(`备份中未找到工作区 ${workspaceId}`)
+    results.push({ ok: true, name: `备份往返（zip ${file.filename} → trailmind-backup v1 → 8 表齐全 + 当前工作区在内）` })
+  } catch (e) {
+    results.push({ ok: false, name: '备份往返', error: e.message })
   }
 
   // 7. M3 总验收：10 条不同类型条目计时（单条 ≤10s，NFR）+ 会话 Markdown 导出往返（06 §4 解析 → 与库中数据逐一比对）

@@ -115,3 +115,24 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* 数据备份（M4 任务六，PRD E5） */
+.settings-backup button {
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-backup button:hover {
+  border-color: var(--brand);
+  background: var(--brand-bg);
+}
+
+.settings-backup button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

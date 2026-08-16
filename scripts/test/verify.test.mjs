@@ -1,8 +1,9 @@
 // 验收冒烟脚本关键逻辑单测（node:test，无第三方依赖）。
-// 覆盖纯决策函数：缺失表检测、通过/失败汇总、保存内容比对（docs/08 §6 DoD「关键逻辑补单测」）。
+// 覆盖纯决策函数：缺失表检测、通过/失败汇总、保存内容比对、备份 zip 解析（docs/08 §6 DoD「关键逻辑补单测」）。
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { EXPECTED_TABLES, missingTables, summarize, checkSavedContent } from '../verify.mjs'
+import zlib from 'node:zlib'
+import { EXPECTED_TABLES, missingTables, summarize, checkSavedContent, unzipBackupJson } from '../verify.mjs'
 
 test('EXPECTED_TABLES：固定 8 张表，与 schema.sql 一致', () => {
   assert.strictEqual(EXPECTED_TABLES.length, 8)
@@ -100,4 +101,81 @@ test('checkSavedContent：节点数不符返回失败', () => {
   const r = checkSavedContent(savedFixture(), { nodeCount: 1, nodes: {}, edges: [] })
   assert.strictEqual(r.ok, false)
   assert.match(r.error, /节点数/)
+})
+
+// 最小单条目 zip 构造（deflate 方法 8），与后端 BackupExportService（ZipOutputStream）产物同构
+function buildZip(entryName, content) {
+  const deflated = zlib.deflateRawSync(Buffer.from(content, 'utf8'))
+  const crc = crc32(Buffer.from(content, 'utf8'))
+  // 本地文件头
+  const lfh = Buffer.alloc(30)
+  lfh.writeUInt32LE(0x04034b50, 0)
+  lfh.writeUInt16LE(20, 4) // version needed
+  lfh.writeUInt16LE(0x0800, 6) // flags
+  lfh.writeUInt16LE(8, 8) // method deflate
+  lfh.writeUInt32LE(crc, 14)
+  lfh.writeUInt32LE(deflated.length, 18)
+  lfh.writeUInt32LE(Buffer.byteLength(content), 22)
+  lfh.writeUInt16LE(Buffer.byteLength(entryName), 26)
+  const lfhBody = Buffer.concat([lfh, Buffer.from(entryName), deflated])
+  // 中央目录
+  const cd = Buffer.alloc(46)
+  cd.writeUInt32LE(0x02014b50, 0)
+  cd.writeUInt16LE(20, 4)
+  cd.writeUInt16LE(20, 6)
+  cd.writeUInt16LE(0x0800, 8)
+  cd.writeUInt16LE(8, 10)
+  cd.writeUInt32LE(crc, 16)
+  cd.writeUInt32LE(deflated.length, 20)
+  cd.writeUInt32LE(Buffer.byteLength(content), 24)
+  cd.writeUInt16LE(Buffer.byteLength(entryName), 28)
+  cd.writeUInt32LE(0, 42) // local header offset
+  const cdBody = Buffer.concat([cd, Buffer.from(entryName)])
+  // EOCD
+  const eocd = Buffer.alloc(22)
+  eocd.writeUInt32LE(0x06054b50, 0)
+  eocd.writeUInt16LE(1, 8) // entry count
+  eocd.writeUInt16LE(1, 10)
+  eocd.writeUInt32LE(cdBody.length, 12)
+  eocd.writeUInt32LE(lfhBody.length, 16)
+  return Buffer.concat([lfhBody, cdBody, eocd])
+}
+
+// CRC-32（IEEE），Node 无内建 → 查表实现（仅测试用）
+function crc32(buf) {
+  let table = crc32.table
+  if (!table) {
+    table = crc32.table = new Int32Array(256)
+    for (let n = 0; n < 256; n++) {
+      let c = n
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+      table[n] = c
+    }
+  }
+  let crc = -1
+  for (const b of buf) crc = (crc >>> 8) ^ table[(crc ^ b) & 0xff]
+  return (crc ^ -1) >>> 0
+}
+
+test('unzipBackupJson：解析备份 zip 还原 format/version/tables', () => {
+  const json = JSON.stringify({
+    format: 'trailmind-backup',
+    version: 1,
+    exportedAt: '2025-08-16T12:00:00',
+    tables: { workspace: [{ id: 1, name: '项目A' }], entry_tag: [], entry_commit: [] },
+  })
+  const zip = buildZip('trailmind-backup.json', json)
+  const doc = unzipBackupJson(zip)
+  assert.strictEqual(doc.format, 'trailmind-backup')
+  assert.strictEqual(doc.version, 1)
+  assert.strictEqual(doc.tables.workspace[0].name, '项目A')
+})
+
+test('unzipBackupJson：非法 zip 抛出明确错误', () => {
+  assert.throws(() => unzipBackupJson(Buffer.from('not a zip')), /EOCD|签名/)
+})
+
+test('unzipBackupJson：缺少目标条目抛出明确错误', () => {
+  const zip = buildZip('other.json', '{}')
+  assert.throws(() => unzipBackupJson(zip), /未找到 trailmind-backup\.json/)
 })

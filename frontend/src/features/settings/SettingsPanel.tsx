@@ -1,16 +1,21 @@
 import { useEffect, useState } from 'react'
 import { THEME_LABELS, THEME_MODES } from '../../api/types'
 import { useSettingsStore } from '../../store/useSettingsStore'
+import { exportBackup } from '../../api/backup'
+import { downloadBase64File } from '../../utils/download'
 import './settings.css'
 
 /**
- * 设置页（M4 任务四，07 §7：数据库连接信息展示、主题切换、仓库路径；入口 Ctrl+,，03 §5）。
+ * 设置页（M4 任务四/六，07 §7：数据库连接信息展示、主题切换、仓库路径、数据备份；入口 Ctrl+,，03 §5）。
  * 数据库连接为只读展示（密码只显示「已配置/未配置」）；主题三选一即时生效并落库；
- * 默认仓库路径为全局回退值（新建会话仓库回退链：会话 → 工作区 → 全局默认），后端校验 .git 目录。
+ * 默认仓库路径为全局回退值（新建会话仓库回退链：会话 → 工作区 → 全局默认），后端校验 .git 目录；
+ * 数据备份导出全部数据为 JSON 压缩包（M4 任务六，PRD E5）。
  */
 export function SettingsPanel({ onBack }: { onBack: () => void }) {
   const { settings, loading, saving, error, load, setTheme, setDefaultRepoPath } = useSettingsStore()
   const [repoDraft, setRepoDraft] = useState('')
+  const [backingUp, setBackingUp] = useState(false)
+  const [backupError, setBackupError] = useState<string | null>(null)
 
   useEffect(() => {
     void load()
@@ -28,6 +33,21 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
   const clearRepo = async () => {
     setRepoDraft('')
     await setDefaultRepoPath('')
+  }
+
+  /** 导出全量备份（M4 任务六，PRD E5）：zip（Base64）→ 浏览器下载。 */
+  const handleBackup = async () => {
+    if (backingUp) return
+    setBackingUp(true)
+    setBackupError(null)
+    try {
+      const file = await exportBackup()
+      downloadBase64File(file.filename, file.content, file.contentType)
+    } catch (e) {
+      setBackupError(e instanceof Error ? e.message : '导出备份失败')
+    } finally {
+      setBackingUp(false)
+    }
   }
 
   const db = settings?.database
@@ -104,6 +124,21 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
           disabled={saving || !settings?.defaultRepoPath}
         >
           清除
+        </button>
+      </div>
+
+      <h3>数据备份</h3>
+      <p className="muted">
+        导出全部数据（工作区/导图/会话/条目/标签/绑定/设置）为 JSON 压缩包，用于留存与迁移。
+      </p>
+      {backupError && (
+        <p className="error" role="alert">
+          {backupError}
+        </p>
+      )}
+      <div className="settings-backup">
+        <button onClick={() => void handleBackup()} disabled={backingUp}>
+          {backingUp ? '导出中…' : '导出全量备份'}
         </button>
       </div>
     </section>
