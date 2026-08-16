@@ -20,6 +20,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { exportMindmap, type MindmapExportType } from '../../api/mindmaps'
+import { getMindmapLinks } from '../../api/linkage'
 import { useMindmapStore } from '../../store/useMindmapStore'
 import type { MindmapMode } from '../../store/useMindmapStore'
 import { downloadBase64File, downloadTextFile } from '../../utils/download'
@@ -28,6 +29,10 @@ import type { MindmapContent } from './content'
 import { computeTreeLayout, type LayoutPoint } from './treeLayout'
 import { MindmapNode, type MindmapRFNode } from './MindmapNode'
 import { NODE_COLORS, NODE_SHAPES } from './nodeStyle'
+import { NodeEntryLinkDialog } from '../linkage/NodeEntryLinkDialog'
+import { NodeLinksPopover } from '../linkage/NodeLinksPopover'
+import type { LinkedEntry } from '../../api/types'
+import '../linkage/linkage.css'
 import './mindmap.css'
 
 // 节点估宽/高（用于拖拽落点中心判定；节点宽随文本变化，估算足够命中）。
@@ -63,6 +68,12 @@ function buildNodes(
   selectedIds: string[],
   mode: MindmapMode,
   flashId: string | null,
+  linkage: {
+    mindmapId: number
+    links: Record<string, number[]>
+    onShowNodeLinks: (nodeId: string) => void
+    onManageLinks: (nodeId: string) => void
+  },
 ): MindmapRFNode[] {
   const out: MindmapRFNode[] = []
   for (const [id, pos] of positions) {
@@ -88,6 +99,11 @@ function buildNodes(
         position: pos,
         // 搜索跳转定位（PRD D2）：目标节点闪烁提示。
         flash: id === flashId,
+        // 联动（v1.1 P1）：挂接徽标/详情弹层/管理对话框。
+        mindmapId: linkage.mindmapId,
+        linkCount: linkage.links[id]?.length ?? 0,
+        onShowNodeLinks: linkage.onShowNodeLinks,
+        onManageLinks: linkage.onManageLinks,
       },
     })
   }
@@ -162,11 +178,14 @@ export function MindMapEditor({
   mindmapId,
   onBack,
   highlightNodeId = null,
+  onOpenEntry,
 }: {
   mindmapId: number
   onBack: () => void
   /** 搜索跳转定位（PRD D2）：加载后选中该节点并闪烁。 */
   highlightNodeId?: string | null
+  /** 联动（v1.1 P1）：挂接详情弹层点击条目 → 跳转会话时间线定位该条目（复用 D2 跳转机制）。 */
+  onOpenEntry?: (sessionId: number, entryId: number, seq: number) => void
 }) {
   const load = useMindmapStore((s) => s.load)
   const select = useMindmapStore((s) => s.select)
@@ -212,6 +231,23 @@ export function MindMapEditor({
   const fittedRef = useRef(false)
   const rfRef = useRef<ReactFlowInstance<MindmapRFNode, Edge> | null>(null)
 
+  // 联动（v1.1 P1）：导图挂接图（nodeId → [entryId]）、挂接详情弹层、挂接管理对话框
+  const [links, setLinks] = useState<Record<string, number[]>>({})
+  const [linksPopover, setLinksPopover] = useState<{ nodeId: string; x: number; y: number } | null>(null)
+  const [linkDialogNode, setLinkDialogNode] = useState<string | null>(null)
+
+  const refreshLinks = useCallback(async () => {
+    try {
+      setLinks(await getMindmapLinks(mindmapId))
+    } catch {
+      setLinks({}) // 挂接图加载失败不阻塞画布（徽标暂时不展示）
+    }
+  }, [mindmapId])
+
+  useEffect(() => {
+    void refreshLinks()
+  }, [refreshLinks])
+
   useEffect(() => {
     void load(mindmapId)
     fittedRef.current = false
@@ -255,10 +291,33 @@ export function MindMapEditor({
     return m
   }, [content])
 
+  // 联动：点 📎 徽标 → 在节点旁弹出挂接详情（flowToScreenPosition 换算屏幕锚点；画布平移/缩放时关闭）
+  const openNodeLinks = useCallback(
+    (nodeId: string) => {
+      const pos = positions.get(nodeId)
+      if (!pos || !rfRef.current) return
+      const screen = rfRef.current.flowToScreenPosition({ x: pos.x + 100, y: pos.y + 22 })
+      setLinksPopover({ nodeId, x: Math.round(screen.x), y: Math.round(screen.y) })
+    },
+    [positions],
+  )
+
+  const openLinkDialog = useCallback((nodeId: string) => {
+    setLinksPopover(null)
+    setLinkDialogNode(nodeId)
+  }, [])
+
   // 布局/内容变化时同步节点与边（拖拽中跳过，避免打断拖拽）。
   useEffect(() => {
     if (!content || dragging.current) return
-    setNodes(buildNodes(content, positions, childCount, selectedIds, mode, flashId))
+    setNodes(
+      buildNodes(content, positions, childCount, selectedIds, mode, flashId, {
+        mindmapId,
+        links,
+        onShowNodeLinks: openNodeLinks,
+        onManageLinks: openLinkDialog,
+      }),
+    )
     // 函数式更新保留当前边选中态：点击选中边会联动取消节点选中（selectedIds 变化触发本 effect），
     // 直接重建会把刚选中的边洗掉，导致「选中边按 Delete 断开」失效（人工验收反馈修复）。
     setEdges((current) =>
@@ -269,7 +328,7 @@ export function MindMapEditor({
       // 双 rAF 等 React Flow 完成首轮测量后再 fit，避免按 0 尺寸计算。
       requestAnimationFrame(() => requestAnimationFrame(() => void rfRef.current?.fitView({ padding: 0.2 })))
     }
-  }, [content, positions, childCount, selectedIds, mode, flashId, setNodes, setEdges])
+  }, [content, positions, childCount, selectedIds, mode, flashId, mindmapId, links, openNodeLinks, openLinkDialog, setNodes, setEdges])
 
   // 切换模式后坐标来源变化（平铺/重排），重新适应视图。
   useEffect(() => {
@@ -553,6 +612,31 @@ export function MindMapEditor({
         </div>
       )}
 
+      {/* 联动（v1.1 P1）：节点挂接详情弹层 + 挂接管理对话框 */}
+      {linksPopover && content?.nodes[linksPopover.nodeId] && (
+        <NodeLinksPopover
+          mindmapId={mindmapId}
+          nodeId={linksPopover.nodeId}
+          nodeText={content.nodes[linksPopover.nodeId].text}
+          x={linksPopover.x}
+          y={linksPopover.y}
+          onClose={() => setLinksPopover(null)}
+          onOpenEntry={(entry: LinkedEntry) => onOpenEntry?.(entry.sessionId, entry.entryId, entry.seq)}
+          onManage={() => openLinkDialog(linksPopover.nodeId)}
+        />
+      )}
+
+      {linkDialogNode && content?.nodes[linkDialogNode] && mindmap?.workspaceId != null && (
+        <NodeEntryLinkDialog
+          mindmapId={mindmapId}
+          nodeId={linkDialogNode}
+          workspaceId={mindmap.workspaceId}
+          initialEntryIds={links[linkDialogNode] ?? []}
+          onClose={() => setLinkDialogNode(null)}
+          onSaved={() => void refreshLinks()}
+        />
+      )}
+
       {loading && !content ? (
         <div className="mm-center muted">加载中…</div>
       ) : error && !content ? (
@@ -589,7 +673,10 @@ export function MindMapEditor({
             onNodeDragStop={onNodeDragStop}
             onConnect={onConnect}
             onEdgesDelete={onEdgesDelete}
-            onMove={(_, viewport) => setZoom(viewport.zoom)}
+            onMove={(_, viewport) => {
+              setZoom(viewport.zoom)
+              setLinksPopover(null) // 画布平移/缩放时关闭挂接弹层（锚点随之失效）
+            }}
             nodesConnectable={mode === 'canvas'}
             nodesFocusable={false}
             fitView={false}

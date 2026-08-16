@@ -25,6 +25,14 @@ export type MindmapNodeData = {
   hover?: boolean
   /** 搜索跳转定位闪烁（PRD D2「跳转后目标高亮闪烁」）。 */
   flash?: boolean
+  /** 联动（v1.1 P1）：导图 id（详情弹层数据源定位）。 */
+  mindmapId?: number
+  /** 联动：该节点挂接的条目数（>0 显示 📎 徽标）。 */
+  linkCount?: number
+  /** 联动：点 📎 徽标 → 编辑器弹出挂接详情弹层。 */
+  onShowNodeLinks?: (nodeId: string) => void
+  /** 联动：工具栏 🔗 / 弹层「管理挂接」→ 打开挂接管理对话框。 */
+  onManageLinks?: (nodeId: string) => void
 }
 
 export type MindmapRFNode = Node<MindmapNodeData, 'mindmap'>
@@ -97,6 +105,9 @@ export function MindmapNode({ id, data, selected }: NodeProps<MindmapRFNode>) {
           <button title="编辑" onClick={startEdit}>
             ✎
           </button>
+          <button title="挂接条目（v1.1 联动）" onClick={() => data.onManageLinks?.(id)}>
+            🔗
+          </button>
           {!data.isRoot && (
             <button title="删除" className="danger" onClick={() => deleteNode(id)}>
               🗑
@@ -139,6 +150,20 @@ export function MindmapNode({ id, data, selected }: NodeProps<MindmapRFNode>) {
 
       {data.collapsed && data.hasChildren && !data.connectable && (
         <span className="mm-node-badge">{data.childCount}</span>
+      )}
+
+      {/* 联动挂接徽标（v1.1 P1）：有挂接时展示 📎 数量，点击弹出挂接条目详情 */}
+      {typeof data.linkCount === 'number' && data.linkCount > 0 && (
+        <button
+          className="mm-link-badge"
+          title={`挂接了 ${data.linkCount} 条记录`}
+          onClick={(e) => {
+            e.stopPropagation() // 不触发节点选中/拖拽
+            data.onShowNodeLinks?.(id)
+          }}
+        >
+          📎 {data.linkCount}
+        </button>
       )}
     </div>
   )
