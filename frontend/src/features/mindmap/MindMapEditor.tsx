@@ -27,6 +27,7 @@ import { downloadBase64File, downloadTextFile } from '../../utils/download'
 import { descendants } from './content'
 import type { MindmapContent } from './content'
 import { computeTreeLayout, type LayoutPoint } from './treeLayout'
+import { contentExceedsViewport } from './fitCheck'
 import { MindmapNode, type MindmapRFNode } from './MindmapNode'
 import { FreeEdge, type FreeEdgeData } from './FreeEdge'
 import { NODE_COLORS, NODE_SHAPES } from './nodeStyle'
@@ -239,6 +240,9 @@ export function MindMapEditor({
   const dropTargetRef = useRef<string | null>(null)
   const fittedRef = useRef(false)
   const rfRef = useRef<ReactFlowInstance<MindmapRFNode, Edge> | null>(null)
+  // 自适应缩放（v1.1 P1）：内容变化后的防抖检查定时器 + 画布容器 ref
+  const autoFitTimerRef = useRef<number | null>(null)
+  const mmCanvasRef = useRef<HTMLDivElement | null>(null)
 
   // 联动（v1.1 P1）：导图挂接图（nodeId → [entryId]）、挂接详情弹层、挂接管理对话框
   const [links, setLinks] = useState<Record<string, number[]>>({})
@@ -316,6 +320,49 @@ export function MindMapEditor({
     setLinkDialogNode(nodeId)
   }, [])
 
+  /**
+   * 自适应缩放（v1.1 P1，PRD §5 P1）：内容变化后仅当节点包围盒超出视口（含边距）才自动 fitView，
+   * 未超出保持用户视野（"不打扰"语义）。实时节点取 React Flow 实例（拖拽后闭包 nodes 滞后）。
+   */
+  const autoFitIfNeeded = useCallback(() => {
+    const inst = rfRef.current
+    const wrap = mmCanvasRef.current
+    if (!inst || !wrap || wrap.clientWidth === 0) return
+    const b = inst.getNodesBounds(inst.getNodes())
+    if (
+      contentExceedsViewport(
+        { minX: b.x, minY: b.y, maxX: b.x + b.width, maxY: b.y + b.height },
+        inst.getViewport(),
+        wrap.clientWidth,
+        wrap.clientHeight,
+      )
+    ) {
+      void inst.fitView({ padding: 0.12, duration: 300 })
+    }
+  }, [])
+
+  /** 双 rAF 等 React Flow 完成节点测量后执行自适应检查（与首帧 fitView 同款时序）。 */
+  const scheduleAutoFit = useCallback(() => {
+    if (autoFitTimerRef.current != null) {
+      window.clearTimeout(autoFitTimerRef.current)
+    }
+    autoFitTimerRef.current = window.setTimeout(() => {
+      requestAnimationFrame(() => requestAnimationFrame(() => autoFitIfNeeded()))
+    }, 300)
+  }, [autoFitIfNeeded])
+
+  // 组件卸载清理自适应防抖定时器。
+  useEffect(() => () => {
+    if (autoFitTimerRef.current != null) window.clearTimeout(autoFitTimerRef.current)
+  }, [])
+
+  // 窗口/面板尺寸变化：缩小导致内容超出时自动适应（React Flow v12 无 onResize prop，走 window resize）。
+  useEffect(() => {
+    const onResize = () => scheduleAutoFit()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [scheduleAutoFit])
+
   // 布局/内容变化时同步节点与边（拖拽中跳过，避免打断拖拽）。
   useEffect(() => {
     if (!content || dragging.current) return
@@ -342,8 +389,11 @@ export function MindMapEditor({
       fittedRef.current = true
       // 双 rAF 等 React Flow 完成首轮测量后再 fit，避免按 0 尺寸计算。
       requestAnimationFrame(() => requestAnimationFrame(() => void rfRef.current?.fitView({ padding: 0.2 })))
+    } else if (!dragging.current) {
+      // 自适应缩放（v1.1 P1）：编辑导致布局/内容变化后，仅当超出视口才自动适应（防抖 300ms）
+      scheduleAutoFit()
     }
-  }, [content, positions, childCount, selectedIds, mode, flashId, mindmapId, links, openNodeLinks, openLinkDialog, updateEdgeLabel, setNodes, setEdges])
+  }, [content, positions, childCount, selectedIds, mode, flashId, mindmapId, links, openNodeLinks, openLinkDialog, updateEdgeLabel, setNodes, setEdges, scheduleAutoFit])
 
   // 切换模式后坐标来源变化（平铺/重排），重新适应视图。
   useEffect(() => {
@@ -381,6 +431,8 @@ export function MindMapEditor({
         // 画布：自由摆放，落点坐标写入 layout 持久化（PRD B2.1/B2.6 批量移动：多选拖一个带动全体）。
         const moved = nodes.filter((n) => selectedIds.includes(n.id))
         moveNodesLayout(moved.map((n) => ({ id: n.id, x: n.position.x, y: n.position.y })))
+        // 自适应缩放：拖出视野后自动拉回（双 rAF 等节点测量完成）
+        requestAnimationFrame(() => requestAnimationFrame(() => autoFitIfNeeded()))
         return
       }
       const target = dropTargetRef.current
@@ -388,7 +440,7 @@ export function MindMapEditor({
       const newParent = target ?? content?.rootNodeId
       if (newParent) moveNode(node.id, newParent)
     },
-    [mode, content, moveNode, moveNodesLayout, selectedIds],
+    [mode, content, moveNode, moveNodesLayout, selectedIds, autoFitIfNeeded],
   )
 
   const onConnect = useCallback(
@@ -659,7 +711,7 @@ export function MindMapEditor({
           {error}
         </div>
       ) : (
-        <div className="mm-canvas">
+        <div className="mm-canvas" ref={mmCanvasRef}>
           <ReactFlow<MindmapRFNode, Edge>
             nodes={nodes}
             edges={edges}
