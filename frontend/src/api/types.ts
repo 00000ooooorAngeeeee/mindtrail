@@ -286,3 +286,42 @@ export interface TaggedEntry {
   workspaceName: string
   tags: string[]
 }
+
+// ---- 导图↔记录联动（v1.1 P1，04 §5 契约补充：节点挂条目 / 条目引用节点） ----
+
+/** 节点挂接的条目详情（GET /mindmaps/{id}/nodes/{nodeId}/links，详情弹层数据源）。 */
+export interface LinkedEntry {
+  entryId: number
+  sessionId: number
+  sessionTitle: string
+  seq: number
+  type: EntryType
+  contentPreview: string | null
+  createdAt?: string | null
+}
+
+/** 条目引用的节点（含工作区 id 供前端跳转定位，GET /entries/{id}/nodes）。 */
+export interface NodeRef {
+  workspaceId: number
+  mindmapId: number
+  mindmapName: string
+  nodeId: string
+  nodeText: string
+}
+
+/** 节点搜索命中（GET /mindmaps/{id}/nodes?q=，path 为祖先链「根 / 子 / 孙」）。 */
+export interface NodeHit {
+  nodeId: string
+  text: string
+  path: string
+}
+
+/** 工作区最近条目（GET /workspaces/{wid}/entries/recent，节点挂条目对话框候选）。 */
+export interface RecentEntry {
+  entryId: number
+  sessionId: number
+  sessionTitle: string
+  type: EntryType
+  contentMd: string
+  createdAt?: string | null
+}
