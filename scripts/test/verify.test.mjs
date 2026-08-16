@@ -5,10 +5,11 @@ import assert from 'node:assert'
 import zlib from 'node:zlib'
 import { EXPECTED_TABLES, missingTables, summarize, checkSavedContent, unzipBackupJson } from '../verify.mjs'
 
-test('EXPECTED_TABLES：固定 8 张表，与 schema.sql 一致', () => {
-  assert.strictEqual(EXPECTED_TABLES.length, 8)
+test('EXPECTED_TABLES：固定 9 张表，与 schema.sql 一致（v1.1 起含 node_entry）', () => {
+  assert.strictEqual(EXPECTED_TABLES.length, 9)
   assert.ok(EXPECTED_TABLES.includes('workspace'))
   assert.ok(EXPECTED_TABLES.includes('entry_commit'))
+  assert.ok(EXPECTED_TABLES.includes('node_entry'))
 })
 
 test('missingTables：全部齐全返回空数组', () => {
@@ -16,7 +17,7 @@ test('missingTables：全部齐全返回空数组', () => {
 })
 
 test('missingTables：缺表时返回缺失表名', () => {
-  const actual = ['workspace', 'mindmap', 'session', 'entry', 'tag', 'entry_tag', 'entry_commit'] // 少 setting
+  const actual = ['workspace', 'mindmap', 'session', 'entry', 'tag', 'entry_tag', 'entry_commit', 'node_entry'] // 少 setting
   assert.deepStrictEqual(missingTables(actual), ['setting'])
 })
 

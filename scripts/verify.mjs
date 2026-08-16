@@ -14,7 +14,7 @@ import { parseOpmlOutlines, pngInfoFromBase64 } from './mindmap-export.mjs'
 
 export const BASE = 'http://127.0.0.1:17860'
 export const EXPECTED_TABLES = [
-  'workspace', 'mindmap', 'session', 'entry', 'tag', 'entry_tag', 'entry_commit', 'setting',
+  'workspace', 'mindmap', 'session', 'entry', 'tag', 'entry_tag', 'entry_commit', 'node_entry', 'setting',
 ]
 
 // 纯函数：比较实际表集与期望表集，返回缺失的表名（单测覆盖）。
@@ -189,7 +189,7 @@ export async function runChecks(deps = {}) {
     const out = await mysql("SELECT table_name FROM information_schema.tables WHERE table_schema='trailmind'", deps)
     const tables = out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
     const missing = missingTables(tables)
-    if (missing.length === 0) results.push({ ok: true, name: `schema 表齐全（${tables.length}/8）` })
+    if (missing.length === 0) results.push({ ok: true, name: `schema 表齐全（${tables.length}/9，v1.1 起含 node_entry）` })
     else results.push({ ok: false, name: 'schema 表齐全', error: `缺失：${missing.join(', ')}` })
   } catch (e) {
     results.push({ ok: false, name: 'schema 表齐全', error: e.message })
@@ -955,8 +955,176 @@ export async function runChecks(deps = {}) {
     }
   }
 
-  // 6.9 备份往返（M4 任务六，PRD E5 / 04 §5 POST /backup/export）：
-  //     导出全量 zip → Base64 解码 → 解析 trailmind-backup.json → format/version/8 表齐全且含当前工作区数据
+  // 6.8 联动往返（v1.1 P1，07 §8 Backlog 第一优先：节点挂条目、条目引用节点）：
+  //     节点挂接替换 → 挂接图/详情 → 条目引用替换 → 会话批量回填 → 节点搜索（path 祖先链）→ 最近条目 →
+  //     跨工作区 400 → 保存差异清理（删节点后挂接消失）→ 级联（删条目清引用）→ 恢复一条挂接供备份段断言
+  let linkageMindmapId = null
+  let linkageEntry2Id = null
+  try {
+    if (!workspaceId) throw new Error('依赖第 3 步的 workspace id')
+    const lm = await request(`${BASE}/api/v1/workspaces/${workspaceId}/mindmaps`, {
+      method: 'POST',
+      body: { name: '验收联动导图' },
+    })
+    linkageMindmapId = lm?.json?.data?.id
+    if (lm?.json?.code !== 0 || !linkageMindmapId) throw new Error(`联动导图创建失败：${JSON.stringify(lm?.json)}`)
+
+    const linkNode = (id, text, parentId) =>
+      `{"id":"${id}","text":"${text}","note":"","style":{"color":"default","bold":false,"shape":"rounded"},"tags":[],"parentId":${parentId},"layout":null,"collapsed":false}`
+    const linkContent = JSON.stringify({
+      version: 1,
+      rootNodeId: 'n1',
+      nodes: {
+        n1: JSON.parse(linkNode('n1', '联动根', 'null')),
+        n2: JSON.parse(linkNode('n2', '联动子', '"n1"')),
+      },
+      edges: [],
+    })
+    const lm0 = await request(`${BASE}/api/v1/mindmaps/${linkageMindmapId}`)
+    const lmSaved = await request(`${BASE}/api/v1/mindmaps/${linkageMindmapId}`, {
+      method: 'PUT',
+      body: { contentJson: linkContent, updatedAt: lm0?.json?.data?.updatedAt },
+    })
+    if (lmSaved?.json?.code !== 0) throw new Error(`联动导图内容保存失败：${JSON.stringify(lmSaved?.json)}`)
+
+    const lsess = await request(`${BASE}/api/v1/workspaces/${workspaceId}/sessions`, {
+      method: 'POST',
+      body: { title: '验收联动会话' },
+    })
+    const lsid = lsess?.json?.data?.id
+    if (lsess?.json?.code !== 0 || !lsid) throw new Error(`联动会话创建失败：${JSON.stringify(lsess?.json)}`)
+    const le1 = await request(`${BASE}/api/v1/sessions/${lsid}/entries`, {
+      method: 'POST',
+      body: { type: 'goal', contentMd: '联动目标' },
+    })
+    const le2 = await request(`${BASE}/api/v1/sessions/${lsid}/entries`, {
+      method: 'POST',
+      body: { type: 'action', contentMd: '联动动作' },
+    })
+    linkageEntry2Id = le2?.json?.data?.id
+    if (le1?.json?.code !== 0 || le2?.json?.code !== 0) throw new Error('联动条目创建失败')
+
+    // 节点挂条目（替换语义）：n1 挂两条 → 挂接图/详情断言
+    const put1 = await request(`${BASE}/api/v1/mindmaps/${linkageMindmapId}/nodes/n1/links`, {
+      method: 'PUT',
+      body: { entryIds: [le1?.json?.data?.id, le2?.json?.data?.id] },
+    })
+    if (put1?.json?.code !== 0 || put1?.json?.data?.length !== 2) {
+      throw new Error(`节点挂接失败：${JSON.stringify(put1?.json)}`)
+    }
+    const linksMap = await request(`${BASE}/api/v1/mindmaps/${linkageMindmapId}/links`)
+    const n1Links = linksMap?.json?.data?.n1
+    if (!Array.isArray(n1Links) || n1Links.length !== 2 || !n1Links.includes(le1?.json?.data?.id)) {
+      throw new Error(`挂接图错误：${JSON.stringify(linksMap?.json?.data)}`)
+    }
+    const nodeLinks = await request(`${BASE}/api/v1/mindmaps/${linkageMindmapId}/nodes/n1/links`)
+    const nl = nodeLinks?.json?.data
+    if (nl?.length !== 2 || nl?.[0]?.sessionTitle !== '验收联动会话' || nl?.[0]?.seq !== 1) {
+      throw new Error(`节点挂接详情错误：${JSON.stringify(nodeLinks?.json)}`)
+    }
+
+    // 条目引用节点（替换语义）：le2 引用 n1/n2 → 引用列表断言
+    const put2 = await request(`${BASE}/api/v1/entries/${le2?.json?.data?.id}/nodes`, {
+      method: 'PUT',
+      body: {
+        links: [
+          { mindmapId: linkageMindmapId, nodeId: 'n1' },
+          { mindmapId: linkageMindmapId, nodeId: 'n2' },
+        ],
+      },
+    })
+    if (put2?.json?.code !== 0 || put2?.json?.data?.length !== 2) {
+      throw new Error(`条目引用失败：${JSON.stringify(put2?.json)}`)
+    }
+    const entryNodes = await request(`${BASE}/api/v1/entries/${le2?.json?.data?.id}/nodes`)
+    if (entryNodes?.json?.data?.length !== 2 || entryNodes?.json?.data?.[0]?.nodeText !== '联动根') {
+      throw new Error(`条目引用列表错误：${JSON.stringify(entryNodes?.json)}`)
+    }
+
+    // 会话批量回填：le2 → 2 个节点引用
+    const sessLinks = await request(`${BASE}/api/v1/sessions/${lsid}/links`)
+    const refsOfLe2 = sessLinks?.json?.data?.[le2?.json?.data?.id]
+    if (!Array.isArray(refsOfLe2) || refsOfLe2.length !== 2) {
+      throw new Error(`会话引用回填错误：${JSON.stringify(sessLinks?.json?.data)}`)
+    }
+
+    // 节点搜索（path 祖先链）
+    const nodeSearch = await request(
+      `${BASE}/api/v1/mindmaps/${linkageMindmapId}/nodes?q=${encodeURIComponent('联动子')}`,
+    )
+    if (nodeSearch?.json?.data?.[0]?.path !== '联动根 / 联动子') {
+      throw new Error(`节点搜索错误：${JSON.stringify(nodeSearch?.json)}`)
+    }
+
+    // 工作区最近条目（选择器数据源）：应包含刚创建的条目
+    const recent = await request(`${BASE}/api/v1/workspaces/${workspaceId}/entries/recent`)
+    if (!(recent?.json?.data || []).some((r) => r.entryId === le2?.json?.data?.id)) {
+      throw new Error(`最近条目缺失：${JSON.stringify(recent?.json)}`)
+    }
+
+    // 同工作区约束：跨工作区条目挂接 → 400
+    const otherWs = await request(`${BASE}/api/v1/workspaces`, {
+      method: 'POST',
+      body: { name: `verify-other-${Date.now()}` },
+    })
+    const otherSess = await request(`${BASE}/api/v1/workspaces/${otherWs?.json?.data?.id}/sessions`, {
+      method: 'POST',
+      body: { title: '他区会话' },
+    })
+    const otherEntry = await request(`${BASE}/api/v1/sessions/${otherSess?.json?.data?.id}/entries`, {
+      method: 'POST',
+      body: { type: 'note', contentMd: '他区条目' },
+    })
+    const cross = await request(`${BASE}/api/v1/mindmaps/${linkageMindmapId}/nodes/n1/links`, {
+      method: 'PUT',
+      body: { entryIds: [otherEntry?.json?.data?.id] },
+    })
+    if (cross?.json?.code !== 400) throw new Error(`跨工作区挂接应拒绝（400）：${JSON.stringify(cross?.json)}`)
+    await request(`${BASE}/api/v1/workspaces/${otherWs?.json?.data?.id}`, { method: 'DELETE' })
+
+    // 保存差异清理：n2 从内容删除并保存 → n2 挂接消失（n1 保留），条目侧 n2 引用不可见
+    const contentNoN2 = JSON.stringify({
+      version: 1,
+      rootNodeId: 'n1',
+      nodes: { n1: JSON.parse(linkNode('n1', '联动根', 'null')) },
+      edges: [],
+    })
+    const lm1 = await request(`${BASE}/api/v1/mindmaps/${linkageMindmapId}`)
+    const lmSaved2 = await request(`${BASE}/api/v1/mindmaps/${linkageMindmapId}`, {
+      method: 'PUT',
+      body: { contentJson: contentNoN2, updatedAt: lm1?.json?.data?.updatedAt },
+    })
+    if (lmSaved2?.json?.code !== 0) throw new Error(`联动导图二次保存失败：${JSON.stringify(lmSaved2?.json)}`)
+    const linksAfterSave = await request(`${BASE}/api/v1/mindmaps/${linkageMindmapId}/links`)
+    const dataAfter = linksAfterSave?.json?.data || {}
+    if (dataAfter.n2 || (dataAfter.n1 || []).length !== 2) {
+      throw new Error(`保存后挂接清理错误：${JSON.stringify(dataAfter)}`)
+    }
+    const entryNodesAfter = await request(`${BASE}/api/v1/entries/${le2?.json?.data?.id}/nodes`)
+    if (entryNodesAfter?.json?.data?.length !== 1 || entryNodesAfter?.json?.data?.[0]?.nodeId !== 'n1') {
+      throw new Error(`删除节点后条目引用应只剩 n1：${JSON.stringify(entryNodesAfter?.json)}`)
+    }
+
+    // 级联：删除条目 le1 → n1 挂接只剩 le2；恢复一条挂接供备份段断言（node_entry 表数据）
+    await request(`${BASE}/api/v1/entries/${le1?.json?.data?.id}`, { method: 'DELETE' })
+    const linksAfterDel = await request(`${BASE}/api/v1/mindmaps/${linkageMindmapId}/links`)
+    if ((linksAfterDel?.json?.data?.n1 || []).length !== 1) throw new Error('删除条目后挂接未级联清理')
+    const putBack = await request(`${BASE}/api/v1/mindmaps/${linkageMindmapId}/nodes/n1/links`, {
+      method: 'PUT',
+      body: { entryIds: [le2?.json?.data?.id] },
+    })
+    if (putBack?.json?.code !== 0) throw new Error(`恢复挂接失败：${JSON.stringify(putBack?.json)}`)
+
+    results.push({
+      ok: true,
+      name: '联动往返（节点挂条目/条目引用节点/挂接图与详情/会话回填/节点搜索 path/最近条目/跨工作区 400/保存差异清理/级联）',
+    })
+  } catch (e) {
+    results.push({ ok: false, name: '联动往返', error: e.message })
+  }
+
+  // 6.9 备份往返（M4 任务六，PRD E5 / 04 §5 POST /backup/export；v1.1 起 9 表含 node_entry）：
+  //     导出全量 zip → Base64 解码 → 解析 trailmind-backup.json → format/version/9 表齐全且含当前工作区数据
   try {
     const bk = await request(`${BASE}/api/v1/backup/export`, { method: 'POST' })
     if (bk?.json?.code !== 0) throw new Error(`备份导出失败：${JSON.stringify(bk?.json)}`)
@@ -978,7 +1146,15 @@ export async function runChecks(deps = {}) {
     // 当前工作区（本段之前各往返创建的数据）应包含在备份中
     const inBackup = (tables.workspace || []).some((w) => w.id === workspaceId)
     if (!inBackup) throw new Error(`备份中未找到工作区 ${workspaceId}`)
-    results.push({ ok: true, name: `备份往返（zip ${file.filename} → trailmind-backup v1 → 8 表齐全 + 当前工作区在内）` })
+    // v1.1 联动：备份应含 node_entry 挂接（联动段恢复的 n1 ↔ le2）
+    const linkInBackup = (tables.node_entry || []).some(
+      (r) => r.mindmapId === linkageMindmapId && r.nodeId === 'n1' && r.entryId === linkageEntry2Id,
+    )
+    if (!linkInBackup) throw new Error('备份中未找到联动挂接（node_entry）')
+    results.push({
+      ok: true,
+      name: `备份往返（zip ${file.filename} → trailmind-backup v1 → 9 表齐全 + 当前工作区与联动挂接在内）`,
+    })
   } catch (e) {
     results.push({ ok: false, name: '备份往返', error: e.message })
   }
