@@ -17,7 +17,7 @@ import java.util.List;
 
 /**
  * 记录会话业务逻辑（docs/07 §6 任务一）：
- * 开始（标题 + 仓库默认继承工作区 + start_head 记录，PRD C1.1）、列表、详情（含条目分页）、
+ * 开始（标题 + 仓库回退链「会话 → 工作区 → 全局默认」 + start_head 记录，PRD C1.1）、列表、详情（含条目分页）、
  * 结束（status/ended_at/end_head/总结写入 review 条目，PRD C1.3）、删除（显式级联，05 §3）。
  */
 @Service
@@ -30,14 +30,17 @@ public class SessionService {
     private final EntryMapper entryMapper;
     private final EntryService entryService;
     private final GitHeadReader gitHeadReader;
+    private final SettingsService settingsService;
 
     public SessionService(SessionMapper sessionMapper, WorkspaceMapper workspaceMapper,
-                          EntryMapper entryMapper, EntryService entryService, GitHeadReader gitHeadReader) {
+                          EntryMapper entryMapper, EntryService entryService, GitHeadReader gitHeadReader,
+                          SettingsService settingsService) {
         this.sessionMapper = sessionMapper;
         this.workspaceMapper = workspaceMapper;
         this.entryMapper = entryMapper;
         this.entryService = entryService;
         this.gitHeadReader = gitHeadReader;
+        this.settingsService = settingsService;
     }
 
     @Transactional
@@ -47,8 +50,11 @@ public class SessionService {
             throw new NotFoundException("工作区不存在");
         }
         String t = validateTitle(title);
-        // 会话级仓库覆盖工作区设置；未指定则继承工作区仓库（PRD C1.1）
+        // 仓库回退链：会话级 → 工作区设置 → 全局默认仓库路径（M4 任务四设置页，PRD C1.1）
         String repo = (repoPath != null && !repoPath.isBlank()) ? repoPath : ws.getRepoPath();
+        if (repo == null) {
+            repo = settingsService.getDefaultRepoPath();
+        }
         String startHead = (repo == null) ? null : gitHeadReader.readHead(repo);
 
         Session s = new Session();

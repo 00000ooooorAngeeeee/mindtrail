@@ -48,6 +48,8 @@ class SessionServiceTest {
     private EntryService entryService;
     @Mock
     private GitHeadReader gitHeadReader;
+    @Mock
+    private SettingsService settingsService;
 
     @InjectMocks
     private SessionService service;
@@ -105,6 +107,32 @@ class SessionServiceTest {
         assertNull(created.getRepoPath());
         assertNull(created.getStartHead());
         verify(gitHeadReader, never()).readHead(anyString());
+    }
+
+    @Test
+    void create_falls_back_to_global_default_repo_path() {
+        // M4 任务四：回退链 会话级 → 工作区 → 全局默认仓库路径（设置页）
+        Workspace w = new Workspace();
+        w.setId(1L);
+        when(workspaceMapper.selectById(1L)).thenReturn(w);
+        when(settingsService.getDefaultRepoPath()).thenReturn("F:/default-repo");
+        when(gitHeadReader.readHead("F:/default-repo")).thenReturn("c".repeat(40));
+
+        Session created = service.create(1L, "会话", null);
+
+        assertEquals("F:/default-repo", created.getRepoPath());
+        assertEquals("c".repeat(40), created.getStartHead());
+    }
+
+    @Test
+    void create_workspace_repo_takes_priority_over_global_default() {
+        when(workspaceMapper.selectById(1L)).thenReturn(workspaceWithRepo());
+        when(gitHeadReader.readHead("D:/repo")).thenReturn("a".repeat(40));
+
+        Session created = service.create(1L, "会话", null);
+
+        assertEquals("D:/repo", created.getRepoPath());
+        verify(settingsService, never()).getDefaultRepoPath();
     }
 
     @Test
