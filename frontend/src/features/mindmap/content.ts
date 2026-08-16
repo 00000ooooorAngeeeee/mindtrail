@@ -266,3 +266,15 @@ export function toggleCollapse(content: MindmapContent, id: string): MindmapCont
   if (!node) return content
   return { ...content, nodes: { ...content.nodes, [id]: { ...node, collapsed: !node.collapsed } } }
 }
+
+/**
+ * 更新自由边标签（PRD B2.2 P1「可编辑标签」；label 字段语义见 docs/05 §4）。
+ * 空白/纯空格视为清除（置 null）；边不存在或无变化返回原内容（引用相等，apply 跳过）。
+ */
+export function updateEdgeLabel(content: MindmapContent, edgeId: string, label: string): MindmapContent {
+  const edge = content.edges.find((e) => e.id === edgeId)
+  if (!edge) return content
+  const next = label.trim() === '' ? null : label.trim()
+  if ((edge.label ?? null) === next) return content
+  return { ...content, edges: content.edges.map((e) => (e.id === edgeId ? { ...e, label: next } : e)) }
+}

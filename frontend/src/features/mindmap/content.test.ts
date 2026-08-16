@@ -12,9 +12,11 @@ import {
   parseContent,
   serializeContent,
   toggleCollapse,
+  updateEdgeLabel,
   updateNodesStyle,
   updateNodeText,
 } from './content'
+import type { MindmapContent } from './content'
 
 describe('parseContent / serializeContent', () => {
   it('空值回退默认内容（单根节点「中心主题」）', () => {
@@ -195,5 +197,32 @@ describe('parseContent 归一化 sticky 字段（旧数据缺省 false）', () =
       }),
     )
     expect(withSticky.nodes.n1.sticky).toBe(true)
+  })
+})
+
+describe('updateEdgeLabel（自由边标签，PRD B2.2 P1「可编辑标签」）', () => {
+  function withEdge(): MindmapContent {
+    return { ...defaultContent(), edges: [{ id: 'e1', source: 'n1', target: 'n2', type: 'free', label: null }] }
+  }
+
+  it('设置标签（去除首尾空白）', () => {
+    const out = updateEdgeLabel(withEdge(), 'e1', '  依赖关系  ')
+    expect(out.edges[0].label).toBe('依赖关系')
+  })
+
+  it('空白视为清除（置 null）', () => {
+    const c = updateEdgeLabel(withEdge(), 'e1', '依赖关系')
+    const cleared = updateEdgeLabel(c, 'e1', '   ')
+    expect(cleared.edges[0].label).toBeNull()
+  })
+
+  it('边不存在返回原内容（引用相等）', () => {
+    const c = withEdge()
+    expect(updateEdgeLabel(c, 'e99', 'x')).toBe(c)
+  })
+
+  it('同值无变化返回原内容（apply 跳过，不产生历史）', () => {
+    const c = updateEdgeLabel(withEdge(), 'e1', '依赖关系')
+    expect(updateEdgeLabel(c, 'e1', '依赖关系')).toBe(c)
   })
 })

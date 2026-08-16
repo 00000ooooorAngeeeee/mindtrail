@@ -13,6 +13,7 @@ import {
   parseContent,
   serializeContent,
   toggleCollapse as toggleCollapsePure,
+  updateEdgeLabel as updateEdgeLabelPure,
   updateNodesStyle as updateNodesStylePure,
   updateNodeText,
 } from '../features/mindmap/content'
@@ -66,6 +67,8 @@ interface MindmapState {
   moveNodesLayout: (updates: { id: string; x: number; y: number }[]) => void
   addFreeEdge: (source: string, target: string) => void
   removeFreeEdge: (edgeId: string) => void
+  /** 更新自由边标签（PRD B2.2 P1「可编辑标签」）；空白视为清除（置 null）。 */
+  updateEdgeLabel: (edgeId: string, label: string) => void
   /** 切换模式；画布→树遇非树边返回 'non-tree'（由 UI 弹三选一，07 §5）。 */
   switchMode: (next: MindmapMode) => 'ok' | 'non-tree'
   /** 三选一之「仅重排树形部分」：保留自由边切回树状（树视图忽略自由边，PRD B3.3）。 */
@@ -234,6 +237,12 @@ export const useMindmapStore = create<MindmapState>()((set, get) => {
       const { content } = get()
       if (!content) return
       apply(removeFreeEdgePure(content, edgeId))
+    },
+
+    updateEdgeLabel: (edgeId, label) => {
+      const { content } = get()
+      if (!content) return
+      apply(updateEdgeLabelPure(content, edgeId, label))
     },
 
     switchMode: (next) => {
