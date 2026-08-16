@@ -5,6 +5,9 @@ target/
 release/
 out/
 
+# Electron 运行期临时用户数据目录（沙箱下 --user-data-dir 指到工作区的产物）
+.electron-dev/
+
 # 日志
 *.log
 

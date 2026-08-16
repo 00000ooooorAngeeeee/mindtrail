@@ -1,4 +1,79 @@
-/* 工作区首页标签面板（M4 任务二，03 §3.2 侧边栏「标签」+ D4 过滤）。 */
+/* 工作区首页标签面板（M4 任务二 + v1.1 P1 标签云，03 §3.2 侧边栏「标签」+ D4 过滤）。 */
+
+/* 标签云（v1.1 P1，PRD D4「标签云视图 P1」）：热度分档字号 + 循环色板 + 点击过滤 */
+.tag-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 8px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card-soft);
+}
+
+.tag-cloud-chip {
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 999px;
+  padding: 2px 10px;
+  cursor: pointer;
+  line-height: 1.6;
+}
+
+.tag-cloud-chip:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+.tag-cloud-chip.active {
+  border-color: var(--brand);
+  background: var(--brand-bg);
+  color: var(--brand);
+}
+
+/* 字号档位（tagCloudSize：0-1 sm / 2-4 md / 5-9 lg / 10+ xl） */
+.tag-cloud-chip.size-sm {
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.tag-cloud-chip.size-md {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.tag-cloud-chip.size-lg {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.tag-cloud-chip.size-xl {
+  font-size: 21px;
+  font-weight: 700;
+}
+
+/* 色板（03 §6 同源，浅底深字保持便签效果） */
+.tag-cloud-chip.color-indigo {
+  color: #4f46e5;
+}
+
+.tag-cloud-chip.color-green {
+  color: #16a34a;
+}
+
+.tag-cloud-chip.color-amber {
+  color: #b45309;
+}
+
+.tag-cloud-chip.color-rose {
+  color: #e11d48;
+}
+
+.tag-cloud-chip.color-sky {
+  color: #0284c7;
+}
 
 .tag-list {
   list-style: none;

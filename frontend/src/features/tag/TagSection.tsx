@@ -3,13 +3,14 @@ import { createTag, deleteTag, filterEntriesByTag, listTags, mergeTag, renameTag
 import type { TagInfo, TaggedEntry, Workspace } from '../../api/types'
 import { ENTRY_TYPE_LABELS } from '../../api/types'
 import { formatTime } from '../session/time'
+import { TagCloud } from './TagCloud'
 import './tag.css'
 
 /**
- * 工作区首页标签面板（M4 任务二，PRD D3/D4 + 03 §3.2 侧边栏「标签」）：
- * 标签列表（名称 + 使用计数）、创建/重命名/合并/删除（D3 工作区级管理）、
- * 点击标签即时过滤条目（D4「过滤即时生效」，后端 GET /entries?tagId=），
- * 过滤结果点击跳转会话并定位条目（复用搜索跳转的 seq 分页估算）。
+ * 工作区首页标签面板（M4 任务二 + v1.1 P1，PRD D3/D4 + 03 §3.2 侧边栏「标签」）：
+ * 标签云（v1.1 P1：热度分档字号可视化 + 点击过滤）、标签列表（名称 + 使用计数）、
+ * 创建/重命名/合并/删除（D3 工作区级管理）、点击标签即时过滤条目（D4「过滤即时生效」，
+ * 后端 GET /entries?tagId=），过滤结果点击跳转会话并定位条目（复用搜索跳转的 seq 分页估算）。
  */
 export function TagSection({
   ws,
@@ -137,7 +138,10 @@ export function TagSection({
       ) : tags.length === 0 ? (
         <p className="muted">暂无标签（在条目中加标签会自动创建）</p>
       ) : (
-        <ul className="tag-list">
+        <>
+          {/* 标签云（v1.1 P1，PRD D4「标签云视图 P1」）：热度分档字号 + 点击过滤 */}
+          <TagCloud tags={tags} activeTagId={filterTag?.id} onPick={(t) => void openFilter(t)} />
+          <ul className="tag-list">
           {tags.map((t) => (
             <li key={t.id} className="tag-row">
               {editingId === t.id ? (
@@ -199,7 +203,8 @@ export function TagSection({
               )}
             </li>
           ))}
-        </ul>
+          </ul>
+        </>
       )}
 
       <div className="create-form">
