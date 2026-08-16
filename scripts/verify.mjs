@@ -783,6 +783,93 @@ export async function runChecks(deps = {}) {
     results.push({ ok: false, name: '导出往返（JSON/OPML/PNG）', error: e.message })
   }
 
+  // 6.8 设置往返（M4 任务四，07 §7「设置页：数据库连接信息展示、主题切换、仓库路径」）：
+  //     GET 数据库连接信息 → 主题非法值 400 / dark 往返（结束后还原）→ 默认仓库路径非法 400 / 真实仓库往返 →
+  //     会话回退链（无仓库工作区 + 无仓库会话 → 继承全局默认仓库路径）→ 清除路径并还原
+  let settingsWsId = null
+  let settingsSessId = null
+  let settingsRepoDir = null
+  try {
+    const initSettings = await request(`${BASE}/api/v1/settings`)
+    if (initSettings?.json?.code !== 0) throw new Error(`GET /settings 失败：${JSON.stringify(initSettings?.json)}`)
+    const dbInfo = initSettings?.json?.data?.database
+    if (dbInfo?.host !== '127.0.0.1' || dbInfo?.port !== 3306 || dbInfo?.database !== 'trailmind') {
+      throw new Error(`数据库连接信息错误：${JSON.stringify(dbInfo)}`)
+    }
+    const initialTheme = initSettings.json.data.theme
+
+    const badTheme = await request(`${BASE}/api/v1/settings`, { method: 'PUT', body: { theme: 'blue' } })
+    if (badTheme?.json?.code !== 400) throw new Error('非法主题应返回 400')
+    const dark = await request(`${BASE}/api/v1/settings`, { method: 'PUT', body: { theme: 'dark' } })
+    if (dark?.json?.code !== 0 || dark?.json?.data?.theme !== 'dark') {
+      throw new Error(`主题切换失败：${JSON.stringify(dark?.json)}`)
+    }
+    const readDark = await request(`${BASE}/api/v1/settings`)
+    if (readDark?.json?.data?.theme !== 'dark') throw new Error('主题读回不等于 dark')
+
+    const badRepo = await request(`${BASE}/api/v1/settings`, {
+      method: 'PUT',
+      body: { defaultRepoPath: 'C:/__trailmind_missing__' },
+    })
+    if (badRepo?.json?.code !== 400) throw new Error('无 .git 目录的仓库路径应返回 400')
+
+    // 真实临时仓库 + 回退链：无仓库工作区 + 无仓库会话 → 继承全局默认仓库路径
+    settingsRepoDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'trailmind-verify-settings-'))
+    await execOut('git', ['init', '-q'], { cwd: settingsRepoDir })
+    const setRepo = await request(`${BASE}/api/v1/settings`, {
+      method: 'PUT',
+      body: { defaultRepoPath: settingsRepoDir },
+    })
+    if (setRepo?.json?.code !== 0 || setRepo?.json?.data?.defaultRepoPath !== settingsRepoDir) {
+      throw new Error(`默认仓库路径保存失败：${JSON.stringify(setRepo?.json)}`)
+    }
+    const sws = await request(`${BASE}/api/v1/workspaces`, {
+      method: 'POST',
+      body: { name: `verify-settings-${Date.now()}` },
+    })
+    settingsWsId = sws?.json?.data?.id
+    if (sws?.json?.code !== 0 || !settingsWsId) throw new Error('设置验收工作区创建失败')
+    const ssess = await request(`${BASE}/api/v1/workspaces/${settingsWsId}/sessions`, {
+      method: 'POST',
+      body: { title: '默认仓库会话' },
+    })
+    settingsSessId = ssess?.json?.data?.id
+    if (ssess?.json?.code !== 0 || ssess?.json?.data?.repoPath !== settingsRepoDir) {
+      throw new Error(`会话未继承默认仓库路径：${JSON.stringify(ssess?.json)}`)
+    }
+
+    // 清理：删会话/工作区；清除默认仓库路径；主题还原；删临时仓库
+    await request(`${BASE}/api/v1/sessions/${settingsSessId}`, { method: 'DELETE' })
+    settingsSessId = null
+    await request(`${BASE}/api/v1/workspaces/${settingsWsId}`, { method: 'DELETE' })
+    settingsWsId = null
+    const cleared = await request(`${BASE}/api/v1/settings`, {
+      method: 'PUT',
+      body: { theme: initialTheme, defaultRepoPath: '' },
+    })
+    if (cleared?.json?.code !== 0 || cleared?.json?.data?.defaultRepoPath != null) {
+      throw new Error(`默认仓库路径清除失败：${JSON.stringify(cleared?.json)}`)
+    }
+    await fs.promises.rm(settingsRepoDir, { recursive: true, force: true })
+    settingsRepoDir = null
+
+    results.push({
+      ok: true,
+      name: '设置往返（数据库连接信息/主题 dark 往返 + 非法 400/默认仓库路径会话回退链/清除还原）',
+    })
+  } catch (e) {
+    results.push({ ok: false, name: '设置往返', error: e.message })
+    if (settingsSessId != null) {
+      await request(`${BASE}/api/v1/sessions/${settingsSessId}`, { method: 'DELETE' }).catch(() => {})
+    }
+    if (settingsWsId != null) {
+      await request(`${BASE}/api/v1/workspaces/${settingsWsId}`, { method: 'DELETE' }).catch(() => {})
+    }
+    if (settingsRepoDir != null) {
+      await fs.promises.rm(settingsRepoDir, { recursive: true, force: true }).catch(() => {})
+    }
+  }
+
   // 7. M3 总验收：10 条不同类型条目计时（单条 ≤10s，NFR）+ 会话 Markdown 导出往返（06 §4 解析 → 与库中数据逐一比对）
   let acceptSessionId = null
   try {
