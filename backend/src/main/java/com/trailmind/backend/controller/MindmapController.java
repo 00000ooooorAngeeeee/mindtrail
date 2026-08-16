@@ -6,6 +6,7 @@ import com.trailmind.backend.service.MindmapExportService;
 import com.trailmind.backend.service.MindmapService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -50,6 +51,12 @@ public class MindmapController {
     @PutMapping("/mindmaps/{id}")
     public ApiResponse<Mindmap> save(@PathVariable Long id, @RequestBody Mindmap req) {
         return ApiResponse.ok(service.save(id, req.getContentJson(), req.getUpdatedAt()));
+    }
+
+    /** 导图重命名（PRD B4，M4 缺陷清理补全）：body 仅 name，同步 search_text 的 name 部分。 */
+    @PatchMapping("/mindmaps/{id}")
+    public ApiResponse<Mindmap> rename(@PathVariable Long id, @RequestBody Mindmap req) {
+        return ApiResponse.ok(service.rename(id, req.getName()));
     }
 
     @DeleteMapping("/mindmaps/{id}")

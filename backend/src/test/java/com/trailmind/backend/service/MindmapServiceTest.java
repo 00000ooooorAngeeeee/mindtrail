@@ -24,6 +24,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -153,5 +154,44 @@ class MindmapServiceTest {
         when(mapper.selectById(1L)).thenReturn(m);
         service.delete(1L);
         verify(mapper).deleteById(1L);
+    }
+
+    // ---------- 导图重命名（PRD B4，M4 缺陷清理补全） ----------
+
+    @Test
+    void rename_not_found_throws() {
+        when(mapper.selectById(1L)).thenReturn(null);
+        assertThrows(NotFoundException.class, () -> service.rename(1L, "新名"));
+        verify(mapper, never()).updateName(anyLong(), anyString(), anyString());
+    }
+
+    @Test
+    void rename_blank_or_long_name_throws() {
+        Mindmap m = new Mindmap();
+        m.setId(1L);
+        m.setName("旧名");
+        when(mapper.selectById(1L)).thenReturn(m);
+        assertThrows(BadRequestException.class, () -> service.rename(1L, "  "));
+        assertThrows(BadRequestException.class, () -> service.rename(1L, null));
+        assertThrows(BadRequestException.class, () -> service.rename(1L, "a".repeat(101)));
+        verify(mapper, never()).updateName(anyLong(), anyString(), anyString());
+    }
+
+    @Test
+    void rename_success_updates_name_and_search_text() {
+        Mindmap existing = new Mindmap();
+        existing.setId(1L);
+        existing.setName("旧名");
+        existing.setContentJson("{\"version\":1,\"nodes\":{\"n1\":{\"text\":\"根\"}},\"edges\":[]}");
+        Mindmap fresh = new Mindmap();
+        fresh.setId(1L);
+        fresh.setName("新名");
+        when(mapper.selectById(1L)).thenReturn(existing, fresh);
+
+        Mindmap renamed = service.rename(1L, "  新名  ");
+
+        // search_text 应含新名与节点文本（05 §4：name + 节点 text 拼接）
+        verify(mapper).updateName(eq(1L), eq("新名"), argThat(s -> s.contains("新名") && s.contains("根")));
+        assertSame(fresh, renamed);
     }
 }

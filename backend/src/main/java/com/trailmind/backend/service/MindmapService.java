@@ -67,6 +67,15 @@ public class MindmapService {
         return get(id); // 回查，拿到 MySQL ON UPDATE 推进后的 updatedAt
     }
 
+    /** 导图重命名（PRD B4）：同步重算 search_text 的 name 部分（05 §4 保存语义，搜索可命中新名）。 */
+    public Mindmap rename(Long id, String name) {
+        Mindmap existing = get(id);
+        String trimmedName = validateName(name);
+        MindmapContentUtil.Summary summary = MindmapContentUtil.analyze(trimmedName, existing.getContentJson());
+        mapper.updateName(id, trimmedName, summary.searchText());
+        return get(id); // 回查，拿到更新后的 name 与 updatedAt
+    }
+
     public void delete(Long id) {
         get(id); // 不存在则抛 404
         mapper.deleteById(id);

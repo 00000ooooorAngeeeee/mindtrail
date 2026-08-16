@@ -27,4 +27,11 @@ public interface MindmapMapper extends BaseMapper<Mindmap> {
                       @Param("contentJson") String contentJson,
                       @Param("searchText") String searchText,
                       @Param("nodeCount") Integer nodeCount);
+
+    // 导图重命名（PRD B4，M4 缺陷清理补全）：仅改 name + 同步 search_text 的 name 部分（05 §4 保存语义）；
+    // 不写 updated_at，由 MySQL ON UPDATE 推进（与 updateContent 同法，保证乐观锁仍生效）。
+    @Update("UPDATE mindmap SET name = #{name}, search_text = #{searchText} WHERE id = #{id}")
+    int updateName(@Param("id") Long id,
+                   @Param("name") String name,
+                   @Param("searchText") String searchText);
 }
