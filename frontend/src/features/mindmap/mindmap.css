@@ -90,6 +90,36 @@
   stroke-width: 2.5;
 }
 
+/* 自由连线标签（PRD B2.2 P1「可编辑标签」）：中点胶囊，白底描边压线可读；pointer-events 继承
+   EdgeLabelRenderer 的 none，点击/双击穿透到连线本身（FreeEdge <g> 统一处理进入编辑）。 */
+.mm-edge-label {
+  padding: 1px 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(31, 36, 48, 0.12);
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--text);
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mm-edge-label-input {
+  width: 150px;
+  padding: 2px 8px;
+  border: 1px solid var(--brand);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  box-shadow: 0 1px 3px rgba(31, 36, 48, 0.12);
+}
+
 .mm-center {
   flex: 1;
   display: flex;

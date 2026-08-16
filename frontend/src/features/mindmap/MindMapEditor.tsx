@@ -28,6 +28,7 @@ import { descendants } from './content'
 import type { MindmapContent } from './content'
 import { computeTreeLayout, type LayoutPoint } from './treeLayout'
 import { MindmapNode, type MindmapRFNode } from './MindmapNode'
+import { FreeEdge, type FreeEdgeData } from './FreeEdge'
 import { NODE_COLORS, NODE_SHAPES } from './nodeStyle'
 import { NodeEntryLinkDialog } from '../linkage/NodeEntryLinkDialog'
 import { NodeLinksPopover } from '../linkage/NodeLinksPopover'
@@ -42,6 +43,9 @@ const NODE_H = 44
 const DROP_RADIUS = 120
 
 const nodeTypes = { mindmap: MindmapNode }
+
+// 自由连线自定义边（PRD B2.2 P1「可编辑标签」）：标签胶囊渲染 + 双击编辑。
+const edgeTypes = { free: FreeEdge }
 
 /**
  * 节点（重）建后显式触发 XYFlow 测量（M2 总验收 GUI 实测修复）。
@@ -114,6 +118,7 @@ function buildEdges(
   content: MindmapContent,
   positions: Map<string, LayoutPoint>,
   mode: MindmapMode,
+  onUpdateEdgeLabel: FreeEdgeData['onUpdateLabel'],
   selectedEdgeIds: Set<string> = new Set(),
 ): Edge[] {
   const out: Edge[] = []
@@ -131,6 +136,7 @@ function buildEdges(
     })
   }
   // 自由连线（type=free，PRD B2.2）：仅画布模式渲染，树视图忽略（PRD B3.3）。
+  // 标签（PRD B2.2 P1「可编辑标签」）：自定义边 FreeEdge 渲染中点胶囊，双击编辑走 store。
   if (mode === 'canvas') {
     for (const e of content.edges) {
       if (!positions.has(e.source) || !positions.has(e.target)) continue
@@ -138,7 +144,7 @@ function buildEdges(
         id: e.id,
         source: e.source,
         target: e.target,
-        type: 'default',
+        type: 'free',
         deletable: true,
         // 保留当前选中态：点击选中边会联动取消节点选中 → selectedIds 变化触发本 effect 重建，
         // 若不带入 selected 标记会把刚选中的边立即「洗掉」，导致按 Delete 无法断开连线（人工验收反馈）。
@@ -146,6 +152,8 @@ function buildEdges(
         // 颜色走 CSS 类（mm-free-edge）：内联 style 会压掉选中态变色，选中无高亮反馈（人工验收反馈）。
         className: 'mm-free-edge',
         markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18 },
+        label: e.label ?? undefined,
+        data: { onUpdateLabel: onUpdateEdgeLabel },
       })
     }
   }
@@ -198,6 +206,7 @@ export function MindMapEditor({
   const moveNodesLayout = useMindmapStore((s) => s.moveNodesLayout)
   const addFreeEdge = useMindmapStore((s) => s.addFreeEdge)
   const removeFreeEdge = useMindmapStore((s) => s.removeFreeEdge)
+  const updateEdgeLabel = useMindmapStore((s) => s.updateEdgeLabel)
   const switchMode = useMindmapStore((s) => s.switchMode)
   const forceTreeMode = useMindmapStore((s) => s.forceTreeMode)
   const ignoreFreeEdgesToTree = useMindmapStore((s) => s.ignoreFreeEdgesToTree)
@@ -321,14 +330,20 @@ export function MindMapEditor({
     // 函数式更新保留当前边选中态：点击选中边会联动取消节点选中（selectedIds 变化触发本 effect），
     // 直接重建会把刚选中的边洗掉，导致「选中边按 Delete 断开」失效（人工验收反馈修复）。
     setEdges((current) =>
-      buildEdges(content, positions, mode, new Set(current.filter((e) => e.selected).map((e) => e.id))),
+      buildEdges(
+        content,
+        positions,
+        mode,
+        updateEdgeLabel,
+        new Set(current.filter((e) => e.selected).map((e) => e.id)),
+      ),
     )
     if (!fittedRef.current) {
       fittedRef.current = true
       // 双 rAF 等 React Flow 完成首轮测量后再 fit，避免按 0 尺寸计算。
       requestAnimationFrame(() => requestAnimationFrame(() => void rfRef.current?.fitView({ padding: 0.2 })))
     }
-  }, [content, positions, childCount, selectedIds, mode, flashId, mindmapId, links, openNodeLinks, openLinkDialog, setNodes, setEdges])
+  }, [content, positions, childCount, selectedIds, mode, flashId, mindmapId, links, openNodeLinks, openLinkDialog, updateEdgeLabel, setNodes, setEdges])
 
   // 切换模式后坐标来源变化（平铺/重排），重新适应视图。
   useEffect(() => {
@@ -649,6 +664,7 @@ export function MindMapEditor({
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onSelectionChange={(p) => setSelectedIds(p.nodes.map((n) => n.id))}
@@ -702,7 +718,7 @@ export function MindMapEditor({
         <span className="muted">
           {mode === 'tree'
             ? '双击节点编辑 · 拖拽改层级 · 双击空白加节点'
-            : '拖拽摆放 · 拖框/Shift 点选多选 · 从节点边缘拖出连线 · 选中边按 Delete 删除'}
+            : '拖拽摆放 · 拖框/Shift 点选多选 · 从节点边缘拖出连线 · 双击连线编辑标签 · 选中边按 Delete 删除'}
         </span>
       </div>
     </div>
