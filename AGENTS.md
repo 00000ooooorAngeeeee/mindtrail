@@ -58,8 +58,9 @@
 - [x] M4 任务六：全量备份导出——已完成（`POST /backup/export` 导出全部 8 张表为「trailmind-backup」v1 JSON，JDK 内置 ZipOutputStream 压缩 zip（零依赖）后 Base64 返回，协议与 06 §4A 同风格（format/version/exportedAt + 时间固定到秒），非表字段不进入备份，供 P2 导入恢复；设置页新增「数据备份」节导出全量备份按钮（zip Blob 下载）；verify.mjs 新增 unzipBackupJson 纯函数（Node 内建 zlib 解析 EOCD/中央目录/本地头）+ 备份往返段；后端 189 + 前端 160 + 脚本 28 单测、SMOKE 13/13 含备份往返段；过程记录见产品工作区「TrailMind 开发」，会话「M4 任务六：全量备份导出」）
 - [x] M4 任务七：性能回归——已完成（04 §8 全预算 GUI 实机复测：新增 `scripts/perf-regression.mjs`（CDP + 合成事件 + rAF 帧率 + 页面内打点），N1 画布 500 节点缩放 194fps / 平移 165.5fps（≥45fps）、增删改 92/30/9ms（≤100ms）；N2 时间线 1000 条首屏 48ms（≤500ms）+ 分页 10ms；N3 复跑 perf-search.mjs 首查 43ms / 缓存 3ms（≤1s）；N4 参考 3098ms（正式验收仍为打包安装环境待办）；脚本单测 5、PERF-REGRESSION 12/12 ALL PASS；过程记录见产品工作区「TrailMind 开发」，会话「M4 任务七：性能回归」）
 - [x] M4 任务八：缺陷清理——已完成（主路径冒烟回归：冒烟 13→14 段 ALL PASS（补导图重命名往返段）、后端 192 + 前端 161 + 脚本 33 单测、GUI 冒烟 31/31 全绿；补全 P0 遗留「导图重命名 PRD B4」——后端 PATCH /mindmaps/{id} 同步 search_text 的 name 部分 + 前端导图列表行内重命名 + 冒烟往返段；修正 07 §7 断网验收项编号错位为 PRD §6.5；过程记录见产品工作区「TrailMind 开发」，会话「M4 任务八：缺陷清理（主路径冒烟回归）」）
+- [x] M4 收尾验收：已完成（07 §7 未勾两项全勾：① 断网状态全功能可用——死代理模拟断网实测（`OFFLINE_MODE=1 node scripts/verify-m2-gui.mjs` → M2 GUI 32/32：31 项冒烟在死代理下全过 + 运行期连接审计 3 采样 19-24 连接/6 进程全部仅回环），另附人工断网复测清单（07 §7）；② 7 天后复盘路径——「七日复盘·夹具会话」时间戳回填 10 天前，`node scripts/verify-m4-acceptance.mjs` → M4 ACCEPTANCE 10/10（搜索命中/标签过滤/会话打开条目渲染（review）/导出协议；GUI 实机 3 项 + API 5 项）；脚本单测 33→41、SMOKE 14 段 ALL PASS；过程记录见产品工作区「TrailMind 开发」，会话「M4 收尾验收」）
 
-下一任务：**M4 收尾验收**（07 §7 未勾两项：断网人工实测、7 天后复盘路径）→ v1.1 P1「导图↔记录联动」。
+下一任务：**v1.1 P1「导图↔记录联动」**（07 §8 Backlog 第一优先：节点挂条目、条目引用节点）。
 
 ## 文档索引
 
