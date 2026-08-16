@@ -242,4 +242,92 @@ class GitRepoServiceTest {
         assertThrows(BadRequestException.class,
                 () -> service.commitDetail(tempDir.resolve("no-repo3").toString(), "a".repeat(40)));
     }
+
+    // ---------- diff（v1.1 P1，PRD C3.5「diff 预览 P1」） ----------
+
+    @Test
+    void diff_modified_and_added_files_show_unified_diff() throws Exception {
+        Path repo = Files.createDirectory(tempDir.resolve("diff-repo"));
+        try (Git git = Git.init().setDirectory(repo.toFile()).call()) {
+            Files.writeString(repo.resolve("a.txt"), "第一行\n第二行\n");
+            git.add().addFilepattern(".").call();
+            git.commit().setMessage("初始").setAuthor(IDENT).setCommitter(IDENT).call();
+            Files.writeString(repo.resolve("a.txt"), "第一行\n第二行改\n第三行\n");
+            Files.writeString(repo.resolve("b.txt"), "新增文件\n");
+            git.add().addFilepattern(".").call();
+            RevCommit c = git.commit().setMessage("修改与新增").setAuthor(IDENT).setCommitter(IDENT).call();
+            String hash = c.getId().name();
+
+            GitRepoService.CommitDiff d = service.diff(repo.toString(), hash);
+
+            assertEquals(hash, d.hash());
+            assertFalse(d.truncated());
+            assertEquals(2, d.files().size());
+            GitRepoService.FileDiff a = d.files().stream().filter(f -> f.path().equals("a.txt")).findFirst().orElseThrow();
+            GitRepoService.FileDiff b = d.files().stream().filter(f -> f.path().equals("b.txt")).findFirst().orElseThrow();
+            assertTrue(a.diff().contains("第二行改"));
+            assertEquals(2, a.added()); // -第二行/+第二行改（修改 1 增 1 删）+ +第三行（新增 1 增）
+            assertEquals(1, a.deleted());
+            assertTrue(b.diff().contains("新增文件"));
+            assertEquals(1, b.added());
+            assertEquals(0, b.deleted());
+        }
+    }
+
+    @Test
+    void diff_root_commit_lists_all_files_as_added() throws Exception {
+        Path repo = Files.createDirectory(tempDir.resolve("diff-root"));
+        try (Git git = Git.init().setDirectory(repo.toFile()).call()) {
+            Files.writeString(repo.resolve("a.txt"), "a");
+            Files.writeString(repo.resolve("b.txt"), "b");
+            git.add().addFilepattern(".").call();
+            RevCommit c = git.commit().setMessage("根提交").setAuthor(IDENT).setCommitter(IDENT).call();
+            String hash = c.getId().name();
+
+            GitRepoService.CommitDiff d = service.diff(repo.toString(), hash);
+
+            assertEquals(2, d.files().size()); // 根提交：全部文件按新增展示
+            assertTrue(d.files().stream().allMatch(f -> f.added() >= 1));
+            assertTrue(d.files().stream().allMatch(f -> f.deleted() == 0));
+        }
+    }
+
+    @Test
+    void diff_unknown_hash_throws_404() throws Exception {
+        List<String> hashes = initRepoWithCommits("diff-404", 1);
+        String path = tempDir.resolve("diff-404").toString();
+        assertThrows(NotFoundException.class, () -> service.diff(path, "a".repeat(40)));
+        assertNotNull(service.diff(path, hashes.get(0)));
+    }
+
+    @Test
+    void diff_invalid_repo_throws() {
+        assertThrows(BadRequestException.class,
+                () -> service.diff(tempDir.resolve("no-repo4").toString(), "a".repeat(40)));
+    }
+
+    @Test
+    void countDiffLines_excludes_file_and_hunk_headers() {
+        String diff = """
+                diff --git a/a.txt b/a.txt
+                index 111..222 100644
+                --- a/a.txt
+                +++ b/a.txt
+                @@ -1,2 +1,3 @@
+                 保留行
+                -旧行
+                +新行
+                +另一新行
+                """;
+        GitRepoService.LineCount lc = GitRepoService.countDiffLines(diff);
+        assertEquals(2, lc.added()); // 文件头/保留行/hunk 头不计入
+        assertEquals(1, lc.deleted());
+    }
+
+    @Test
+    void countDiffLines_empty_text_returns_zero() {
+        GitRepoService.LineCount lc = GitRepoService.countDiffLines("");
+        assertEquals(0, lc.added());
+        assertEquals(0, lc.deleted());
+    }
 }

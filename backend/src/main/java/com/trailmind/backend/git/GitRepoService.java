@@ -2,19 +2,28 @@ package com.trailmind.backend.git;
 
 import com.trailmind.backend.common.BadRequestException;
 import com.trailmind.backend.common.NotFoundException;
+import org.eclipse.jgit.diff.DiffEntry;
+import org.eclipse.jgit.diff.DiffFormatter;
+import org.eclipse.jgit.diff.RawTextComparator;
 import org.eclipse.jgit.errors.IncorrectObjectTypeException;
 import org.eclipse.jgit.errors.MissingObjectException;
 import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.lib.ObjectReader;
 import org.eclipse.jgit.lib.PersonIdent;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
+import org.eclipse.jgit.treewalk.AbstractTreeIterator;
+import org.eclipse.jgit.treewalk.CanonicalTreeParser;
+import org.eclipse.jgit.treewalk.EmptyTreeIterator;
 import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.treewalk.filter.TreeFilter;
 import org.springframework.stereotype.Component;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -37,6 +46,10 @@ public class GitRepoService {
 
     /** 单次提交变更文件列表上限（防止巨型 commit 拖垮响应）。 */
     private static final int MAX_FILES_PER_COMMIT = 500;
+
+    /** diff 预览上限（PRD C3.5 P1 / 04 §5）：文件数与累计 diff 文本字节，超限截断并标记 truncated。 */
+    private static final int MAX_DIFF_FILES = 100;
+    private static final int MAX_DIFF_BYTES = 256 * 1024;
 
     /** 校验路径是否为 Git 仓库，返回 HEAD 信息（PRD C3.1 / 04 §5 GET /git/repo/status）。 */
     public RepoStatus status(String path) {
@@ -114,6 +127,84 @@ public class GitRepoService {
         }
     }
 
+    /**
+     * 提交 diff 预览（v1.1 P1，PRD C3.5「diff 预览 P1」/ 04 §5 GET /git/repo/commits/{hash}/diff）：
+     * 相对首个父提交输出 unified diff（根提交 = 全部文件为新增，EmptyTreeIterator）。
+     * 防巨型提交：文件数 > 100 或累计 diff 文本 > 256KB 时截断并标记 truncated（08 §10.4 不读大仓库全量）。
+     */
+    public CommitDiff diff(String path, String hash) {
+        try (Repository repo = open(path)) {
+            ObjectId id = repo.resolve(hash);
+            if (id == null) {
+                throw new NotFoundException("提交不存在：" + hash);
+            }
+            try (RevWalk walk = new RevWalk(repo)) {
+                RevCommit c = walk.parseCommit(id);
+                RevCommit parent = c.getParentCount() > 0 ? walk.parseCommit(c.getParent(0)) : null;
+
+                List<FileDiff> files = new ArrayList<>();
+                boolean truncated = false;
+                int totalBytes = 0;
+                List<DiffEntry> entries;
+                try (ObjectReader reader = repo.newObjectReader();
+                     DiffFormatter scanner = new DiffFormatter(new ByteArrayOutputStream())) {
+                    scanner.setRepository(repo);
+                    scanner.setDiffComparator(RawTextComparator.DEFAULT);
+                    scanner.setDetectRenames(true);
+                    AbstractTreeIterator oldTree = parent == null
+                            ? new EmptyTreeIterator() // 根提交：全量新增
+                            : new CanonicalTreeParser(null, reader, parent.getTree());
+                    entries = scanner.scan(oldTree, new CanonicalTreeParser(null, reader, c.getTree()));
+                }
+                for (DiffEntry entry : entries) {
+                    if (files.size() >= MAX_DIFF_FILES) {
+                        truncated = true;
+                        break;
+                    }
+                    ByteArrayOutputStream out = new ByteArrayOutputStream();
+                    try (DiffFormatter f = new DiffFormatter(out)) {
+                        f.setRepository(repo);
+                        f.setDiffComparator(RawTextComparator.DEFAULT);
+                        f.format(entry);
+                    }
+                    String text = out.toString(StandardCharsets.UTF_8);
+                    if (totalBytes + text.length() > MAX_DIFF_BYTES) {
+                        truncated = true;
+                        break;
+                    }
+                    totalBytes += text.length();
+                    LineCount lc = countDiffLines(text);
+                    files.add(new FileDiff(entry.getNewPath(), text, lc.added(), lc.deleted()));
+                }
+                return new CommitDiff(hash, files, truncated);
+            } catch (MissingObjectException | IncorrectObjectTypeException e) {
+                throw new NotFoundException("提交不存在：" + hash);
+            }
+        } catch (IOException | IllegalArgumentException e) {
+            throw new BadRequestException("路径不是有效的 Git 仓库：" + path, e);
+        }
+    }
+
+    /**
+     * unified diff 文本行统计（纯函数）：'+'/'−' 开头行计数，排除文件头（---/+++）与 hunk 头（@@）。
+     * 供前端展示每个文件的增删行数徽标。
+     */
+    public static LineCount countDiffLines(String diffText) {
+        int added = 0;
+        int deleted = 0;
+        for (String line : diffText.split("\n", -1)) {
+            if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("@@")) {
+                continue;
+            }
+            if (line.startsWith("+")) {
+                added++;
+            } else if (line.startsWith("-")) {
+                deleted++;
+            }
+        }
+        return new LineCount(added, deleted);
+    }
+
     private Repository open(String path) throws IOException {
         if (path == null || path.isBlank()) {
             throw new BadRequestException("仓库路径不能为空");
@@ -178,5 +269,17 @@ public class GitRepoService {
     /** 提交元信息（04 §5：hash/author/time/message/files；不读 diff，性能可忽略，04 §6.2）。 */
     public record CommitInfo(String hash, String author, String authorEmail,
                              LocalDateTime time, String message, List<String> files) {
+    }
+
+    /** 提交 diff 预览（v1.1 P1）：files 为相对首父的统一 diff（根提交全新增），truncated 表示超限截断。 */
+    public record CommitDiff(String hash, List<FileDiff> files, boolean truncated) {
+    }
+
+    /** 单个文件 diff：path 为变更后路径，diff 为 unified diff 文本（含文件头与 hunk 头），added/deleted 为行统计。 */
+    public record FileDiff(String path, String diff, int added, int deleted) {
+    }
+
+    /** 增删行统计（countDiffLines 返回值）。 */
+    public record LineCount(int added, int deleted) {
     }
 }

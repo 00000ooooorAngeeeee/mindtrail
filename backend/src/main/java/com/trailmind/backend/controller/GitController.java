@@ -13,11 +13,12 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * Git 仓库只读接口（04 §5 契约，M3 任务三/四）：
+ * Git 仓库只读接口（04 §5 契约，M3 任务三/四 + v1.1 P1 C3.6）：
  * GET /git/repo/status?path= 校验是否为 Git 仓库并返回 HEAD 信息（PRD C3.1）；
  * GET /git/repo/commits?path=&since=&until=&limit= 提交列表（hash/author/time/message/files，04 §5；
  * since=会话 start_head 即 5s 轮询的「新提交感知」来源，04 §6.2）；
- * GET /git/repo/commits/{hash}?path= 单个提交详情（任务四 commit 详情弹层，PRD C3.5）。
+ * GET /git/repo/commits/{hash}?path= 单个提交详情（任务四 commit 详情弹层，PRD C3.5）；
+ * GET /git/repo/commits/{hash}/diff?path= 提交 diff 预览（v1.1 P1，PRD C3.5「diff 预览 P1」）。
  */
 @RestController
 @RequestMapping("/api/v1")
@@ -45,5 +46,11 @@ public class GitController {
     @GetMapping("/git/repo/commits/{hash}")
     public ApiResponse<CommitInfo> commitDetail(@RequestParam String path, @PathVariable String hash) {
         return ApiResponse.ok(service.commitDetail(path, hash));
+    }
+
+    /** 提交 diff 预览（v1.1 P1 C3.6，PRD C3.5「diff 预览 P1」）：unified diff + 增删行统计 + 截断标记。 */
+    @GetMapping("/git/repo/commits/{hash}/diff")
+    public ApiResponse<GitRepoService.CommitDiff> diff(@RequestParam String path, @PathVariable String hash) {
+        return ApiResponse.ok(service.diff(path, hash));
     }
 }
