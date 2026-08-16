@@ -4,7 +4,7 @@
 
 ## 这是什么
 
-**思迹 TrailMind**：Windows 桌面端工具 = 双模式思维导图 + Git 绑定的 vibecoding 过程记录。当前仓库已完成 **M0 里程碑**（后端 /health、MySQL 幂等建表、workspace CRUD、前端工程、Electron 壳、一键脚本均已落地，验收见 docs/10 §12）、**M1 里程碑**（工作区 + 树状思维导图）、**M2 里程碑**（自由画布模式，已总验收）、**M3 里程碑**（过程记录 + Git 绑定，已总验收）、**M4 全部任务**（搜索/标签/导出/设置/空态/备份/性能回归/缺陷清理/收尾验收，已完成）与 **v1.1 P1 大部分任务**（导图↔记录联动、B2 完善之连线标签、C2.4 补记时间 / C2.5 插入条目、C3.6 diff 预览、标签云、自适应缩放，均已完成），下一任务 **v1.1 P1「多会话并行视图」**（07 §8 Backlog 第七优先；多会话同时查看）。
+**思迹 TrailMind**：Windows 桌面端工具 = 双模式思维导图 + Git 绑定的 vibecoding 过程记录。当前仓库已完成 **M0 里程碑**（后端 /health、MySQL 幂等建表、workspace CRUD、前端工程、Electron 壳、一键脚本均已落地，验收见 docs/10 §12）、**M1 里程碑**（工作区 + 树状思维导图）、**M2 里程碑**（自由画布模式，已总验收）、**M3 里程碑**（过程记录 + Git 绑定，已总验收）、**M4 全部任务**（搜索/标签/导出/设置/空态/备份/性能回归/缺陷清理/收尾验收，已完成）与 **v1.1 P1 全部任务**（导图↔记录联动、B2 完善之连线标签、C2.4 补记时间 / C2.5 插入条目、C3.6 diff 预览、标签云、自适应缩放、多会话并行视图，均已完成，07 §8 Backlog P1 行全部勾选），下一任务 **v1.2 / P2「导入恢复」**（07 §8 Backlog；备份导出已就绪，补齐恢复闭环）。
 
 ## 技术栈（一句话）
 
@@ -65,8 +65,9 @@
 - [x] v1.1 P1「C3.6 diff 预览」——已完成（07 §13 全清单，PRD C3.5「diff 预览 P1」，04 §5 契约自 M3 起预留）：提交详情弹层 Diff 预览——后端 `GET /git/repo/commits/{hash}/diff`（JGit DiffFormatter 相对首父 unified diff，根提交全量按新增展示；每文件 {path, diff, added, deleted}，countDiffLines 纯函数统计；文件数 >100 或 >256KB 截断标记 truncated）；前端 CommitDetailModal 每文件 details 折叠 +/- 行着色 + 增删徽标 + 截断提示，diff 失败降级不阻塞详情；存储/导出零改动（diff 实时只读不落库）；后端 225 → 231、前端 197 → 202 单测、SMOKE 16 段 ALL PASS（git 段内补 diff 断言）；过程记录见产品工作区「TrailMind 开发」，会话「v1.1 P1「C3.6 diff 预览」」）
 - [x] v1.1 P1「标签云」——已完成（07 §14 全清单，PRD D4「标签云视图 P1」）：工作区标签面板顶部标签云——TagCloud 组件按使用计数分档字号（sm/md/lg/xl）+ 热度降序 + 循环色板着色，点击即时过滤（与列表同一 openFilter 路径）；tagCloudUtil.ts 纯函数（档位/色板/稳定排序）；管理操作仍在列表；后端零改动（数据源既有 GET /tags）；前端 202 → 206 单测、SMOKE 16 段回归全过；防坑：Windows 大小写不敏感导致 TagCloud.tsx 与 tagCloud.ts 冲突（import 解析到纯函数文件），纯函数改名 tagCloudUtil.ts；过程记录见产品工作区「TrailMind 开发」，会话「v1.1 P1「标签云」」）
 - [x] v1.1 P1「自适应缩放」——已完成（07 §15 全清单，PRD §5 P1）：画布视图随内容变化自动适应——fitCheck.ts 纯函数 contentExceedsViewport（包围盒 vs 视口可见区 flow 坐标换算，padRatio 边距）；MindMapEditor 三触发点（内容/布局变化防抖 300ms、画布拖拽停止双 rAF、window resize），仅当超出视口才 fitView（padding 0.12 动画 300ms），未超出保持视野不打扰；实时节点取 React Flow 实例 getNodes（拖拽后闭包滞后）；v12 无 onResize prop 改 window resize 监听；前端 206 → 215 单测（fitCheck 9 条）、SMOKE 16 段回归全过；过程记录见产品工作区「TrailMind 开发」，会话「v1.1 P1「自适应缩放」」）
+- [x] v1.1 P1「多会话并行视图」——已完成（07 §16 全清单，PRD §5 P1 / 02 §7「v1.1 再评估」落地 Tab 式）：App 会话视图改标签式——sessionTabs 全部挂载（非激活 display:none）状态各自保留（滚动/过滤/编辑）；标签栏点击激活/× 关闭（关激活自动切前一个）/「＋」回工作区继续打开（标签保留）；「← 返回」=关当前标签；标题占位 + getSession(size=1) 轻量回填；搜索/标签/联动跳转 upsert 标签，进导图清空；ARIA tablist/tab/tabpanel；前端 215 → 216 单测（多会话全流程）、SMOKE 16 段回归全过；**v1.1 P1 至此全部完成**；过程记录见产品工作区「TrailMind 开发」，会话「v1.1 P1「多会话并行视图」」）
 
-下一任务：**v1.1 P1「多会话并行视图」**（07 §8 Backlog 第七优先；多会话同时查看）。
+下一任务：**v1.2 / P2「导入恢复」**（07 §8 Backlog；备份导出已就绪，补齐恢复闭环）。
 
 ## 文档索引
 
