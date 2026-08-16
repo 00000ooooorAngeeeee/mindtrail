@@ -165,6 +165,61 @@ async function killTree(pid) {
 const results = []
 const check = (name, ok, error) => results.push({ name, ok: !!ok, ...(error ? { error } : {}) })
 
+// ---------- M4 收尾验收：断网模拟（OFFLINE_MODE=1）----------
+// 死代理：Chromium 渲染进程一切网络请求指向不可达代理（127.0.0.1:9，discard 端口无服务），
+// 回环地址显式 bypass（本应用内部通信全在 127.0.0.1：前端静态服务器/后端/CDP/MySQL）——等价断网：
+// 任何外网请求必然失败（PRD §6.5 本地优先，docs/07 §7「断网状态全功能可用」实测）。
+export function offlineProxyArgs() {
+  return ['--proxy-server=http://127.0.0.1:9', '--proxy-bypass-list=127.0.0.1;localhost']
+}
+
+// netstat -ano 行解析（Windows TCP 行）：{ local, remote, state, pid }；非 TCP 行返回 null
+export function parseNetstatRow(line) {
+  const m = line.match(/^\s*TCP\s+(\S+)\s+(\S+)\s+(\S+)\s+(\d+)\s*$/)
+  return m ? { local: m[1], remote: m[2], state: m[3], pid: Number(m[4]) } : null
+}
+
+// 回环地址判定（127.0.0.1 / ::1；netstat 中 IPv6 回环写作 [::1]:port，IPv4 写作 127.0.0.1:port）
+export function isLoopback(addr) {
+  const a = (addr || '').trim()
+  if (!a) return false
+  const m = a.match(/^\[?([0-9a-fA-F:.]+?)\]?(?::\d+)?$/)
+  const host = m ? m[1] : a.split(':')[0]
+  return host === '127.0.0.1' || host === '::1' || host === 'localhost'
+}
+
+// 连接审计：目标 PID 集合内、除 LISTENING 外任何非回环远端连接均视为违规
+//（ESTABLISHED 活跃连接 / SYN_SENT 发起中的连接 / TIME_WAIT 曾建立过连接，都是外网依赖证据）
+export function auditConnections(rows, pids) {
+  const pidSet = new Set(pids)
+  return rows.filter((r) => r && pidSet.has(r.pid) && r.state !== 'LISTENING' && !isLoopback(r.remote))
+}
+
+// 目标进程树（Electron 主进程 → 渲染/GPU/后端 java 等子进程）：PowerShell 一次取全量父子关系后 BFS
+function processTreePids(rootPid) {
+  return new Promise((resolve) => {
+    const cmd =
+      `$all = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId; $ids = @{}; $ids[${rootPid}] = $true; ` +
+      `$changed = $true; while ($changed) { $changed = $false; foreach ($p in $all) { ` +
+      `if ($ids.ContainsKey([int]$p.ParentProcessId) -and -not $ids.ContainsKey([int]$p.ProcessId)) { $ids[[int]$p.ProcessId] = $true; $changed = $true } } }; ` +
+      `($ids.Keys | Sort-Object) -join ','`
+    execFile('powershell', ['-NoProfile', '-Command', cmd], { windowsHide: true }, (err, stdout) => {
+      if (err) return resolve([])
+      resolve((stdout || '').trim().split(',').map(Number).filter(Boolean))
+    })
+  })
+}
+
+// 采样当前全部 netstat 行
+function netstatRows() {
+  return new Promise((resolve) => {
+    execFile('netstat', ['-ano'], { windowsHide: true }, (err, stdout) => {
+      if (err) return resolve([])
+      resolve((stdout || '').split(/\r?\n/).map(parseNetstatRow).filter(Boolean))
+    })
+  })
+}
+
 /**
  * 页面驱动会话封装：evaluate/waitFor/合成事件/截图，绑定一个 CDP 连接。
  * 输入全部为页面内合成事件（view: window），驱动真实 DOM 事件流水线与应用逻辑。
@@ -331,11 +386,30 @@ async function main() {
   let wid = null
   let mid1 = null
 
+  // 断网模拟（M4 收尾验收）：OFFLINE_MODE=1 时 Electron 以死代理拉起，运行期做连接审计采样
+  const offline = process.env.OFFLINE_MODE === '1'
+  const auditSamples = []
+  const auditNow = async (label) => {
+    if (!offline) return
+    const rows = await netstatRows()
+    const pids = await processTreePids(electron.pid)
+    const violations = auditConnections(rows, pids)
+    auditSamples.push({
+      label,
+      violations,
+      pidCount: pids.length,
+      connCount: rows.filter((r) => pids.includes(r.pid)).length,
+    })
+  }
+
   try {
     console.log('[m2-gui] 启动静态服务器（frontend/dist + /api 代理）…')
     staticServer = await startStaticServer()
 
     console.log('[m2-gui] 拉起 Electron（自动拉起后端 jar，CDP 端口 9222）…')
+    if (offline) {
+      console.log(`[m2-gui] 断网模拟模式：死代理 ${offlineProxyArgs()[0]}（外网请求必然失败，回环显式 bypass）`)
+    }
     const electronBin = path.join(ROOT, 'desktop', 'node_modules', 'electron', 'dist', 'electron.exe')
     const env = { ...process.env, TRAILMIND_DEV_URL: FRONTEND_URL }
     delete env.ELECTRON_RUN_AS_NODE
@@ -345,9 +419,13 @@ async function main() {
       // 这些开关让窗口无论可见性如何都保持渲染循环（真实用户前台使用不受影响）。
       const child = spawn(electronBin, [
         `--remote-debugging-port=${CDP_PORT}`,
+        // userData 指到工作区内：agent 沙箱环境对 %APPDATA% 只读，Electron 写单实例锁/DevActivePort
+        // 会崩溃（实测 FATAL: platform_channel）；独立 user-data-dir 同时避免与真实用户实例互斥（同 perf-regression.mjs）
+        `--user-data-dir=${path.join(OUT_DIR, 'userdata')}`,
         '--disable-renderer-backgrounding',
         '--disable-background-timer-throttling',
         '--disable-features=CalculateNativeWinOcclusion',
+        ...(offline ? offlineProxyArgs() : []),
         '.',
       ], {
         cwd: path.join(ROOT, 'desktop'), env, stdio: 'ignore', windowsHide: true,
@@ -375,6 +453,7 @@ async function main() {
     const big = await rest('GET', `/mindmaps/${mid2}`)
     await rest('PUT', `/mindmaps/${mid2}`, { contentJson: JSON.stringify(gridContent(100)), updatedAt: big.data.updatedAt })
     await d.evaluate(`location.reload()`).catch(() => {})
+    await auditNow('首屏+数据准备')
 
     // ---------- S0：启动 → 工作区 → 打开导图 ----------
     await d.waitFor(`[...document.querySelectorAll('.workspace-item .item-name')].some(b => b.textContent.includes(${JSON.stringify(wsName)}))`, '工作区列表出现验收工作区', 20000)
@@ -700,6 +779,7 @@ async function main() {
     check('S5b 重启后坐标恢复（画布 layout 不丢）', layoutOk === true, `恢复 fx=${rootRestored?.fx?.toFixed(0)},fy=${rootRestored?.fy?.toFixed(0)} 快照=${JSON.stringify(snapshotRootLayout)}`)
     check('S5c 重启后形状/颜色/加粗/便签恢复', styleOk === true && stickyOk === true, `style=${styleOk} sticky=${stickyOk}`)
     await d2.screenshot('05-after-restart')
+    await auditNow('重启恢复')
 
     // ---------- S6：100 节点自由画布拖拽流畅 ----------
     await d2.clickText('.mm-toolbar button', '返回')
@@ -740,6 +820,20 @@ async function main() {
     const fps = fpsInfo.frames / (fpsInfo.dt / 1000)
     check('S6b 100 节点拖拽流畅（拖拽期帧率 ≥ 30fps）', fps >= 30, `实测 ${fps.toFixed(1)}fps（${fpsInfo.frames} 帧 / ${(fpsInfo.dt / 1000).toFixed(2)}s）`)
     await d2.screenshot('06-100nodes')
+    await auditNow('100节点拖拽')
+
+    // ---------- 断网模拟汇总（OFFLINE_MODE=1）：运行期连接审计 ----------
+    if (offline) {
+      const allViolations = auditSamples.flatMap((s) => s.violations)
+      const detail = auditSamples
+        .map((s) => `${s.label} ${s.connCount} 连接/${s.pidCount} 进程${s.violations.length ? ` 违规 ${s.violations.length}` : ''}`)
+        .join('；')
+      check(
+        `断网模拟连接审计：运行期全部连接仅回环（${detail}）`,
+        allViolations.length === 0,
+        allViolations.length ? `非回环连接：${JSON.stringify(allViolations.slice(0, 5))}` : undefined,
+      )
+    }
 
     // ---------- 清理：删除验收工作区（级联）→ 关闭应用 ----------
     await rest('DELETE', `/workspaces/${wid}`)
@@ -757,6 +851,9 @@ async function main() {
 
 async function mainEntry() {
   console.log('[m2-gui] M2 总验收 GUI 实机验证开始')
+  if (process.env.OFFLINE_MODE === '1') {
+    console.log('[m2-gui] 断网模拟实测（PRD §6.5 本地优先，docs/07 §7）：全部断言在死代理模式下执行')
+  }
   try {
     await main()
   } catch (e) {
