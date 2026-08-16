@@ -131,7 +131,7 @@ feat(session): 实现时间线条目追加与类型选择
 
 ## 9. 给人类用户的会话启动提示词模板
 
-复制以下模板开启一次 vibecoding 会话。「本次任务」填 [AGENTS.md](../AGENTS.md)「当前进度」里第一个未勾选的任务（当前为 **v1.1 P1「C2.4 补记时间 / C2.5 插入条目」**（07 §8 Backlog 第三优先；seq 重排））：
+复制以下模板开启一次 vibecoding 会话。「本次任务」填 [AGENTS.md](../AGENTS.md)「当前进度」里第一个未勾选的任务（当前为 **v1.1 P1「C3.6 diff 预览」**（07 §8 Backlog 第四优先；绑定后查看提交 diff））：
 
 ```
 你是思迹 TrailMind 项目的开发 agent。请先阅读项目根目录的 AGENTS.md 与 docs/08-Agent协作手册.md，
