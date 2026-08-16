@@ -351,7 +351,32 @@ public final class MindmapPngRenderer {
             Point2D.Double b = edgePoint(target.bounds(), center(from, source));
             drawCurve(g, a, b);
             drawArrowHead(g, a, b);
+            String label = edge.path("label").asText(null);
+            if (label != null && !label.isBlank()) {
+                drawEdgeLabel(g, a, b, label);
+            }
         }
+    }
+
+    /** 自由边标签（PRD B2.2 P1「可编辑标签」，05 §4 edges[].label）：绘制于贝塞尔中点（t=0.5）的白底胶囊。 */
+    private static void drawEdgeLabel(Graphics2D g, Point2D.Double a, Point2D.Double b, String label) {
+        double dx = Math.max(40, Math.abs(b.x - a.x) * 0.5);
+        // 三次贝塞尔 t=0.5 公式：B(0.5) = (P0 + 3P1 + 3P2 + P3) / 8；P1/P2 与 drawCurve 同构
+        double mx = (a.x + 3 * (a.x + dx) + 3 * (b.x - dx) + b.x) / 8;
+        double my = (a.y + 3 * a.y + 3 * b.y + b.y) / 8;
+
+        Font old = g.getFont();
+        g.setFont(old.deriveFont(11f));
+        FontMetrics fm = g.getFontMetrics();
+        int w = fm.stringWidth(label) + 12;
+        int h = fm.getHeight() + 2;
+        int x = (int) Math.round(mx - w / 2.0);
+        int y = (int) Math.round(my - h / 2.0);
+        g.setColor(Color.WHITE);
+        g.fillRoundRect(x, y, w, h, h, h);
+        g.setColor(TEXT_COLOR);
+        g.drawString(label, x + 6, (int) Math.round(my + fm.getAscent() / 2.0 - 1));
+        g.setFont(old);
     }
 
     private static void drawCurve(Graphics2D g, Point2D.Double a, Point2D.Double b) {

@@ -166,6 +166,29 @@ class MindmapExportServiceTest {
         assertNotNull(ImageIO.read(imageToPng(image)));
     }
 
+    @Test
+    void renderer_draws_free_edge_label_pill() throws Exception {
+        // PRD B2.2 P1「可编辑标签」：PNG 导出应绘制自由边标签（白底胶囊 + 中点文本）。
+        // 断言方式：同几何内容「带标签 vs 标签为 null」两次渲染，除标签外几何完全一致，
+        // 像素差异 > 0 即证明标签被绘制（几何/节点文本/箭头均相同，不会产生其他差异）。
+        String withLabel = contentWithCanvas();
+        String withoutLabel = withLabel.replace("\"label\":\"自由连线\"", "\"label\":null");
+        BufferedImage a = MindmapPngRenderer.render(withLabel);
+        BufferedImage b = MindmapPngRenderer.render(withoutLabel);
+        assertEquals(a.getWidth(), b.getWidth());
+        assertEquals(a.getHeight(), b.getHeight());
+        int diff = 0;
+        for (int x = 0; x < a.getWidth(); x++) {
+            for (int y = 0; y < a.getHeight(); y++) {
+                if (a.getRGB(x, y) != b.getRGB(x, y)) {
+                    diff++;
+                }
+            }
+        }
+        // 4 个中文字符的胶囊文本至少覆盖数百像素；20 为防抖阈值
+        assertTrue(diff > 20, "带标签渲染应有像素差异（自由边标签未绘制？diff=" + diff + "）");
+    }
+
     private static ByteArrayInputStream imageToPng(BufferedImage image) throws Exception {
         java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
         ImageIO.write(image, "png", out);
