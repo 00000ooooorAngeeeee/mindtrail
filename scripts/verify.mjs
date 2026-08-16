@@ -1,7 +1,8 @@
 // 验收冒烟（docs/10 §10/§12 起）：/health → schema 表齐全 → workspace 往返 → mindmap 往返（M2 总验收补充）
 // → session/entry 往返（M3 任务一：start_head、seq 1/2/3、标签、分页、编辑、结束写 review、追加限制、级联删除）
 // → 条目插入/补记往返（v1.1 P1：afterSeq 插入位置 seq 重排、createdAt 补记时间、非法 400）
-// → git 服务往返（M3 任务三：仓库校验、提交历史、since=start_head 新提交感知、绑定/解绑、详情回填、级联清理）→ 输出 ALL PASS。
+// → git 服务往返（M3 任务三：仓库校验、提交历史、since=start_head 新提交感知、绑定/解绑、详情回填、级联清理；
+//   v1.1 P1 C3.6：提交 diff 预览断言）→ 输出 ALL PASS。
 // 仅依赖 Node 内建（http/child_process/fs）+ 系统 git 命令，无第三方依赖。前置：后端已在 127.0.0.1:17860 运行、MySQL 可连（DB_PASS/MYSQL_PWD）。
 import http from 'node:http'
 import fs from 'node:fs'
@@ -574,6 +575,28 @@ export async function runChecks(deps = {}) {
       throw new Error('since 过滤错误（应仅剩 c2）')
     }
 
+    // diff 预览（v1.1 P1 C3.6，PRD C3.5「diff 预览 P1」）：c2 相对 c1 应只含 b.txt 新增；
+    // 根提交 c1 全部文件按新增展示；未知 hash → 404
+    const d2 = await request(
+      `${BASE}/api/v1/git/repo/commits/${c2}/diff?path=${encodeURIComponent(gitRepoDir)}`,
+    )
+    const d2files = d2?.json?.data?.files || []
+    if (d2?.json?.code !== 0 || d2files.length !== 1 || d2files[0]?.path !== 'b.txt') {
+      throw new Error(`c2 diff 文件错误：${JSON.stringify(d2?.json)}`)
+    }
+    if (!(d2files[0]?.diff || '').includes('+two')) throw new Error('c2 diff 文本未包含新增行 +two')
+    if (d2files[0]?.added < 1 || d2files[0]?.deleted !== 0) throw new Error('c2 diff 增删统计错误')
+    if (d2?.json?.data?.truncated !== false) throw new Error('小提交不应截断')
+    const d1 = await request(
+      `${BASE}/api/v1/git/repo/commits/${c1}/diff?path=${encodeURIComponent(gitRepoDir)}`,
+    )
+    const d1paths = (d1?.json?.data?.files || []).map((f) => f.path)
+    if (!d1paths.includes('a.txt')) throw new Error(`根提交 diff 应含 a.txt：${d1paths.join(',')}`)
+    const d404 = await request(
+      `${BASE}/api/v1/git/repo/commits/${'0'.repeat(40)}/diff?path=${encodeURIComponent(gitRepoDir)}`,
+    )
+    if (d404?.json?.code !== 404) throw new Error('未知提交 diff 应 404')
+
     // 带仓库会话：start_head = 当前 HEAD
     const gws = await request(`${BASE}/api/v1/workspaces`, {
       method: 'POST',
@@ -658,7 +681,7 @@ export async function runChecks(deps = {}) {
 
     results.push({
       ok: true,
-      name: 'git 服务往返（status/历史 since/start_head/新提交感知/绑定解绑/详情回填/防造假 400/级联清理）',
+      name: 'git 服务往返（status/历史 since/start_head/新提交感知/绑定解绑/详情回填/防造假 400/diff 预览/级联清理）',
     })
   } catch (e) {
     results.push({ ok: false, name: 'git 服务往返', error: e.message })
