@@ -165,6 +165,90 @@ describe('SessionView 会话详情页（时间线条目）', () => {
     expect(await screen.findByText('改后的内容')).toBeInTheDocument()
   })
 
+  it('编辑条目补记时间：面板预填创建时间，改动后保存携带 createdAt（PRD C2.4）', async () => {
+    updateEntryMock.mockResolvedValue({ id: 12, sessionId: 1, seq: 2, type: 'error', contentMd: '报错了', tags: [], createdAt: '2025-06-01T09:15:30' })
+    render(<SessionView sessionId={1} onBack={() => {}} />)
+    await screen.findByText('报错了')
+
+    fireEvent.click(screen.getAllByText('编辑')[1])
+    const timeInput = screen.getByLabelText('编辑时间') as HTMLInputElement
+    // jsdom 对 datetime-local 归一化：秒为 0 时省略 ":00"
+    expect(timeInput.value).toMatch(/^2025-06-01T09:10(?::00)?$/) // 预填原创建时间
+    fireEvent.change(timeInput, { target: { value: '2025-06-01T09:15:30' } })
+    fireEvent.click(screen.getByText('保存'))
+
+    await waitFor(() =>
+      expect(updateEntryMock).toHaveBeenCalledWith(12, {
+        contentMd: '报错了',
+        type: 'error',
+        createdAt: '2025-06-01T09:15:30',
+      }),
+    )
+    expect(await screen.findByText('09:15')).toBeInTheDocument() // 时间线时间戳随补记更新
+  })
+
+  it('编辑条目不改时间：保存不携带 createdAt（不覆盖原创建时间）', async () => {
+    updateEntryMock.mockResolvedValue({ id: 12, sessionId: 1, seq: 2, type: 'error', contentMd: '报错了', tags: [], createdAt: '2025-06-01T09:10:00' })
+    render(<SessionView sessionId={1} onBack={() => {}} />)
+    await screen.findByText('报错了')
+
+    fireEvent.click(screen.getAllByText('编辑')[1])
+    fireEvent.click(screen.getByText('保存'))
+
+    await waitFor(() => expect(updateEntryMock).toHaveBeenCalledWith(12, { contentMd: '报错了', type: 'error' }))
+  })
+
+  it('插入条目：面板预填当前时间，提交携带 afterSeq 与 createdAt 并重载时间线（PRD C2.5）', async () => {
+    vi.setSystemTime(new Date('2025-06-01T10:30:00'))
+    addMock.mockResolvedValue({ id: 13, sessionId: 1, seq: 2, type: 'action', contentMd: '插入的验证', tags: [], createdAt: '2025-06-01T10:30:00' })
+    getMock
+      .mockResolvedValueOnce(activeSession())
+      .mockResolvedValueOnce({
+        ...activeSession(),
+        entryTotal: 3,
+        entries: [
+          ...(activeSession().entries ?? []),
+          { id: 13, sessionId: 1, seq: 2, type: 'action', contentMd: '插入的验证', tags: [], createdAt: '2025-06-01T10:30:00' },
+        ],
+      })
+    render(<SessionView sessionId={1} onBack={() => {}} />)
+    await screen.findByText('报错了')
+
+    fireEvent.click(screen.getAllByText('插入')[0]) // 第 1 条（seq=1）之后插入
+    expect(screen.getByText('插入到 #1 之后')).toBeInTheDocument()
+    const timeInput = screen.getByLabelText('插入时间') as HTMLInputElement
+    expect(timeInput.value).toMatch(/^2025-06-01T10:30(?::00)?$/) // 默认当前时间（jsdom 省略 ":00"）
+
+    fireEvent.change(screen.getByLabelText('插入内容'), { target: { value: '插入的验证' } })
+    fireEvent.change(timeInput, { target: { value: '2025-06-01T09:45:00' } }) // 补录场景：改到过去
+    const panel = screen.getByText('插入到 #1 之后').closest('.entry-card') as HTMLElement
+    fireEvent.click(within(panel).getByText('插入'))
+
+    await waitFor(() =>
+      expect(addMock).toHaveBeenCalledWith(1, {
+        type: 'action',
+        contentMd: '插入的验证',
+        afterSeq: 1,
+        createdAt: '2025-06-01T09:45:00',
+      }),
+    )
+    await waitFor(() => expect(getMock).toHaveBeenCalledTimes(2)) // 提交成功后重载（seq 重排）
+    expect(await screen.findByText('插入的验证')).toBeInTheDocument()
+  })
+
+  it('插入条目：取消不提交，面板关闭', async () => {
+    render(<SessionView sessionId={1} onBack={() => {}} />)
+    await screen.findByText('报错了')
+
+    fireEvent.click(screen.getAllByText('插入')[0])
+    expect(screen.getByText('插入到 #1 之后')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('插入内容'), { target: { value: '不会提交' } })
+    fireEvent.click(screen.getByText('取消'))
+
+    expect(screen.queryByText('插入到 #1 之后')).not.toBeInTheDocument()
+    expect(addMock).not.toHaveBeenCalled()
+  })
+
   it('删除条目：二次确认后调用删除接口', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     deleteEntryMock.mockResolvedValue(undefined)

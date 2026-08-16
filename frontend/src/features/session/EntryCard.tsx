@@ -14,6 +14,7 @@ export const EntryCard = memo(function EntryCard({
   nodes,
   onEdit,
   onDelete,
+  onInsert,
   onCommitClick,
   onNodeClick,
   onManageNodes,
@@ -23,6 +24,8 @@ export const EntryCard = memo(function EntryCard({
   nodes?: NodeRef[]
   onEdit: (entry: Entry) => void
   onDelete: (entry: Entry) => void
+  /** 打开「插入到该条目之后」面板（PRD C2.5 插入位置）。 */
+  onInsert?: (entry: Entry) => void
   onCommitClick: (entry: Entry, hash: string) => void
   /** 点击引用节点 chip：跳转导图并定位该节点。 */
   onNodeClick?: (ref: NodeRef) => void
@@ -78,6 +81,7 @@ export const EntryCard = memo(function EntryCard({
       )}
       <div className="entry-actions">
         <button onClick={() => onManageNodes?.()}>🔗 节点</button>
+        {onInsert && <button onClick={() => onInsert(entry)}>插入</button>}
         <button onClick={() => onEdit(entry)}>编辑</button>
         <button className="danger" onClick={() => onDelete(entry)}>
           删除

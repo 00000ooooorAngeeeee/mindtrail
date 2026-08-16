@@ -34,6 +34,7 @@ import { renderMarkdown } from './markdown'
 import { loadEntryType, saveEntryType } from './typeMemory'
 import { useInfiniteScroll } from './useInfiniteScroll'
 import { formatTime } from './time'
+import { datetimeLocalToIso, isoToDatetimeLocal, nowLocalIso } from './entryTime'
 import { downloadTextFile, sanitizeFileName } from '../../utils/download'
 import '../linkage/linkage.css'
 import './session.css'
@@ -79,6 +80,15 @@ export function SessionView({
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editType, setEditType] = useState<EntryType>('action')
   const [editContent, setEditContent] = useState('')
+  const [editTime, setEditTime] = useState('')
+  // 编辑面板打开时的时间初值：未改动则提交时不带 createdAt（不覆盖原时间）
+  const editTimeInitialRef = useRef('')
+
+  // 插入位置（PRD C2.5）：在目标条目之后插入新条目（内联面板，类型/内容/补记时间）
+  const [insertEntryId, setInsertEntryId] = useState<number | null>(null)
+  const [insertType, setInsertType] = useState<EntryType>('action')
+  const [insertContent, setInsertContent] = useState('')
+  const [insertTime, setInsertTime] = useState('')
 
   // 搜索跳转定位（PRD D2）：闪烁中的条目 id；highlightHandledRef 保证同一目标只处理一次。
   const [flashEntryId, setFlashEntryId] = useState<number | null>(null)
@@ -379,11 +389,46 @@ export function SessionView({
   const submitEdit = async (entry: Entry) => {
     if (!editContent.trim()) return
     try {
-      const updated = await updateEntry(entry.id, { contentMd: editContent, type: editType })
+      // PRD C2.4 补记时间：仅当用户改动时间输入才提交 createdAt（未改动保留原时间）
+      const timeIso = datetimeLocalToIso(editTime)
+      const payload: { contentMd: string; type: EntryType; createdAt?: string } = {
+        contentMd: editContent,
+        type: editType,
+      }
+      if (timeIso && editTime !== editTimeInitialRef.current) payload.createdAt = timeIso
+      const updated = await updateEntry(entry.id, payload)
       setEntries((prev) => prev.map((x) => (x.id === entry.id ? updated : x)))
       setEditingId(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : '编辑条目失败')
+    }
+  }
+
+  /** 打开「插入到该条目之后」面板（PRD C2.5）：类型沿用快速记录记忆，时间默认当前。 */
+  const openInsert = (entry: Entry) => {
+    setInsertEntryId(entry.id)
+    setInsertType(draftType)
+    setInsertContent('')
+    setInsertTime(nowLocalIso())
+  }
+
+  /** 插入提交：afterSeq=目标条目 seq（其后条目 seq 重排），成功后重载时间线。 */
+  const submitInsert = async () => {
+    if (insertEntryId == null || !insertContent.trim()) return
+    try {
+      const timeIso = datetimeLocalToIso(insertTime)
+      const payload: { type: EntryType; contentMd: string; afterSeq: number; createdAt?: string } = {
+        type: insertType,
+        contentMd: insertContent,
+        afterSeq: entries.find((e) => e.id === insertEntryId)?.seq ?? 0,
+      }
+      if (timeIso) payload.createdAt = timeIso
+      await addEntry(sessionId, payload)
+      setInsertEntryId(null)
+      setInsertContent('')
+      await load(1) // seq 重排后本地条目序号失效，整体重载（与分页共存的最简正确路径）
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '插入条目失败')
     }
   }
 
@@ -640,8 +685,66 @@ export function SessionView({
                       value={editContent}
                       onChange={(e) => setEditContent(e.target.value)}
                     />
+                    {/* PRD C2.4 补记时间：datetime-local 秒级输入（step=1），留空不改时间 */}
+                    <label className="entry-time-label">
+                      时间（补记）
+                      <input
+                        type="datetime-local"
+                        step="1"
+                        aria-label="编辑时间"
+                        value={editTime}
+                        onChange={(e) => setEditTime(e.target.value)}
+                      />
+                    </label>
                     <button onClick={() => void submitEdit(entry)}>保存</button>
                     <button onClick={() => setEditingId(null)}>取消</button>
+                  </div>
+                </div>
+              ) : insertEntryId === entry.id ? (
+                <div className="entry-card">
+                  <div className="entry-meta">
+                    <span className="entry-chip">插入到 #{entry.seq} 之后</span>
+                  </div>
+                  <div className="entry-edit">
+                    <select
+                      aria-label="插入类型"
+                      value={insertType}
+                      onChange={(e) => setInsertType(e.target.value as EntryType)}
+                    >
+                      {typeOptions.map((t) => (
+                        <option key={t} value={t}>
+                          {ENTRY_TYPE_LABELS[t]}
+                        </option>
+                      ))}
+                    </select>
+                    <textarea
+                      aria-label="插入内容"
+                      placeholder="输入要插入的记录内容"
+                      value={insertContent}
+                      onChange={(e) => setInsertContent(e.target.value)}
+                    />
+                    {/* PRD C2.4 补记时间：插入时一并指定（补录场景），默认当前时间 */}
+                    <label className="entry-time-label">
+                      时间（补记）
+                      <input
+                        type="datetime-local"
+                        step="1"
+                        aria-label="插入时间"
+                        value={insertTime}
+                        onChange={(e) => setInsertTime(e.target.value)}
+                      />
+                    </label>
+                    <button onClick={() => void submitInsert()} disabled={!insertContent.trim()}>
+                      插入
+                    </button>
+                    <button
+                      onClick={() => {
+                        setInsertEntryId(null)
+                        setInsertContent('')
+                      }}
+                    >
+                      取消
+                    </button>
                   </div>
                 </div>
               ) : (
@@ -652,7 +755,10 @@ export function SessionView({
                     setEditingId(e.id)
                     setEditType(e.type)
                     setEditContent(e.contentMd)
+                    editTimeInitialRef.current = isoToDatetimeLocal(e.createdAt) // C2.4：预填当前创建时间
+                    setEditTime(editTimeInitialRef.current)
                   }}
+                  onInsert={openInsert}
                   onDelete={(e) => void handleDelete(e)}
                   onCommitClick={(e, hash) => openCommitDetail(e, hash)}
                   onNodeClick={(r) => onOpenMindmapNode?.(r.workspaceId, r.mindmapId, r.nodeId)}
