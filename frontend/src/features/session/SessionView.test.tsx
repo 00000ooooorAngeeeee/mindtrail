@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { SessionView } from './SessionView'
 import { exportSessionJson, exportSessionMarkdown, getSession, updateSession } from '../../api/sessions'
 import { addEntry, deleteEntry, updateEntry } from '../../api/entries'
-import { bindCommits, getCommitDetail, getCommits, getSessionCommits, unbindCommit } from '../../api/git'
+import { bindCommits, getCommitDetail, getCommitDiff, getCommits, getSessionCommits, unbindCommit } from '../../api/git'
 import { filterEntriesByTag, listTags } from '../../api/tags'
 import { MockIntersectionObserver } from '../../test/intersectionObserver'
 import { ENTRY_TYPE_STORAGE_KEY } from './typeMemory'
@@ -27,6 +27,7 @@ vi.mock('../../api/git', () => ({
   bindCommits: vi.fn(),
   unbindCommit: vi.fn(),
   getCommitDetail: vi.fn(),
+  getCommitDiff: vi.fn(),
 }))
 vi.mock('../../api/tags', () => ({
   listTags: vi.fn(),
@@ -45,6 +46,7 @@ const getSessionCommitsMock = vi.mocked(getSessionCommits)
 const bindMock = vi.mocked(bindCommits)
 const unbindMock = vi.mocked(unbindCommit)
 const detailMock = vi.mocked(getCommitDetail)
+const diffMock = vi.mocked(getCommitDiff)
 const listTagsMock = vi.mocked(listTags)
 const filterEntriesMock = vi.mocked(filterEntriesByTag)
 
@@ -97,6 +99,8 @@ describe('SessionView 会话详情页（时间线条目）', () => {
     getCommitsMock.mockResolvedValue([])
     getSessionCommitsMock.mockResolvedValue([])
     detailMock.mockReset()
+    diffMock.mockReset()
+    diffMock.mockResolvedValue({ hash: H1, files: [], truncated: false }) // 弹层 diff 预览默认空（既有用例不关心）
     exportMock.mockReset()
     exportJsonMock.mockReset()
     listTagsMock.mockReset()

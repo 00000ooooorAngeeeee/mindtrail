@@ -813,6 +813,7 @@ export function SessionView({
         <CommitDetailModal
           commit={detailData}
           error={detailError}
+          repoPath={session?.repoPath}
           onClose={closeCommitDetail}
           onUnbind={() => void unbindFromDetail()}
         />

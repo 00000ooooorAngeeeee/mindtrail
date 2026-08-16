@@ -109,6 +109,21 @@ export interface GitCommit {
   files: string[]
 }
 
+/** 单个文件 diff（v1.1 P1 C3.6）：unified diff 文本 + 增删行统计（diff 预览弹层）。 */
+export interface FileDiff {
+  path: string
+  diff: string
+  added: number
+  deleted: number
+}
+
+/** 提交 diff 预览（GET /git/repo/commits/{hash}/diff，PRD C3.5「diff 预览 P1」）；truncated=超限截断。 */
+export interface CommitDiff {
+  hash: string
+  files: FileDiff[]
+  truncated: boolean
+}
+
 /** 会话内条目-提交绑定关系（GET /sessions/{id}/commits，Git 面板与未绑定缓冲计算）。 */
 export interface BoundCommit {
   entryId: number

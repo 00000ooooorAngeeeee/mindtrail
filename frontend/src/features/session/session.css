@@ -484,6 +484,78 @@
   overflow-y: auto;
 }
 
+/* diff 预览（v1.1 P1 C3.6，PRD C3.5「diff 预览 P1」） */
+.commit-diff-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.commit-diff-file {
+  border: 1px solid var(--code-border);
+  border-radius: 6px;
+  background: var(--code-bg);
+  overflow: hidden;
+}
+
+.commit-diff-file summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+}
+
+.commit-diff-path {
+  word-break: break-all;
+}
+
+.commit-diff-stats {
+  margin-left: auto;
+  font-size: 11px;
+}
+
+.diff-added {
+  color: #16a34a;
+  margin-right: 4px;
+}
+
+.diff-deleted {
+  color: #dc2626;
+}
+
+.commit-diff-text {
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  border-top: 1px solid var(--code-border);
+}
+
+.commit-diff-text > div {
+  padding: 0 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diff-line-add {
+  background: rgba(22, 163, 74, 0.12);
+}
+
+.diff-line-del {
+  background: rgba(220, 38, 38, 0.12);
+}
+
+.diff-line-hunk {
+  background: var(--chip-bg);
+  color: var(--text-secondary);
+}
+
 .modal-actions {
   display: flex;
   gap: 8px;

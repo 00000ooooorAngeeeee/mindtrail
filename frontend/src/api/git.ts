@@ -1,5 +1,5 @@
 import { del, get, post } from './client'
-import type { BoundCommit, GitCommit, RepoStatus } from './types'
+import type { BoundCommit, CommitDiff, GitCommit, RepoStatus } from './types'
 
 /** 仓库校验（PRD C3.1 / 04 §5）：非法路径后端返回 400 并给出明确提示。 */
 export function getRepoStatus(path: string): Promise<RepoStatus> {
@@ -26,6 +26,11 @@ export function getSessionCommits(sessionId: number): Promise<BoundCommit[]> {
 /** 单个提交详情（PRD C3.5 详情弹层：hash/作者/时间/完整 message/变更文件）。 */
 export function getCommitDetail(path: string, hash: string): Promise<GitCommit> {
   return get<GitCommit>(`/git/repo/commits/${encodeURIComponent(hash)}?path=${encodeURIComponent(path)}`)
+}
+
+/** 提交 diff 预览（v1.1 P1 C3.6，PRD C3.5「diff 预览 P1」）：unified diff + 增删统计 + 截断标记。 */
+export function getCommitDiff(path: string, hash: string): Promise<CommitDiff> {
+  return get<CommitDiff>(`/git/repo/commits/${encodeURIComponent(hash)}/diff?path=${encodeURIComponent(path)}`)
 }
 
 /** 绑定提交到条目（04 §5 POST /entries/{id}/commits）：返回本次新增绑定的 hash。 */
