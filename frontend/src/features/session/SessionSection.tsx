@@ -6,13 +6,21 @@ import { formatTime } from './time'
 /**
  * 工作区首页的会话区（07 §6 任务一）：
  * 列表（标题/状态徽标/条目数/开始时间）、开始会话（仓库缺省继承工作区）、删除（二次确认，级联条目）。
+ * M4 任务五：titleInputRef 供新工作区空态引导聚焦输入框；onEmptyChange 上报会话是否为空（空态引导判定）。
  */
 export function SessionSection({
   ws,
   onOpenSession,
+  titleInputRef,
+  onEmptyChange,
+  suppressEmptyText = false,
 }: {
   ws: Workspace
   onOpenSession: (id: number) => void
+  titleInputRef?: React.Ref<HTMLInputElement>
+  onEmptyChange?: (empty: boolean) => void
+  /** 新工作区空态引导已接管空态展示时，隐藏本区「暂无会话」文本（03 §7.1）。 */
+  suppressEmptyText?: boolean
 }) {
   const [sessions, setSessions] = useState<Session[]>([])
   const [title, setTitle] = useState('')
@@ -24,13 +32,15 @@ export function SessionSection({
     setLoading(true)
     setError(null)
     try {
-      setSessions(await listSessions(ws.id))
+      const list = await listSessions(ws.id)
+      setSessions(list)
+      onEmptyChange?.(list.length === 0)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载会话失败')
     } finally {
       setLoading(false)
     }
-  }, [ws.id])
+  }, [ws.id, onEmptyChange])
 
   useEffect(() => {
     void load()
@@ -71,7 +81,7 @@ export function SessionSection({
       {loading ? (
         <p className="muted">加载中…</p>
       ) : sessions.length === 0 ? (
-        <p className="muted">暂无会话</p>
+        suppressEmptyText ? null : <p className="muted">暂无会话</p>
       ) : (
         <ul className="workspace-list">
           {sessions.map((s) => (
@@ -95,6 +105,7 @@ export function SessionSection({
 
       <div className="create-form">
         <input
+          ref={titleInputRef}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={(e) => {

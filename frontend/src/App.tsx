@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppStore } from './store/useAppStore'
 import { useSettingsStore } from './store/useSettingsStore'
 import { createMindmap, deleteMindmap, listMindmaps } from './api/mindmaps'
@@ -9,6 +9,7 @@ import { PAGE_SIZE, SessionView } from './features/session/SessionView'
 import { SearchOverlay, type SearchNavigateTarget } from './features/search/SearchOverlay'
 import { SettingsPanel } from './features/settings/SettingsPanel'
 import { TagSection } from './features/tag/TagSection'
+import { EmptyGuide } from './features/workspace/EmptyGuide'
 import './App.css'
 
 export default function App() {
@@ -23,6 +24,8 @@ export default function App() {
   const [sessionJump, setSessionJump] = useState<{ page: number; entryId: number } | null>(null)
   // 设置页（M4 任务四）：Ctrl+, 打开（03 §5）
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // 搜索无结果空态（03 §7.3）：标签快速过滤入口 → 打开工作区首页标签面板并高亮（信号递增触发滚动）
+  const [tagFocusSignal, setTagFocusSignal] = useState(0)
 
   useEffect(() => {
     void load()
@@ -81,6 +84,15 @@ export default function App() {
     setOpenSessionId(sessionId)
   }
 
+  // 搜索无结果空态（03 §7.3）：标签快速过滤入口——回到工作区首页标签面板并聚焦高亮。
+  const handleBrowseTags = () => {
+    setSearchOpen(false)
+    setOpenMindmapId(null)
+    setOpenSessionId(null)
+    if (!open && workspaces.length > 0) setOpen(workspaces[0])
+    setTagFocusSignal((s) => s + 1)
+  }
+
   const handleCreate = async () => {
     const trimmed = name.trim()
     if (!trimmed || creating) return
@@ -108,7 +120,11 @@ export default function App() {
       </header>
 
       {searchOpen && (
-        <SearchOverlay onClose={() => setSearchOpen(false)} onNavigate={handleSearchNavigate} />
+        <SearchOverlay
+          onClose={() => setSearchOpen(false)}
+          onNavigate={handleSearchNavigate}
+          onBrowseTags={handleBrowseTags}
+        />
       )}
 
       {error && (
@@ -146,6 +162,7 @@ export default function App() {
             onOpenMindmap={setOpenMindmapId}
             onOpenSession={setOpenSessionId}
             onOpenSessionEntry={handleOpenSessionEntry}
+            tagFocusSignal={tagFocusSignal}
           />
         ) : (
           <section className="workspace-panel">
@@ -235,17 +252,27 @@ function WorkspaceHome({
   onOpenMindmap,
   onOpenSession,
   onOpenSessionEntry,
+  tagFocusSignal,
 }: {
   ws: Workspace
   onBack: () => void
   onOpenMindmap: (id: number) => void
   onOpenSession: (id: number) => void
   onOpenSessionEntry: (sessionId: number, entryId: number, seq: number) => void
+  /** 搜索无结果「按标签浏览」入口（03 §7.3）：信号递增时滚动聚焦标签面板。 */
+  tagFocusSignal?: number
 }) {
   const [mindmaps, setMindmaps] = useState<Mindmap[]>([])
   const [name, setName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // M4 任务五（03 §7.1）：会话是否为空（SessionSection 加载后上报），与导图空共同决定空态引导；
+  // null = 会话尚未加载完成，此时不展示引导避免闪烁。
+  const [sessionsEmpty, setSessionsEmpty] = useState<boolean | null>(null)
+  const [tagFocusFlash, setTagFocusFlash] = useState(false)
+  const mindmapTitleRef = useRef<HTMLInputElement>(null)
+  const sessionTitleRef = useRef<HTMLInputElement>(null)
+  const tagSectionRef = useRef<HTMLDivElement>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -285,6 +312,18 @@ function WorkspaceHome({
     }
   }
 
+  // 新工作区空态引导（03 §7.1）：导图与会话均为空时，居中引导「新建第一张导图 / 开始第一次会话」。
+  const showEmptyGuide = !loading && sessionsEmpty === true && mindmaps.length === 0
+
+  // 搜索无结果「按标签浏览」入口（03 §7.3）：信号递增 → 滚动到标签面板并闪烁高亮 2s。
+  useEffect(() => {
+    if (tagFocusSignal === undefined || tagFocusSignal === 0) return
+    tagSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setTagFocusFlash(true)
+    const timer = setTimeout(() => setTagFocusFlash(false), 2000)
+    return () => clearTimeout(timer)
+  }, [tagFocusSignal])
+
   return (
     <section className="workspace-panel">
       <button onClick={onBack}>← 返回</button>
@@ -295,12 +334,20 @@ function WorkspaceHome({
         导图 {ws.mindmapCount ?? 0} · 会话 {ws.sessionCount ?? 0}
       </p>
 
+      {showEmptyGuide && (
+        <EmptyGuide
+          workspaceName={ws.name}
+          onNewMindmap={() => mindmapTitleRef.current?.focus()}
+          onNewSession={() => sessionTitleRef.current?.focus()}
+        />
+      )}
+
       <h3>导图</h3>
       {error && <p className="error" role="alert">{error}</p>}
       {loading ? (
         <p className="muted">加载中…</p>
       ) : mindmaps.length === 0 ? (
-        <p className="muted">暂无导图</p>
+        showEmptyGuide ? null : <p className="muted">暂无导图</p>
       ) : (
         <ul className="workspace-list">
           {mindmaps.map((m) => (
@@ -320,6 +367,7 @@ function WorkspaceHome({
 
       <div className="create-form">
         <input
+          ref={mindmapTitleRef}
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="输入导图名称"
@@ -330,10 +378,18 @@ function WorkspaceHome({
       </div>
 
       <h3>会话</h3>
-      <SessionSection ws={ws} onOpenSession={onOpenSession} />
+      <SessionSection
+        ws={ws}
+        onOpenSession={onOpenSession}
+        titleInputRef={sessionTitleRef}
+        onEmptyChange={setSessionsEmpty}
+        suppressEmptyText={showEmptyGuide}
+      />
 
       <h3>标签</h3>
-      <TagSection ws={ws} onOpenSessionEntry={onOpenSessionEntry} />
+      <div ref={tagSectionRef} className={`tag-section-anchor${tagFocusFlash ? ' tag-section-flash' : ''}`}>
+        <TagSection ws={ws} onOpenSessionEntry={onOpenSessionEntry} />
+      </div>
     </section>
   )
 }

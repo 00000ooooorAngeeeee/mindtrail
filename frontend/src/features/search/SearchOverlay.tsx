@@ -32,9 +32,12 @@ const DEBOUNCE_MS = 300
 export function SearchOverlay({
   onClose,
   onNavigate,
+  onBrowseTags,
 }: {
   onClose: () => void
   onNavigate: (target: SearchNavigateTarget) => void
+  /** 无结果空态（03 §7.3）：标签快速过滤入口回调，由 App 跳转到工作区标签面板。 */
+  onBrowseTags?: () => void
 }) {
   const [q, setQ] = useState('')
   const [tab, setTab] = useState<Tab>('all')
@@ -132,7 +135,14 @@ export function SearchOverlay({
             </p>
           )}
           {!loading && !error && results && counts.all === 0 && (
-            <p className="search-hint">未找到，试试其他关键词</p>
+            <div className="search-empty">
+              <p className="search-hint">未找到，试试其他关键词</p>
+              {onBrowseTags && (
+                <button className="search-browse-tags" onClick={onBrowseTags}>
+                  按标签浏览（快速过滤入口）
+                </button>
+              )}
+            </div>
           )}
           {!loading && !error && results && counts.all > 0 && (
             <ul className="search-results">

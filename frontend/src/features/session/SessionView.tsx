@@ -497,7 +497,9 @@ export function SessionView({
           )}
           {gitPanelOpen &&
             (gitCommits.length === 0 ? (
-              <p className="muted">会话期间暂无提交</p>
+              <p className="muted" data-testid="git-panel-empty">
+                尚未检测到提交，先关联仓库或完成一次 git commit（03 §7.2）
+              </p>
             ) : (
               <ul className="git-commit-list">
                 {gitCommits.map((c) => {

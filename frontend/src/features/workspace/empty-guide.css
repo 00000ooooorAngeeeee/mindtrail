@@ -1,0 +1,93 @@
+/* 新工作区空态引导（03 §7.1，M4 任务五）：居中卡片 + 双入口 + 30 秒快速上手 */
+
+.empty-guide {
+  display: flex;
+  justify-content: center;
+  padding: 32px 8px;
+}
+
+.empty-guide-card {
+  max-width: 460px;
+  width: 100%;
+  background: var(--card-soft);
+  border: 1px dashed var(--border-strong);
+  border-radius: 12px;
+  padding: 24px 28px;
+  text-align: center;
+}
+
+.empty-guide-title {
+  margin: 0 0 8px;
+  font-size: 18px;
+  color: var(--text);
+}
+
+.empty-guide-sub {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.empty-guide-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+.empty-guide-btn {
+  padding: 10px 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 150ms ease-out, background 150ms ease-out;
+}
+
+.empty-guide-btn:hover {
+  border-color: var(--brand);
+  background: var(--brand-bg);
+}
+
+.empty-guide-btn.primary {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+
+.empty-guide-btn.primary:hover {
+  opacity: 0.92;
+}
+
+.empty-guide-steps {
+  text-align: left;
+  border-top: 1px solid var(--border-faint);
+  padding-top: 14px;
+}
+
+.empty-guide-steps-title {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.empty-guide-steps ol {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.9;
+}
+
+.empty-guide-steps kbd {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 11px;
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: 4px;
+  padding: 0 4px;
+}

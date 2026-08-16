@@ -97,6 +97,33 @@
   text-align: center;
 }
 
+/* 无结果空态（03 §7.3）：标签快速过滤入口 */
+.search-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 8px;
+}
+
+.search-empty .search-hint {
+  padding: 0;
+}
+
+.search-browse-tags {
+  padding: 8px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--brand-bg);
+  color: var(--brand);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.search-browse-tags:hover {
+  border-color: var(--brand);
+}
+
 .search-results {
   list-style: none;
   margin: 0;

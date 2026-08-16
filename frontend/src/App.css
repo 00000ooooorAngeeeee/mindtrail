@@ -150,3 +150,13 @@
   margin: 16px 0 6px;
   font-size: 14px;
 }
+
+/* 搜索无结果「按标签浏览」入口聚焦（03 §7.3，M4 任务五）：标签面板闪烁 2s */
+.tag-section-anchor {
+  border-radius: 8px;
+  transition: box-shadow 150ms ease-out;
+}
+
+.tag-section-flash {
+  box-shadow: 0 0 0 3px var(--brand-bg), 0 0 0 5px var(--brand);
+}
