@@ -37,6 +37,10 @@ public class Entry {
     @TableField(exist = false)
     private List<String> commitHashes;
 
+    /** 仅请求体字段（PRD C2.5 插入位置）：插入到该 seq 之后（0=最前），缺省=追加末尾；seq 重排由 service 事务内完成。 */
+    @TableField(exist = false)
+    private Integer afterSeq;
+
     public Long getId() {
         return id;
     }
@@ -115,5 +119,13 @@ public class Entry {
 
     public void setCommitHashes(List<String> commitHashes) {
         this.commitHashes = commitHashes;
+    }
+
+    public Integer getAfterSeq() {
+        return afterSeq;
+    }
+
+    public void setAfterSeq(Integer afterSeq) {
+        this.afterSeq = afterSeq;
     }
 }

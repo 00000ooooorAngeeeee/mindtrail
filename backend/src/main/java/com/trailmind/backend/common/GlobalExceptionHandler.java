@@ -1,5 +1,6 @@
 package com.trailmind.backend.common;
 
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -12,6 +13,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BadRequestException.class)
     public ApiResponse<Void> handleBadRequest(BadRequestException e) {
         return ApiResponse.error(400, e.getMessage());
+    }
+
+    /** 请求体不可读（JSON 语法错误 / 字段类型不匹配，如补记时间格式非法）→ 400 而非 500（C2.4 校验链路）。 */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ApiResponse<Void> handleNotReadable(HttpMessageNotReadableException e) {
+        return ApiResponse.error(400, "请求体格式错误：" + e.getMostSpecificCause().getMessage());
     }
 
     @ExceptionHandler(NotFoundException.class)

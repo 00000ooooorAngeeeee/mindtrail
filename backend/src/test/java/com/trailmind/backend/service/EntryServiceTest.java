@@ -25,6 +25,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -32,8 +33,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 条目服务单测（docs/07 §6 任务一 + 任务三）：seq 事务分配（05 §5 MAX(seq)+1）、类型枚举校验、
- * 已结束会话仅可追加 review/note、编辑与标签重建、级联删除、分页标签/提交回填、
+ * 条目服务单测（docs/07 §6 任务一 + 任务三 + v1.1 C2.4/C2.5）：seq 事务分配（05 §5 MAX(seq)+1）、
+ * 插入位置（afterSeq 重排：中间/最前/末尾等价/非法 400，PRD C2.5）、补记时间（createdAt 追加与编辑，PRD C2.4）、
+ * 类型枚举校验、已结束会话仅可追加 review/note、编辑与标签重建、级联删除、分页标签/提交回填、
  * 绑定/解绑（hash 格式校验、仓库存在性校验、幂等去重、会话无仓库拒绝）。
  */
 @ExtendWith(MockitoExtension.class)
@@ -273,6 +275,122 @@ class EntryServiceTest {
         service.page(7L, 3, 75);
 
         verify(entryMapper).listBySession(7L, 150, 75);
+    }
+
+    // ---------- 插入位置与补记时间（v1.1 P1，PRD C2.5 / C2.4） ----------
+
+    /** 捕获 insert 参数并回填自增 id 的 Answer。 */
+    private org.mockito.stubbing.Answer<Integer> insertWithId(Long id) {
+        return inv -> {
+            ((Entry) inv.getArgument(0)).setId(id);
+            return 1;
+        };
+    }
+
+    private void mockActiveSession() {
+        when(sessionMapper.selectById(7L)).thenReturn(session("active"));
+    }
+
+    @Test
+    void add_insert_after_seq_shifts_subsequent_entries() {
+        mockActiveSession();
+        when(entryMapper.maxSeq(7L)).thenReturn(3);
+        org.mockito.Mockito.doAnswer(insertWithId(9L)).when(entryMapper).insert(any(Entry.class));
+
+        Entry e = service.add(7L, "test", "插入的验证", List.of(), List.of(), 1, null);
+
+        assertEquals(2, e.getSeq()); // 插入到 seq 1 之后 → 新条目 seq=2
+        verify(entryMapper).shiftSeq(7L, 1); // 原 seq 2/3 → 3/4
+        verify(entryMapper).insert(any(Entry.class));
+    }
+
+    @Test
+    void add_insert_at_top_shifts_all_entries() {
+        mockActiveSession();
+        when(entryMapper.maxSeq(7L)).thenReturn(3);
+        org.mockito.Mockito.doAnswer(insertWithId(9L)).when(entryMapper).insert(any(Entry.class));
+
+        Entry e = service.add(7L, "note", "补在最前", List.of(), List.of(), 0, null);
+
+        assertEquals(1, e.getSeq()); // afterSeq=0 → 最前
+        verify(entryMapper).shiftSeq(7L, 0);
+    }
+
+    @Test
+    void add_insert_after_last_is_append_equivalent() {
+        mockActiveSession();
+        when(entryMapper.maxSeq(7L)).thenReturn(3);
+
+        Entry e = service.add(7L, "note", "末尾插入", List.of(), List.of(), 3, null);
+
+        assertEquals(4, e.getSeq()); // afterSeq == max → 追加效果
+        verify(entryMapper).shiftSeq(7L, 3); // 无 seq>3 的条目，重排为空操作
+        verify(entryMapper, never()).nextSeq(anyLong());
+    }
+
+    @Test
+    void add_insert_invalid_after_seq_throws_without_mutation() {
+        mockActiveSession();
+        when(entryMapper.maxSeq(7L)).thenReturn(3);
+
+        assertThrows(BadRequestException.class, () -> service.add(7L, "note", "x", null, List.of(), -1, null));
+        assertThrows(BadRequestException.class, () -> service.add(7L, "note", "x", null, List.of(), 5, null));
+
+        verify(entryMapper, never()).shiftSeq(anyLong(), anyInt());
+        verify(entryMapper, never()).insert(any(Entry.class));
+    }
+
+    @Test
+    void add_with_created_at_backfills_time() {
+        mockActiveSession();
+        when(entryMapper.nextSeq(7L)).thenReturn(4);
+        org.mockito.Mockito.doAnswer(insertWithId(9L)).when(entryMapper).insert(any(Entry.class));
+
+        Entry e = service.add(7L, "action", "补录动作", List.of(), List.of(), null,
+                java.time.LocalDateTime.of(2026, 1, 2, 3, 4, 5));
+
+        assertEquals(java.time.LocalDateTime.of(2026, 1, 2, 3, 4, 5), e.getCreatedAt());
+    }
+
+    @Test
+    void add_without_created_at_keeps_null_for_db_default() {
+        mockActiveSession();
+        when(entryMapper.nextSeq(7L)).thenReturn(1);
+        org.mockito.Mockito.doAnswer(insertWithId(9L)).when(entryMapper).insert(any(Entry.class));
+
+        Entry e = service.add(7L, "goal", "目标", null, List.of());
+
+        assertEquals(null, e.getCreatedAt()); // 入库走 DEFAULT CURRENT_TIMESTAMP
+    }
+
+    @Test
+    void update_with_created_at_backfills_time() {
+        Entry e = new Entry();
+        e.setId(5L);
+        e.setSessionId(7L);
+        e.setContentMd("旧内容");
+        when(entryMapper.selectById(5L)).thenReturn(e);
+        when(entryTagMapper.selectNamesByEntry(5L)).thenReturn(List.of());
+
+        Entry updated = service.update(5L, null, null, null, java.time.LocalDateTime.of(2026, 2, 3, 4, 5, 6));
+
+        assertEquals(java.time.LocalDateTime.of(2026, 2, 3, 4, 5, 6), updated.getCreatedAt());
+        verify(entryMapper).updateById(e);
+    }
+
+    @Test
+    void update_without_created_at_keeps_original_time() {
+        Entry e = new Entry();
+        e.setId(5L);
+        e.setSessionId(7L);
+        e.setCreatedAt(java.time.LocalDateTime.of(2026, 1, 1, 0, 0, 0));
+        when(entryMapper.selectById(5L)).thenReturn(e);
+        when(entryTagMapper.selectNamesByEntry(5L)).thenReturn(List.of());
+
+        Entry updated = service.update(5L, "新内容", null, null);
+
+        assertEquals(java.time.LocalDateTime.of(2026, 1, 1, 0, 0, 0), updated.getCreatedAt()); // 未传 createdAt 不改时间
+        verify(entryMapper).updateById(e);
     }
 
     // ---------- Git 绑定（M3 任务三） ----------

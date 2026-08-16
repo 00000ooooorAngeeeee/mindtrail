@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
 import java.time.LocalDateTime;
@@ -20,6 +21,13 @@ public interface EntryMapper extends BaseMapper<Entry> {
 
     @Select("SELECT COALESCE(MAX(seq), 0) + 1 FROM entry WHERE session_id = #{sessionId}")
     Integer nextSeq(@Param("sessionId") Long sessionId);
+
+    @Select("SELECT COALESCE(MAX(seq), 0) FROM entry WHERE session_id = #{sessionId}")
+    Integer maxSeq(@Param("sessionId") Long sessionId);
+
+    /** 插入条目（PRD C2.5）：afterSeq 之后全部条目 seq +1（seq 重排）。事务内调用；降序更新避免中间态与索引顺序抖动。 */
+    @Update("UPDATE entry SET seq = seq + 1 WHERE session_id = #{sessionId} AND seq > #{afterSeq} ORDER BY seq DESC")
+    int shiftSeq(@Param("sessionId") Long sessionId, @Param("afterSeq") int afterSeq);
 
     @Select("SELECT id, session_id, seq, type, content_md, created_at, updated_at " +
             "FROM entry WHERE session_id = #{sessionId} ORDER BY seq ASC LIMIT #{limit} OFFSET #{offset}")

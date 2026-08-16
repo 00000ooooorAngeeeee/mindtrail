@@ -76,6 +76,17 @@ public class EntryService {
 
     @Transactional
     public Entry add(Long sessionId, String type, String contentMd, List<String> tags, List<String> commitHashes) {
+        return add(sessionId, type, contentMd, tags, commitHashes, null, null);
+    }
+
+    /**
+     * 追加条目（04 §5 POST /sessions/{id}/entries）。
+     * afterSeq（PRD C2.5 插入位置）：非空时插入到该 seq 之后（0=最前，须 ≤ 会话内最大 seq），其后条目 seq +1 重排；
+     * 缺省追加末尾（MAX(seq)+1，05 §5）。createdAt（PRD C2.4 补记时间）：非空时手动指定创建时间（精确到秒），缺省当前时间。
+     */
+    @Transactional
+    public Entry add(Long sessionId, String type, String contentMd, List<String> tags, List<String> commitHashes,
+                     Integer afterSeq, LocalDateTime createdAt) {
         Session session = requireSession(sessionId);
         String t = validateType(type);
         if ("completed".equals(session.getStatus()) && !POST_COMPLETE_TYPES.contains(t)) {
@@ -86,9 +97,10 @@ public class EntryService {
 
         Entry e = new Entry();
         e.setSessionId(sessionId);
-        e.setSeq(entryMapper.nextSeq(sessionId)); // 事务内 MAX(seq)+1，保证时间线顺序（05 §5）
+        e.setSeq(resolveSeq(sessionId, afterSeq)); // 事务内分配：追加 MAX(seq)+1 / 插入 afterSeq+1 并重排（05 §5）
         e.setType(t);
         e.setContentMd(content);
+        e.setCreatedAt(createdAt); // C2.4 补记时间（可空：入库走 DEFAULT CURRENT_TIMESTAMP）
         entryMapper.insert(e);
         linkTags(e.getId(), session.getWorkspaceId(), names);
         if (commitHashes != null && !commitHashes.isEmpty()) {
@@ -98,8 +110,30 @@ public class EntryService {
         return e;
     }
 
+    /** 解析 seq：缺省追加末尾；afterSeq 非空时校验范围（0 ≤ afterSeq ≤ 最大 seq）并重排其后条目（PRD C2.5）。 */
+    private int resolveSeq(Long sessionId, Integer afterSeq) {
+        if (afterSeq == null) {
+            return entryMapper.nextSeq(sessionId); // 追加：MAX(seq)+1
+        }
+        if (afterSeq < 0) {
+            throw new BadRequestException("插入位置无效：afterSeq 不能为负数");
+        }
+        int max = entryMapper.maxSeq(sessionId);
+        if (afterSeq > max) {
+            throw new BadRequestException("插入位置无效：会话内最大序号为 " + max);
+        }
+        entryMapper.shiftSeq(sessionId, afterSeq); // 其后条目 seq+1（降序更新，无唯一约束冲突）
+        return afterSeq + 1;
+    }
+
     @Transactional
     public Entry update(Long entryId, String contentMd, String type, List<String> tags) {
+        return update(entryId, contentMd, type, tags, null);
+    }
+
+    /** 编辑条目（04 §5 PUT /entries/{id}）；createdAt 为 PRD C2.4 补记时间（非空时重写创建时间，精确到秒）。 */
+    @Transactional
+    public Entry update(Long entryId, String contentMd, String type, List<String> tags, LocalDateTime createdAt) {
         Entry e = entryMapper.selectById(entryId);
         if (e == null) {
             throw new NotFoundException("条目不存在");
@@ -113,6 +147,9 @@ public class EntryService {
         if (tags != null) {
             Session session = requireSession(e.getSessionId());
             linkTags(entryId, session.getWorkspaceId(), normalizeTags(tags));
+        }
+        if (createdAt != null) {
+            e.setCreatedAt(createdAt); // C2.4 补记时间（updated_at 由 DB ON UPDATE 推进）
         }
         entryMapper.updateById(e);
         e.setTags(entryTagMapper.selectNamesByEntry(entryId));

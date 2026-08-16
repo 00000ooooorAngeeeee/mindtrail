@@ -16,8 +16,9 @@ import java.util.List;
 
 /**
  * 时间线条目接口（04 §5 契约）：
- * POST /sessions/{id}/entries 追加（type/contentMd/tags/commitHashes，seq 事务分配）、
- * PUT /entries/{id} 编辑（MVP 仅 contentMd/type/tags）、DELETE /entries/{id}（级联关联表）、
+ * POST /sessions/{id}/entries 追加（type/contentMd/tags/commitHashes，seq 事务分配；
+ * 可选 afterSeq 插入到指定 seq 之后（PRD C2.5）、createdAt 补记时间（PRD C2.4））、
+ * PUT /entries/{id} 编辑（contentMd/type/tags/createdAt）、DELETE /entries/{id}（级联关联表）、
  * Git 绑定（M3 任务三）：POST /entries/{id}/commits 绑定、DELETE /entries/{id}/commits/{hash} 解绑、
  * GET /sessions/{id}/commits 会话绑定列表（Git 面板与未绑定缓冲计算）。
  */
@@ -33,12 +34,14 @@ public class EntryController {
 
     @PostMapping("/sessions/{sessionId}/entries")
     public ApiResponse<Entry> add(@PathVariable Long sessionId, @RequestBody Entry req) {
-        return ApiResponse.ok(service.add(sessionId, req.getType(), req.getContentMd(), req.getTags(), req.getCommitHashes()));
+        // afterSeq（C2.5 插入位置）/ createdAt（C2.4 补记时间）为可选请求字段，缺省保持追加末尾 + 当前时间
+        return ApiResponse.ok(service.add(sessionId, req.getType(), req.getContentMd(), req.getTags(),
+                req.getCommitHashes(), req.getAfterSeq(), req.getCreatedAt()));
     }
 
     @PutMapping("/entries/{id}")
     public ApiResponse<Entry> update(@PathVariable Long id, @RequestBody Entry req) {
-        return ApiResponse.ok(service.update(id, req.getContentMd(), req.getType(), req.getTags()));
+        return ApiResponse.ok(service.update(id, req.getContentMd(), req.getType(), req.getTags(), req.getCreatedAt()));
     }
 
     @DeleteMapping("/entries/{id}")
