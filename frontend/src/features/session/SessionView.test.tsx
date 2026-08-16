@@ -294,7 +294,7 @@ describe('SessionView 会话详情页（时间线条目）', () => {
     expect(screen.getByText('feat: 第二个提交')).toBeInTheDocument()
   })
 
-  it('Git 面板空态：无提交显示空态引导（PRD C3.6）', async () => {
+  it('Git 面板空态：无提交显示空态引导（PRD C3.6 + 03 §7.2）', async () => {
     getMock.mockResolvedValue(gitSession())
     getCommitsMock.mockResolvedValueOnce([])
     getSessionCommitsMock.mockResolvedValueOnce([])
@@ -303,7 +303,7 @@ describe('SessionView 会话详情页（时间线条目）', () => {
 
     fireEvent.click(screen.getByText(/Git 时间线（0 个提交）/))
 
-    expect(await screen.findByText('会话期间暂无提交')).toBeInTheDocument()
+    expect(await screen.findByText(/尚未检测到提交，先关联仓库或完成一次 git commit/)).toBeInTheDocument()
   })
 
   it('5s 轮询发现新提交 → 建议卡片 → 一键绑定到最近条目并显示徽标', async () => {

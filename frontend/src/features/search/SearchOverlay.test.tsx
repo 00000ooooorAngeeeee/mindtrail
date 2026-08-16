@@ -54,8 +54,8 @@ describe('SearchOverlay 全局搜索浮层', () => {
     searchMock.mockResolvedValue(results)
   })
 
-  const open = (onNavigate: (t: SearchNavigateTarget) => void = vi.fn(), onClose = vi.fn()) =>
-    render(<SearchOverlay onClose={onClose} onNavigate={onNavigate} />)
+  const open = (onNavigate: (t: SearchNavigateTarget) => void = vi.fn(), onClose = vi.fn(), onBrowseTags = vi.fn()) =>
+    render(<SearchOverlay onClose={onClose} onNavigate={onNavigate} onBrowseTags={onBrowseTags} />)
 
   it('输入关键词防抖 300ms 后调用搜索接口', async () => {
     vi.useFakeTimers()
@@ -113,12 +113,15 @@ describe('SearchOverlay 全局搜索浮层', () => {
     vi.useRealTimers()
   })
 
-  it('无结果显示空态提示', async () => {
+  it('无结果显示空态提示与标签快速过滤入口（03 §7.3）', async () => {
+    const onBrowseTags = vi.fn()
     searchMock.mockResolvedValue({ query: 'x', mindmaps: [], entries: [], sessions: [] })
-    open()
+    open(vi.fn(), vi.fn(), onBrowseTags)
     fireEvent.change(screen.getByLabelText('搜索关键词'), { target: { value: '不存在词' } })
 
     expect(await screen.findByText('未找到，试试其他关键词')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /按标签浏览/ }))
+    expect(onBrowseTags).toHaveBeenCalledTimes(1)
   })
 
   it('Esc 关闭浮层', async () => {
