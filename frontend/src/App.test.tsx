@@ -8,6 +8,7 @@ import { createSession, deleteSession, getSession, listSessions } from './api/se
 import { listTags } from './api/tags'
 import { fetchSettings } from './api/settings'
 import { searchGlobal } from './api/search'
+import type { Session } from './api/types'
 
 vi.mock('./api/health', () => ({ fetchHealth: vi.fn() }))
 vi.mock('./api/workspaces', () => ({
@@ -290,6 +291,51 @@ describe('App 首页', () => {
 
     expect(await screen.findByText('目标内容')).toBeInTheDocument()
     expect(within(screen.getByRole('list')).getByText('目标')).toBeInTheDocument()
+  })
+
+  it('多会话并行视图：打开第二个会话保留标签，标签切换状态互不丢失（v1.1 P1）', async () => {
+    const sessionOf = (id: number, title: string, content: string): Session => ({
+      id,
+      title,
+      status: 'active',
+      entryTotal: 1,
+      startedAt: '2025-06-01T09:00:00',
+      endedAt: null,
+      entries: [{ id: id * 10, sessionId: id, seq: 1, type: 'goal', contentMd: content, tags: [], createdAt: '2025-06-01T09:02:00' }],
+    })
+    workspacesMock.mockResolvedValue([ws])
+    listSessionsMock.mockResolvedValue([
+      { id: 7, title: '会话A', status: 'active', entryCount: 1, startedAt: '2025-06-01T09:00:00' },
+      { id: 8, title: '会话B', status: 'active', entryCount: 1, startedAt: '2025-06-01T10:00:00' },
+    ])
+    getSessionMock.mockImplementation(async (id: number) => sessionOf(id, id === 7 ? '会话A' : '会话B', id === 7 ? '内容A' : '内容B'))
+    render(<App />)
+
+    // 打开会话A → 标签「会话A」出现，内容A 可见
+    fireEvent.click(await screen.findByText('项目A'))
+    fireEvent.click(await screen.findByText('会话A'))
+    expect(await screen.findByRole('tab', { name: /会话A/ })).toBeInTheDocument()
+    expect(await screen.findByText('内容A')).toBeVisible()
+
+    // 「＋」回工作区（标签保留）→ 打开会话B → 两个标签，内容B 可见、内容A 隐藏但状态保留
+    fireEvent.click(screen.getByRole('button', { name: '打开更多会话' }))
+    expect(await screen.findByText('会话B')).toBeInTheDocument() // 回到工作区会话列表
+    fireEvent.click(screen.getByText('会话B'))
+    expect(await screen.findByText('内容B')).toBeVisible()
+    expect(screen.getByText('内容A')).not.toBeVisible() // display:none 保留挂载状态
+
+    // 切回会话A → 内容A 恢复可见
+    fireEvent.click(screen.getByRole('tab', { name: /会话A/ }))
+    expect(screen.getByText('内容A')).toBeVisible()
+    expect(screen.getByText('内容B')).not.toBeVisible()
+
+    // 关闭激活的会话A → 自动切到会话B；再点 ← 返回 → 回工作区
+    fireEvent.click(screen.getByRole('button', { name: '关闭 会话A' }))
+    expect(screen.getByText('内容B')).toBeVisible()
+    expect(screen.queryByRole('tab', { name: /会话A/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText('← 返回'))
+    expect(await screen.findByText('会话B')).toBeInTheDocument() // 工作区列表
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
   })
 
   it('Ctrl+, 打开设置页并可返回（M4 任务四）', async () => {

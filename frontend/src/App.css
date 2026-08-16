@@ -44,6 +44,84 @@
   margin-bottom: 16px;
 }
 
+/* 多会话并行视图（v1.1 P1）：会话标签栏 */
+.session-tabs-area {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.session-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.session-tab {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card-soft);
+  overflow: hidden;
+}
+
+.session-tab.active {
+  border-color: var(--brand);
+  background: var(--brand-bg);
+}
+
+.session-tab-title {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  padding: 5px 4px 5px 10px;
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.session-tab.active .session-tab-title {
+  color: var(--brand);
+  font-weight: 600;
+}
+
+.session-tab-close {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.session-tab-close:hover {
+  color: var(--danger);
+}
+
+.session-tab-new {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 15px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.session-tab-new:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+.session-tab-pane {
+  min-height: 0;
+}
+
 .workspace-panel {
   background: var(--card);
   border-radius: 12px;

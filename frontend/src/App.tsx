@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppStore } from './store/useAppStore'
 import { useSettingsStore } from './store/useSettingsStore'
 import { createMindmap, deleteMindmap, listMindmaps, renameMindmap } from './api/mindmaps'
+import { getSession } from './api/sessions'
 import type { Mindmap, Workspace } from './api/types'
 import { MindMapEditor } from './features/mindmap/MindMapEditor'
 import { SessionSection } from './features/session/SessionSection'
@@ -12,16 +13,29 @@ import { TagSection } from './features/tag/TagSection'
 import { EmptyGuide } from './features/workspace/EmptyGuide'
 import './App.css'
 
+/** 多会话并行视图（v1.1 P1）标签：会话 + 跳转定位参数（打开瞬间有效）。 */
+interface SessionTab {
+  sessionId: number
+  title: string
+  /** 搜索/标签跳转：初始加载页（按 seq 估算）。 */
+  page?: number
+  /** 搜索/标签跳转：加载后闪烁定位的条目 id。 */
+  entryId?: number
+}
+
 export default function App() {
   const { health, workspaces, loading, creating, error, load, create, rename, remove } = useAppStore()
   const [name, setName] = useState('')
   const [open, setOpen] = useState<Workspace | null>(null)
   const [openMindmapId, setOpenMindmapId] = useState<number | null>(null)
-  const [openSessionId, setOpenSessionId] = useState<number | null>(null)
+  // 多会话并行视图（v1.1 P1）：打开的会话标签列表（全部挂载保留状态，激活的可见）+ 激活会话
+  const [sessionTabs, setSessionTabs] = useState<SessionTab[]>([])
+  const [activeSessionId, setActiveSessionId] = useState<number | null>(null)
+  // 标签栏「＋」：回工作区继续打开其它会话（标签保留）；再次打开/跳转会话时回到标签视图
+  const [browseSessions, setBrowseSessions] = useState(false)
   // 全局搜索（M4 任务一）：浮层开关 + 跳转定位信息（导图命中节点 / 条目所在页与条目 id）
   const [searchOpen, setSearchOpen] = useState(false)
   const [mindmapHighlight, setMindmapHighlight] = useState<string | null>(null)
-  const [sessionJump, setSessionJump] = useState<{ page: number; entryId: number } | null>(null)
   // 设置页（M4 任务四）：Ctrl+, 打开（03 §5）
   const [settingsOpen, setSettingsOpen] = useState(false)
   // 搜索无结果空态（03 §7.3）：标签快速过滤入口 → 打开工作区首页标签面板并高亮（信号递增触发滚动）
@@ -61,34 +75,27 @@ export default function App() {
     setSearchOpen(false)
     setOpen(workspaces.find((w) => w.id === t.workspaceId) ?? null)
     setMindmapHighlight(null)
-    setSessionJump(null)
     if (t.kind === 'mindmap') {
-      setOpenSessionId(null)
+      closeAllSessionTabs()
       setMindmapHighlight(t.nodeId)
       setOpenMindmapId(t.mindmapId)
     } else if (t.kind === 'entry') {
-      setOpenMindmapId(null)
       // 条目按 seq 分页：估算目标条目所在页（删除造成的 seq 空洞可能偏移，未命中时静默忽略）
-      setSessionJump({ page: Math.floor((t.seq - 1) / PAGE_SIZE) + 1, entryId: t.entryId })
-      setOpenSessionId(t.sessionId)
+      openSessionTab(t.sessionId, { page: Math.floor((t.seq - 1) / PAGE_SIZE) + 1, entryId: t.entryId })
     } else {
-      setOpenMindmapId(null)
-      setOpenSessionId(t.sessionId)
+      openSessionTab(t.sessionId)
     }
   }
 
   // 标签过滤条目跳转（M4 任务二，PRD D2 同款定位：seq 估算分页 + 闪烁）。
   const handleOpenSessionEntry = (sessionId: number, entryId: number, seq: number) => {
-    setOpenMindmapId(null)
-    setSessionJump({ page: Math.floor((seq - 1) / PAGE_SIZE) + 1, entryId })
-    setOpenSessionId(sessionId)
+    openSessionTab(sessionId, { page: Math.floor((seq - 1) / PAGE_SIZE) + 1, entryId })
   }
 
   // 联动（v1.1 P1）：条目引用节点 chip 点击 → 打开导图并定位节点（复用 PRD D2 高亮闪烁机制）。
   const handleOpenMindmapNode = (workspaceId: number, mindmapId: number, nodeId: string) => {
     setOpen(workspaces.find((w) => w.id === workspaceId) ?? null)
-    setOpenSessionId(null)
-    setSessionJump(null)
+    closeAllSessionTabs()
     setMindmapHighlight(nodeId)
     setOpenMindmapId(mindmapId)
   }
@@ -97,9 +104,59 @@ export default function App() {
   const handleBrowseTags = () => {
     setSearchOpen(false)
     setOpenMindmapId(null)
-    setOpenSessionId(null)
+    closeAllSessionTabs()
     if (!open && workspaces.length > 0) setOpen(workspaces[0])
     setTagFocusSignal((s) => s + 1)
+  }
+
+  /**
+   * 打开（或激活）会话标签（v1.1 P1 多会话并行视图）：
+   * 已打开 → 仅激活并更新跳转定位；首次打开 → 追加标签（标题先占位，轻量 GET 拉取后回填）。
+   */
+  const openSessionTab = (sessionId: number, jump?: { page?: number; entryId?: number }) => {
+    setOpenMindmapId(null)
+    setBrowseSessions(false) // 打开/跳转会话 → 回到标签视图
+    setActiveSessionId(sessionId)
+    const isNew = !sessionTabs.some((t) => t.sessionId === sessionId)
+    setSessionTabs((prev) =>
+      isNew
+        ? [...prev, { sessionId, title: `会话 #${sessionId}`, page: jump?.page, entryId: jump?.entryId }]
+        : prev.map((t) =>
+            t.sessionId === sessionId
+              ? { ...t, page: jump?.page ?? t.page, entryId: jump?.entryId ?? t.entryId }
+              : t,
+          ),
+    )
+    if (isNew) {
+      getSession(sessionId, 1, 1) // size=1 仅取标题（会话详情首屏由 SessionView 自己拉）
+        .then((s) => {
+          setSessionTabs((cur) => cur.map((t) => (t.sessionId === sessionId ? { ...t, title: s.title } : t)))
+        })
+        .catch(() => {
+          /* 标题拉取失败保留占位标题 */
+        })
+    }
+  }
+
+  /** 关闭会话标签：关闭的是激活标签时切回前一个（无剩余则回工作区）。 */
+  const closeSessionTab = (sessionId: number) => {
+    const next = sessionTabs.filter((t) => t.sessionId !== sessionId)
+    setSessionTabs(next)
+    if (activeSessionId === sessionId) {
+      if (next.length === 0) {
+        setActiveSessionId(null)
+      } else {
+        const idx = sessionTabs.findIndex((t) => t.sessionId === sessionId)
+        setActiveSessionId(next[Math.max(0, idx - 1)].sessionId)
+      }
+    }
+  }
+
+  /** 关闭全部会话标签（进入导图/搜索入口时调用）。 */
+  const closeAllSessionTabs = () => {
+    setSessionTabs([])
+    setActiveSessionId(null)
+    setBrowseSessions(false)
   }
 
   const handleCreate = async () => {
@@ -155,23 +212,66 @@ export default function App() {
               setMindmapHighlight(null)
             }}
           />
-        ) : openSessionId != null ? (
-          <SessionView
-            sessionId={openSessionId}
-            initialPage={sessionJump?.page}
-            initialHighlightEntryId={sessionJump?.entryId}
-            onOpenMindmapNode={handleOpenMindmapNode}
-            onBack={() => {
-              setOpenSessionId(null)
-              setSessionJump(null)
-            }}
-          />
+        ) : sessionTabs.length > 0 && !browseSessions ? (
+          /* 多会话并行视图（v1.1 P1）：标签栏 + 全部标签挂载（非激活 display:none 保留状态） */
+          <div className="session-tabs-area">
+            <div className="session-tabs" role="tablist" aria-label="打开的会话">
+              {sessionTabs.map((t) => (
+                <div
+                  key={t.sessionId}
+                  className={`session-tab${t.sessionId === activeSessionId ? ' active' : ''}`}
+                >
+                  <button
+                    role="tab"
+                    aria-label={t.title}
+                    aria-selected={t.sessionId === activeSessionId}
+                    className="session-tab-title"
+                    title={t.title}
+                    onClick={() => setActiveSessionId(t.sessionId)}
+                  >
+                    {t.title}
+                  </button>
+                  <button
+                    className="session-tab-close"
+                    aria-label={`关闭 ${t.title}`}
+                    onClick={() => closeSessionTab(t.sessionId)}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              {/* 「＋」回工作区继续打开其它会话（标签保留） */}
+              <button
+                className="session-tab-new"
+                aria-label="打开更多会话"
+                onClick={() => setBrowseSessions(true)}
+              >
+                ＋
+              </button>
+            </div>
+            {sessionTabs.map((t) => (
+              <div
+                key={t.sessionId}
+                role="tabpanel"
+                className="session-tab-pane"
+                style={{ display: t.sessionId === activeSessionId ? undefined : 'none' }}
+              >
+                <SessionView
+                  sessionId={t.sessionId}
+                  initialPage={t.page}
+                  initialHighlightEntryId={t.entryId}
+                  onOpenMindmapNode={handleOpenMindmapNode}
+                  onBack={() => closeSessionTab(t.sessionId)}
+                />
+              </div>
+            ))}
+          </div>
         ) : open ? (
           <WorkspaceHome
             ws={open}
             onBack={() => setOpen(null)}
             onOpenMindmap={setOpenMindmapId}
-            onOpenSession={setOpenSessionId}
+            onOpenSession={(id) => openSessionTab(id)}
             onOpenSessionEntry={handleOpenSessionEntry}
             tagFocusSignal={tagFocusSignal}
           />
