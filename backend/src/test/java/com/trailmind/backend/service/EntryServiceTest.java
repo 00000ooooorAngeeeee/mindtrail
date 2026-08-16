@@ -11,6 +11,7 @@ import com.trailmind.backend.git.GitRepoService;
 import com.trailmind.backend.repository.EntryCommitMapper;
 import com.trailmind.backend.repository.EntryMapper;
 import com.trailmind.backend.repository.EntryTagMapper;
+import com.trailmind.backend.repository.NodeEntryMapper;
 import com.trailmind.backend.repository.SessionMapper;
 import com.trailmind.backend.repository.TagMapper;
 import org.junit.jupiter.api.Test;
@@ -51,6 +52,8 @@ class EntryServiceTest {
     private EntryTagMapper entryTagMapper;
     @Mock
     private EntryCommitMapper entryCommitMapper;
+    @Mock
+    private NodeEntryMapper nodeEntryMapper;
     @Mock
     private GitRepoService gitRepoService;
 
@@ -213,6 +216,7 @@ class EntryServiceTest {
 
         verify(entryMapper).deleteEntryTagsByEntry(5L);
         verify(entryMapper).deleteEntryCommitsByEntry(5L);
+        verify(nodeEntryMapper).deleteByEntry(5L); // v1.1 联动级联：条目删除清其节点引用
         verify(entryMapper).deleteById(5L);
     }
 

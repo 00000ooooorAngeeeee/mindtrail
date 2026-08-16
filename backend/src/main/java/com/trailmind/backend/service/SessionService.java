@@ -7,6 +7,7 @@ import com.trailmind.backend.entity.Session;
 import com.trailmind.backend.entity.Workspace;
 import com.trailmind.backend.git.GitHeadReader;
 import com.trailmind.backend.repository.EntryMapper;
+import com.trailmind.backend.repository.NodeEntryMapper;
 import com.trailmind.backend.repository.SessionMapper;
 import com.trailmind.backend.repository.WorkspaceMapper;
 import org.springframework.stereotype.Service;
@@ -28,16 +29,19 @@ public class SessionService {
     private final SessionMapper sessionMapper;
     private final WorkspaceMapper workspaceMapper;
     private final EntryMapper entryMapper;
+    private final NodeEntryMapper nodeEntryMapper;
     private final EntryService entryService;
     private final GitHeadReader gitHeadReader;
     private final SettingsService settingsService;
 
     public SessionService(SessionMapper sessionMapper, WorkspaceMapper workspaceMapper,
-                          EntryMapper entryMapper, EntryService entryService, GitHeadReader gitHeadReader,
+                          EntryMapper entryMapper, NodeEntryMapper nodeEntryMapper,
+                          EntryService entryService, GitHeadReader gitHeadReader,
                           SettingsService settingsService) {
         this.sessionMapper = sessionMapper;
         this.workspaceMapper = workspaceMapper;
         this.entryMapper = entryMapper;
+        this.nodeEntryMapper = nodeEntryMapper;
         this.entryService = entryService;
         this.gitHeadReader = gitHeadReader;
         this.settingsService = settingsService;
@@ -122,6 +126,7 @@ public class SessionService {
         // 子先于父：关联表 → 条目 → 会话（无物理外键，service 层显式处理，05 §3）
         entryMapper.deleteEntryTagsBySession(id);
         entryMapper.deleteEntryCommitsBySession(id);
+        nodeEntryMapper.deleteBySession(id); // v1.1 联动：会话删除级联清理其条目全部节点引用
         entryMapper.deleteBySession(id);
         sessionMapper.deleteById(id);
     }

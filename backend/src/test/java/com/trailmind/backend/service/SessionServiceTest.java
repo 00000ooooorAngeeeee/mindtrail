@@ -8,6 +8,7 @@ import com.trailmind.backend.entity.Session;
 import com.trailmind.backend.entity.Workspace;
 import com.trailmind.backend.git.GitHeadReader;
 import com.trailmind.backend.repository.EntryMapper;
+import com.trailmind.backend.repository.NodeEntryMapper;
 import com.trailmind.backend.repository.SessionMapper;
 import com.trailmind.backend.repository.WorkspaceMapper;
 import org.junit.jupiter.api.Test;
@@ -44,6 +45,8 @@ class SessionServiceTest {
     private WorkspaceMapper workspaceMapper;
     @Mock
     private EntryMapper entryMapper;
+    @Mock
+    private NodeEntryMapper nodeEntryMapper;
     @Mock
     private EntryService entryService;
     @Mock
@@ -252,6 +255,7 @@ class SessionServiceTest {
         // 级联顺序：关联表 → 条目 → 会话本身（05 §3 service 层显式处理）
         verify(entryMapper).deleteEntryTagsBySession(10L);
         verify(entryMapper).deleteEntryCommitsBySession(10L);
+        verify(nodeEntryMapper).deleteBySession(10L); // v1.1 联动级联：会话删除清其条目全部节点引用
         verify(entryMapper).deleteBySession(10L);
         verify(sessionMapper).deleteById(10L);
     }

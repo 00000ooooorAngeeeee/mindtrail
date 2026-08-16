@@ -60,6 +60,7 @@ public class WorkspaceService {
         // 子先于父：先清关联表，再清业务表，最后删工作区
         mapper.deleteEntryTagsByWorkspace(id);
         mapper.deleteEntryCommitsByWorkspace(id);
+        mapper.deleteNodeEntriesByWorkspace(id); // v1.1 联动：导图/条目两侧挂接一并清理
         mapper.deleteEntriesByWorkspace(id);
         mapper.deleteSessionsByWorkspace(id);
         mapper.deleteMindmapsByWorkspace(id);

@@ -6,6 +6,7 @@ import com.trailmind.backend.common.NotFoundException;
 import com.trailmind.backend.entity.Mindmap;
 import com.trailmind.backend.entity.Workspace;
 import com.trailmind.backend.repository.MindmapMapper;
+import com.trailmind.backend.repository.NodeEntryMapper;
 import com.trailmind.backend.repository.WorkspaceMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -38,6 +39,12 @@ class MindmapServiceTest {
 
     @Mock
     private WorkspaceMapper workspaceMapper;
+
+    @Mock
+    private NodeEntryMapper nodeEntryMapper;
+
+    @Mock
+    private NodeEntryService nodeEntryService;
 
     @InjectMocks
     private MindmapService service;
@@ -127,6 +134,7 @@ class MindmapServiceTest {
         Mindmap existing = new Mindmap();
         existing.setId(1L);
         existing.setName("导图");
+        existing.setContentJson("{\"version\":1,\"nodes\":{\"n1\":{\"text\":\"根\"},\"n2\":{\"text\":\"子\"}},\"edges\":[]}");
         existing.setUpdatedAt(LocalDateTime.of(2026, 8, 14, 10, 0, 0));
         Mindmap fresh = new Mindmap();
         fresh.setId(1L);
@@ -137,7 +145,23 @@ class MindmapServiceTest {
         Mindmap saved = service.save(1L, json, LocalDateTime.of(2026, 8, 14, 10, 0, 0));
 
         verify(mapper).updateContent(eq(1L), eq(json), anyString(), eq(1));
+        // v1.1 联动：保存后差异清理已删除节点（n2）的挂接
+        verify(nodeEntryService).cleanupRemovedNodes(eq(1L), eq(existing.getContentJson()), eq(json));
         assertSame(fresh, saved);
+    }
+
+    @Test
+    void save_conflict_skips_link_cleanup() {
+        Mindmap existing = new Mindmap();
+        existing.setId(1L);
+        existing.setName("导图");
+        existing.setUpdatedAt(LocalDateTime.of(2026, 8, 14, 10, 0, 0));
+        when(mapper.selectById(1L)).thenReturn(existing);
+
+        assertThrows(ConflictException.class,
+                () -> service.save(1L, "{\"version\":1,\"nodes\":{},\"edges\":[]}",
+                        LocalDateTime.of(2026, 8, 14, 9, 0, 0)));
+        verify(nodeEntryService, never()).cleanupRemovedNodes(anyLong(), anyString(), anyString());
     }
 
     @Test
@@ -153,6 +177,7 @@ class MindmapServiceTest {
         m.setId(1L);
         when(mapper.selectById(1L)).thenReturn(m);
         service.delete(1L);
+        verify(nodeEntryMapper).deleteByMindmap(1L); // v1.1 联动级联：删除导图先清其节点挂接
         verify(mapper).deleteById(1L);
     }
 

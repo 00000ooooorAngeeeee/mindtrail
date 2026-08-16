@@ -29,6 +29,12 @@ public interface WorkspaceMapper extends BaseMapper<Workspace> {
             "(SELECT e.id FROM entry e JOIN session s ON e.session_id = s.id WHERE s.workspace_id = #{workspaceId})")
     int deleteEntryCommitsByWorkspace(Long workspaceId);
 
+    /** v1.1 联动级联：清理工作区内全部 node_entry（导图侧与条目侧都要覆盖，05 §3 显式级联）。 */
+    @Delete("DELETE FROM node_entry WHERE mindmap_id IN (SELECT id FROM mindmap WHERE workspace_id = #{workspaceId}) " +
+            "OR entry_id IN (SELECT e.id FROM entry e JOIN session s ON e.session_id = s.id " +
+            "WHERE s.workspace_id = #{workspaceId})")
+    int deleteNodeEntriesByWorkspace(Long workspaceId);
+
     @Delete("DELETE FROM entry WHERE session_id IN " +
             "(SELECT id FROM session WHERE workspace_id = #{workspaceId})")
     int deleteEntriesByWorkspace(Long workspaceId);

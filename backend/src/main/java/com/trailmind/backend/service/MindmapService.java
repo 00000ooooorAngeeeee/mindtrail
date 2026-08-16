@@ -5,6 +5,7 @@ import com.trailmind.backend.common.ConflictException;
 import com.trailmind.backend.common.NotFoundException;
 import com.trailmind.backend.entity.Mindmap;
 import com.trailmind.backend.repository.MindmapMapper;
+import com.trailmind.backend.repository.NodeEntryMapper;
 import com.trailmind.backend.repository.WorkspaceMapper;
 import org.springframework.stereotype.Service;
 
@@ -13,17 +14,23 @@ import java.util.List;
 
 /**
  * 导图业务逻辑：新建（默认单根节点）、详情、列表（摘要）、整图保存（乐观锁）、删除。
- * 保存整图时由 {@link MindmapContentUtil} 同步维护 search_text 与 node_count（05 §4 保存语义）。
+ * 保存整图时由 {@link MindmapContentUtil} 同步维护 search_text 与 node_count（05 §4 保存语义）；
+ * v1.1 联动：保存后差异清理已删除节点的挂接（{@link NodeEntryService#cleanupRemovedNodes}），删除时级联清 node_entry。
  */
 @Service
 public class MindmapService {
 
     private final MindmapMapper mapper;
     private final WorkspaceMapper workspaceMapper;
+    private final NodeEntryMapper nodeEntryMapper;
+    private final NodeEntryService nodeEntryService;
 
-    public MindmapService(MindmapMapper mapper, WorkspaceMapper workspaceMapper) {
+    public MindmapService(MindmapMapper mapper, WorkspaceMapper workspaceMapper,
+                          NodeEntryMapper nodeEntryMapper, NodeEntryService nodeEntryService) {
         this.mapper = mapper;
         this.workspaceMapper = workspaceMapper;
+        this.nodeEntryMapper = nodeEntryMapper;
+        this.nodeEntryService = nodeEntryService;
     }
 
     public Mindmap create(Long workspaceId, String name, String contentJson) {
@@ -64,6 +71,8 @@ public class MindmapService {
         }
         MindmapContentUtil.Summary summary = MindmapContentUtil.analyze(existing.getName(), contentJson);
         mapper.updateContent(id, contentJson, summary.searchText(), summary.nodeCount());
+        // v1.1 联动：差异清理已删除节点的挂接（撤销恢复由「保存前撤销不落库」保证不误伤，05 §4）
+        nodeEntryService.cleanupRemovedNodes(id, existing.getContentJson(), contentJson);
         return get(id); // 回查，拿到 MySQL ON UPDATE 推进后的 updatedAt
     }
 
@@ -78,6 +87,7 @@ public class MindmapService {
 
     public void delete(Long id) {
         get(id); // 不存在则抛 404
+        nodeEntryMapper.deleteByMindmap(id); // v1.1 联动级联：删除导图先清其节点挂接（05 §3 显式级联）
         mapper.deleteById(id);
     }
 

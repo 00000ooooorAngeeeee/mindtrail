@@ -119,6 +119,7 @@ class WorkspaceServiceTest {
         // 级联顺序：关联表 → 业务表 → 工作区本身
         verify(mapper).deleteEntryTagsByWorkspace(1L);
         verify(mapper).deleteEntryCommitsByWorkspace(1L);
+        verify(mapper).deleteNodeEntriesByWorkspace(1L); // v1.1 联动级联：导图/条目两侧挂接一并清理
         verify(mapper).deleteEntriesByWorkspace(1L);
         verify(mapper).deleteSessionsByWorkspace(1L);
         verify(mapper).deleteMindmapsByWorkspace(1L);

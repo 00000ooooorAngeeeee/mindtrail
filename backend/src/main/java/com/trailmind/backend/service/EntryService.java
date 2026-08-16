@@ -11,6 +11,7 @@ import com.trailmind.backend.git.GitRepoService;
 import com.trailmind.backend.repository.EntryCommitMapper;
 import com.trailmind.backend.repository.EntryMapper;
 import com.trailmind.backend.repository.EntryTagMapper;
+import com.trailmind.backend.repository.NodeEntryMapper;
 import com.trailmind.backend.repository.SessionMapper;
 import com.trailmind.backend.repository.TagMapper;
 import org.springframework.stereotype.Service;
@@ -57,16 +58,19 @@ public class EntryService {
     private final TagMapper tagMapper;
     private final EntryTagMapper entryTagMapper;
     private final EntryCommitMapper entryCommitMapper;
+    private final NodeEntryMapper nodeEntryMapper;
     private final GitRepoService gitRepoService;
 
     public EntryService(EntryMapper entryMapper, SessionMapper sessionMapper,
                         TagMapper tagMapper, EntryTagMapper entryTagMapper,
-                        EntryCommitMapper entryCommitMapper, GitRepoService gitRepoService) {
+                        EntryCommitMapper entryCommitMapper, NodeEntryMapper nodeEntryMapper,
+                        GitRepoService gitRepoService) {
         this.entryMapper = entryMapper;
         this.sessionMapper = sessionMapper;
         this.tagMapper = tagMapper;
         this.entryTagMapper = entryTagMapper;
         this.entryCommitMapper = entryCommitMapper;
+        this.nodeEntryMapper = nodeEntryMapper;
         this.gitRepoService = gitRepoService;
     }
 
@@ -123,6 +127,7 @@ public class EntryService {
         // 子先于父：先清关联表，再删条目（无物理外键，service 层显式处理，05 §3）
         entryMapper.deleteEntryTagsByEntry(entryId);
         entryMapper.deleteEntryCommitsByEntry(entryId);
+        nodeEntryMapper.deleteByEntry(entryId); // v1.1 联动：条目删除级联清理其节点引用
         entryMapper.deleteById(entryId);
     }
 
