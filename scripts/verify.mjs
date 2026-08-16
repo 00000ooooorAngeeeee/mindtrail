@@ -304,7 +304,39 @@ export async function runChecks(deps = {}) {
     })
     if (saved2?.json?.code !== 0) throw new Error(`二次保存失败：${JSON.stringify(saved2?.json)}`)
 
+    // 导图重命名（PRD B4，M4 缺陷清理补全）：PATCH 改 name → 读回新名 → search_text 同步新名（05 §4）→ 改名回原样
+    const renamed = await request(`${BASE}/api/v1/mindmaps/${mid}`, {
+      method: 'PATCH',
+      body: { name: '验收导图改' },
+    })
+    if (renamed?.json?.code !== 0 || renamed?.json?.data?.name !== '验收导图改') {
+      throw new Error(`导图重命名失败：${JSON.stringify(renamed?.json)}`)
+    }
+    const renamedRow = await mysql(
+      `SELECT CONCAT(name, '|', search_text) FROM trailmind.mindmap WHERE id=${mid}`,
+      deps,
+    )
+    const [renamedName, renamedSearchText] = renamedRow.split('|')
+    if (renamedName !== '验收导图改') throw new Error(`重命名后库中 name=${renamedName}`)
+    if (!renamedSearchText.includes('验收导图改')) throw new Error('重命名后 search_text 未同步新名')
+    const renameBack = await request(`${BASE}/api/v1/mindmaps/${mid}`, {
+      method: 'PATCH',
+      body: { name: '验收导图' },
+    })
+    if (renameBack?.json?.code !== 0 || renameBack?.json?.data?.name !== '验收导图') {
+      throw new Error(`导图改名回退失败：${JSON.stringify(renameBack?.json)}`)
+    }
+    const badRename = await request(`${BASE}/api/v1/mindmaps/${mid}`, {
+      method: 'PATCH',
+      body: { name: '   ' },
+    })
+    if (badRename?.json?.code !== 400) throw new Error('空名称重命名应返回 400')
+
     results.push({ ok: true, name: 'mindmap 创建→整图保存→读回坐标/样式/自由边一致 + search_text/node_count' })
+    results.push({
+      ok: true,
+      name: '导图重命名往返（PATCH 改 name + search_text 同步新名 + 回退 + 空名 400）',
+    })
   } catch (e) {
     results.push({ ok: false, name: 'mindmap 往返', error: e.message })
   }
