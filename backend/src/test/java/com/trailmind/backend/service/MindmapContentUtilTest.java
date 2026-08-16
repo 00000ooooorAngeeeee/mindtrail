@@ -3,6 +3,8 @@ package com.trailmind.backend.service;
 import com.trailmind.backend.common.BadRequestException;
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -75,5 +77,38 @@ class MindmapContentUtilTest {
 
         assertEquals(1, s.nodeCount());
         assertTrue(s.searchText().contains("中心主题"));
+    }
+
+    // ---------- v1.1 联动：nodeIds / nodeViews ----------
+
+    @Test
+    void nodeIds_extracts_all_node_ids_in_order() {
+        String json = "{\"version\":1,\"nodes\":{\"n1\":{\"text\":\"根\"},\"n2\":{\"text\":\"子\"},\"n3\":{\"text\":\"孙\"}},\"edges\":[]}";
+
+        assertEquals(java.util.List.of("n1", "n2", "n3"), new java.util.ArrayList<>(MindmapContentUtil.nodeIds(json)));
+    }
+
+    @Test
+    void nodeIds_empty_nodes_returns_empty_set() {
+        assertEquals(java.util.Set.of(), MindmapContentUtil.nodeIds("{\"version\":1,\"nodes\":{},\"edges\":[]}"));
+    }
+
+    @Test
+    void nodeViews_extracts_text_and_parent() {
+        String json = "{\"version\":1,\"nodes\":{\"n1\":{\"text\":\"根\"},\"n2\":{\"text\":\"子\",\"parentId\":\"n1\"}},\"edges\":[]}";
+
+        Map<String, MindmapContentUtil.NodeView> views = MindmapContentUtil.nodeViews(json);
+
+        assertEquals(2, views.size());
+        assertEquals("根", views.get("n1").text());
+        assertEquals(null, views.get("n1").parentId());
+        assertEquals("子", views.get("n2").text());
+        assertEquals("n1", views.get("n2").parentId());
+    }
+
+    @Test
+    void nodeIds_and_nodeViews_invalid_json_throws() {
+        assertThrows(BadRequestException.class, () -> MindmapContentUtil.nodeIds("{not-json"));
+        assertThrows(BadRequestException.class, () -> MindmapContentUtil.nodeViews("{not-json"));
     }
 }

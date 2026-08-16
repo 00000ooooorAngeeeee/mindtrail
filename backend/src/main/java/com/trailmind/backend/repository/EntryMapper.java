@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
+import java.time.LocalDateTime;
 
 /**
  * entry 表 Mapper。
@@ -43,4 +44,77 @@ public interface EntryMapper extends BaseMapper<Entry> {
 
     @Delete("DELETE FROM entry_commit WHERE entry_id = #{entryId}")
     int deleteEntryCommitsByEntry(@Param("entryId") Long entryId);
+
+    /** 工作区最近条目（v1.1 联动选择器：节点挂条目对话框「最近条目」页，按创建时间倒序）。 */
+    @Select("SELECT e.id, e.session_id, e.seq, e.type, e.content_md, e.created_at, s.title AS session_title " +
+            "FROM entry e JOIN session s ON s.id = e.session_id " +
+            "WHERE s.workspace_id = #{workspaceId} ORDER BY e.created_at DESC, e.id DESC LIMIT #{limit}")
+    List<RecentRow> selectRecentByWorkspace(@Param("workspaceId") Long workspaceId, @Param("limit") int limit);
+
+    /** 投影行：最近条目（含会话标题，联动选择器展示）。 */
+    class RecentRow {
+        private Long id;
+        private Long sessionId;
+        private Integer seq;
+        private String type;
+        private String contentMd;
+        private LocalDateTime createdAt;
+        private String sessionTitle;
+
+        public Long getId() {
+            return id;
+        }
+
+        public void setId(Long id) {
+            this.id = id;
+        }
+
+        public Long getSessionId() {
+            return sessionId;
+        }
+
+        public void setSessionId(Long sessionId) {
+            this.sessionId = sessionId;
+        }
+
+        public Integer getSeq() {
+            return seq;
+        }
+
+        public void setSeq(Integer seq) {
+            this.seq = seq;
+        }
+
+        public String getType() {
+            return type;
+        }
+
+        public void setType(String type) {
+            this.type = type;
+        }
+
+        public String getContentMd() {
+            return contentMd;
+        }
+
+        public void setContentMd(String contentMd) {
+            this.contentMd = contentMd;
+        }
+
+        public LocalDateTime getCreatedAt() {
+            return createdAt;
+        }
+
+        public void setCreatedAt(LocalDateTime createdAt) {
+            this.createdAt = createdAt;
+        }
+
+        public String getSessionTitle() {
+            return sessionTitle;
+        }
+
+        public void setSessionTitle(String sessionTitle) {
+            this.sessionTitle = sessionTitle;
+        }
+    }
 }

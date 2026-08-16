@@ -81,6 +81,15 @@ CREATE TABLE IF NOT EXISTS entry_commit (
   KEY idx_commit_repo (repo_path, commit_hash)
 ) ENGINE=InnoDB COMMENT='条目-Git 提交绑定';
 
+CREATE TABLE IF NOT EXISTS node_entry (
+  mindmap_id BIGINT      NOT NULL,
+  node_id    VARCHAR(64) NOT NULL COMMENT 'content_json 内节点 id（如 n1，docs/05 §4）',
+  entry_id   BIGINT      NOT NULL,
+  created_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (mindmap_id, node_id, entry_id),
+  KEY idx_node_entry_entry (entry_id)
+) ENGINE=InnoDB COMMENT='导图节点-条目联动（v1.1 P1：节点挂条目 / 条目引用节点）';
+
 CREATE TABLE IF NOT EXISTS setting (
   k          VARCHAR(100) NOT NULL,
   v          TEXT         NOT NULL,

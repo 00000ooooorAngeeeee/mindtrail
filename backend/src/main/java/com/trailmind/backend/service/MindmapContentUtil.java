@@ -6,8 +6,11 @@ import com.trailmind.backend.common.BadRequestException;
 
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 导图 content_json 纯函数解析：从整图 JSON 提取搜索文本（search_text）与节点数（node_count）。
@@ -88,6 +91,49 @@ public final class MindmapContentUtil {
         if (s != null && !s.isBlank()) {
             parts.add(s);
         }
+    }
+
+    /** 解析整图 JSON，返回全部节点 id 集合（v1.1 联动：节点存在性校验 / 保存差异清理）。非法 JSON 抛 BadRequestException。 */
+    public static Set<String> nodeIds(String contentJson) {
+        JsonNode nodes = parse(contentJson).path("nodes");
+        Set<String> ids = new LinkedHashSet<>();
+        if (nodes.isObject()) {
+            nodes.fieldNames().forEachRemaining(ids::add);
+        }
+        return ids;
+    }
+
+    /** 节点搜索视图：id → (text, parentId)，保留 JSON 书写顺序（v1.1 联动节点搜索/路径派生用）。非法 JSON 抛 BadRequestException。 */
+    public static Map<String, NodeView> nodeViews(String contentJson) {
+        JsonNode nodes = parse(contentJson).path("nodes");
+        Map<String, NodeView> out = new LinkedHashMap<>();
+        if (nodes.isObject()) {
+            Iterator<Map.Entry<String, JsonNode>> it = nodes.fields();
+            while (it.hasNext()) {
+                Map.Entry<String, JsonNode> e = it.next();
+                JsonNode n = e.getValue();
+                out.put(e.getKey(), new NodeView(nodeText(n.path("text")), nodeParentId(n.path("parentId"))));
+            }
+        }
+        return out;
+    }
+
+    private static String nodeText(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return "";
+        }
+        return node.isTextual() ? node.textValue() : node.toString();
+    }
+
+    private static String nodeParentId(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull() || !node.isTextual()) {
+            return null;
+        }
+        return node.textValue();
+    }
+
+    /** 节点视图：文本 + 父节点 id（父不存在为 null）。 */
+    public record NodeView(String text, String parentId) {
     }
 
     /** 解析结果：搜索文本 + 节点数。 */
