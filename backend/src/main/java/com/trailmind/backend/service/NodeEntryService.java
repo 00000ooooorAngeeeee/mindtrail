@@ -199,7 +199,7 @@ public class NodeEntryService {
         List<EntryMapper.RecentRow> rows = entryMapper.selectRecentByWorkspace(workspaceId, n);
         List<RecentEntry> out = new ArrayList<>(rows.size());
         for (EntryMapper.RecentRow r : rows) {
-            out.add(new RecentEntry(r.getId(), r.getSessionId(), r.getSessionTitle(), r.getType(),
+            out.add(new RecentEntry(r.getId(), r.getSessionId(), r.getSessionTitle(), r.getSeq(), r.getType(),
                     preview(r.getContentMd()), r.getCreatedAt()));
         }
         return out;
@@ -403,8 +403,8 @@ public class NodeEntryService {
     }
 
     /** 工作区最近条目（选择器候选）。 */
-    public record RecentEntry(Long entryId, Long sessionId, String sessionTitle, String type, String contentMd,
-                              LocalDateTime createdAt) {
+    public record RecentEntry(Long entryId, Long sessionId, String sessionTitle, Integer seq, String type,
+                              String contentMd, LocalDateTime createdAt) {
     }
 
     /** 条目引用节点请求项。 */

@@ -1,6 +1,6 @@
 // 节点挂接条目管理对话框（v1.1 P1）：搜索（type=entry + workspaceId 圈定）+ 工作区最近条目，
 // 勾选后「先清后插」替换保存（PUT /mindmaps/{id}/nodes/{nodeId}/links）。
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getRecentEntries, replaceNodeLinks } from '../../api/linkage'
 import { searchGlobal } from '../../api/search'
 import {
@@ -16,7 +16,7 @@ type Candidate = {
   entryId: number
   sessionId: number
   sessionTitle: string
-  seq: number
+  seq?: number
   type: SearchEntryHit['type']
   snippet: string
 }
@@ -101,7 +101,7 @@ export function NodeEntryLinkDialog({
       <span aria-hidden="true">{ENTRY_TYPE_ICONS[c.type]}</span>
       <span className="mm-links-row-main">
         <span className="mm-links-row-title">
-          {c.sessionTitle} <span className="muted">#{c.seq}</span>
+          {c.sessionTitle} {c.seq != null && <span className="muted">#{c.seq}</span>}
         </span>
         <span className="mm-links-row-sub">{previewLine(c.snippet)}</span>
       </span>

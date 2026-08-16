@@ -321,6 +321,7 @@ export interface RecentEntry {
   entryId: number
   sessionId: number
   sessionTitle: string
+  seq: number
   type: EntryType
   contentMd: string
   createdAt?: string | null

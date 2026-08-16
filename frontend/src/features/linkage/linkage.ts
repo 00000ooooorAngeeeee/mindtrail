@@ -8,8 +8,9 @@ export const PATH_MAX_DEPTH = 20
 /**
  * 勾选切换（挂接对话框用）：保持书写顺序的选中集增删。
  * 已含则移除（取消勾选），未含则追加；返回新数组（原数组不修改）。
+ * 泛型支持 number[]（条目 id）与 string[]（`导图id:节点id` 键）。
  */
-export function toggleSelection(current: number[], id: number): number[] {
+export function toggleSelection<T>(current: T[], id: T): T[] {
   if (current.includes(id)) {
     return current.filter((x) => x !== id)
   }
@@ -26,7 +27,7 @@ export function buildNodePath(content: MindmapContent, nodeId: string): string {
   const seen = new Set<string>()
   while (cur != null && chain.length < PATH_MAX_DEPTH && !seen.has(cur)) {
     seen.add(cur)
-    const node = content.nodes[cur]
+    const node: MindmapContent['nodes'][string] | undefined = content.nodes[cur]
     if (!node) break
     chain.push(node.text.trim() ? node.text : cur)
     cur = node.parentId
