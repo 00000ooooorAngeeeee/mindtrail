@@ -1,5 +1,6 @@
 // 验收冒烟（docs/10 §10/§12 起）：/health → schema 表齐全 → workspace 往返 → mindmap 往返（M2 总验收补充）
 // → session/entry 往返（M3 任务一：start_head、seq 1/2/3、标签、分页、编辑、结束写 review、追加限制、级联删除）
+// → 条目插入/补记往返（v1.1 P1：afterSeq 插入位置 seq 重排、createdAt 补记时间、非法 400）
 // → git 服务往返（M3 任务三：仓库校验、提交历史、since=start_head 新提交感知、绑定/解绑、详情回填、级联清理）→ 输出 ALL PASS。
 // 仅依赖 Node 内建（http/child_process/fs）+ 系统 git 命令，无第三方依赖。前置：后端已在 127.0.0.1:17860 运行、MySQL 可连（DB_PASS/MYSQL_PWD）。
 import http from 'node:http'
@@ -435,6 +436,104 @@ export async function runChecks(deps = {}) {
     })
   } catch (e) {
     results.push({ ok: false, name: 'session 往返', error: e.message })
+  }
+
+  // 5.5 条目插入/补记往返（v1.1 P1，PRD C2.5/C2.4）：
+  //     追加 2 条 → 插入到 seq 1 之后（afterSeq=1：seq 重排 + createdAt 补记）→ 最前插入（afterSeq=0）→
+  //     非法 afterSeq（负数/越界）400 且不产生新条目 → 编辑补记时间（PUT createdAt）→ 非法时间格式 400 → 清理
+  let insertSessId = null
+  try {
+    if (!workspaceId) throw new Error('依赖第 3 步的 workspace id')
+    const isess = await request(`${BASE}/api/v1/workspaces/${workspaceId}/sessions`, {
+      method: 'POST',
+      body: { title: '验收插入会话' },
+    })
+    insertSessId = isess?.json?.data?.id
+    if (isess?.json?.code !== 0 || !insertSessId) throw new Error(`插入会话创建失败：${JSON.stringify(isess?.json)}`)
+
+    const i1 = await request(`${BASE}/api/v1/sessions/${insertSessId}/entries`, {
+      method: 'POST',
+      body: { type: 'goal', contentMd: '插前目标' },
+    })
+    const i2 = await request(`${BASE}/api/v1/sessions/${insertSessId}/entries`, {
+      method: 'POST',
+      body: { type: 'action', contentMd: '插前动作' },
+    })
+    if (i1?.json?.code !== 0 || i2?.json?.code !== 0) throw new Error('前置条目创建失败')
+
+    // 插入到 seq 1 之后：新条目 seq=2，原 seq 2 → 3；携带 createdAt 补记（补录场景）
+    const ins = await request(`${BASE}/api/v1/sessions/${insertSessId}/entries`, {
+      method: 'POST',
+      body: { type: 'test', contentMd: '插入的验证', afterSeq: 1, createdAt: '2026-01-02T03:04:05' },
+    })
+    if (ins?.json?.code !== 0 || ins?.json?.data?.seq !== 2) {
+      throw new Error(`插入失败：${JSON.stringify(ins?.json)}`)
+    }
+    if (ins?.json?.data?.createdAt !== '2026-01-02T03:04:05') throw new Error('插入条目补记时间未生效')
+    const afterIns = await request(`${BASE}/api/v1/sessions/${insertSessId}`)
+    const orderAfterIns = (afterIns?.json?.data?.entries || []).map((e) => `${e.seq}:${e.contentMd}`)
+    if (orderAfterIns.join('|') !== '1:插前目标|2:插入的验证|3:插前动作') {
+      throw new Error(`插入后顺序错误：${orderAfterIns.join('|')}`)
+    }
+
+    // 最前插入（afterSeq=0）：全部后移，新条目 seq=1
+    const top = await request(`${BASE}/api/v1/sessions/${insertSessId}/entries`, {
+      method: 'POST',
+      body: { type: 'note', contentMd: '最前补录', afterSeq: 0 },
+    })
+    if (top?.json?.code !== 0 || top?.json?.data?.seq !== 1) {
+      throw new Error(`最前插入失败：${JSON.stringify(top?.json)}`)
+    }
+    const afterTop = await request(`${BASE}/api/v1/sessions/${insertSessId}`)
+    const orderAfterTop = (afterTop?.json?.data?.entries || []).map((e) => `${e.seq}:${e.contentMd}`)
+    if (orderAfterTop.join('|') !== '1:最前补录|2:插前目标|3:插入的验证|4:插前动作') {
+      throw new Error(`最前插入后顺序错误：${orderAfterTop.join('|')}`)
+    }
+
+    // 非法插入位置：负数 / 越界（> 最大 seq）→ 400，且不产生新条目
+    const neg = await request(`${BASE}/api/v1/sessions/${insertSessId}/entries`, {
+      method: 'POST',
+      body: { type: 'note', contentMd: 'x', afterSeq: -1 },
+    })
+    if (neg?.json?.code !== 400) throw new Error('负数 afterSeq 应 400')
+    const over = await request(`${BASE}/api/v1/sessions/${insertSessId}/entries`, {
+      method: 'POST',
+      body: { type: 'note', contentMd: 'x', afterSeq: 99 },
+    })
+    if (over?.json?.code !== 400) throw new Error('越界 afterSeq 应 400')
+    const cnt = await mysql(`SELECT COUNT(*) FROM trailmind.entry WHERE session_id=${insertSessId}`, deps)
+    if (cnt !== '4') throw new Error(`非法插入后条目数 ${cnt} ≠ 4（不应产生新条目）`)
+
+    // 编辑补记时间（PRD C2.4）：PUT createdAt 重写创建时间 → 读回生效
+    const backfill = await request(`${BASE}/api/v1/entries/${i2?.json?.data?.id}`, {
+      method: 'PUT',
+      body: { createdAt: '2026-02-03T04:05:06' },
+    })
+    if (backfill?.json?.code !== 0 || backfill?.json?.data?.createdAt !== '2026-02-03T04:05:06') {
+      throw new Error(`编辑补记时间失败：${JSON.stringify(backfill?.json)}`)
+    }
+    const afterBackfill = await request(`${BASE}/api/v1/sessions/${insertSessId}`)
+    const e2row = (afterBackfill?.json?.data?.entries || []).find((e) => e.id === i2?.json?.data?.id)
+    if (e2row?.createdAt !== '2026-02-03T04:05:06') throw new Error('补记时间未持久化')
+
+    // 非法时间格式（Jackson 反序列化失败）→ 400（GlobalExceptionHandler 兜底）
+    const badTime = await request(`${BASE}/api/v1/entries/${i1?.json?.data?.id}`, {
+      method: 'PUT',
+      body: { createdAt: 'not-a-time' },
+    })
+    if (badTime?.json?.code !== 400) throw new Error(`非法时间格式应 400：${JSON.stringify(badTime?.json)}`)
+
+    await request(`${BASE}/api/v1/sessions/${insertSessId}`, { method: 'DELETE' })
+    insertSessId = null
+    results.push({
+      ok: true,
+      name: '条目插入/补记往返（afterSeq 中间/最前/非法 400 + createdAt 补记持久化 + 顺序断言）',
+    })
+  } catch (e) {
+    results.push({ ok: false, name: '条目插入/补记往返', error: e.message })
+    if (insertSessId != null) {
+      await request(`${BASE}/api/v1/sessions/${insertSessId}`, { method: 'DELETE' }).catch(() => {})
+    }
   }
 
   // 6. git 服务往返（M3 任务三）：临时真实仓库 3 次提交 → /git/repo/status 与 git rev-parse 一致 →
