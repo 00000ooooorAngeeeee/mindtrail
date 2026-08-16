@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import App from './App'
 import { fetchHealth } from './api/health'
 import { deleteWorkspace, fetchWorkspaces, updateWorkspace } from './api/workspaces'
-import { createMindmap, deleteMindmap, listMindmaps } from './api/mindmaps'
+import { createMindmap, deleteMindmap, listMindmaps, renameMindmap } from './api/mindmaps'
 import { createSession, deleteSession, getSession, listSessions } from './api/sessions'
 import { listTags } from './api/tags'
 import { fetchSettings } from './api/settings'
@@ -20,6 +20,7 @@ vi.mock('./api/mindmaps', () => ({
   listMindmaps: vi.fn(),
   createMindmap: vi.fn(),
   deleteMindmap: vi.fn(),
+  renameMindmap: vi.fn(),
 }))
 vi.mock('./api/sessions', () => ({
   listSessions: vi.fn(),
@@ -50,6 +51,7 @@ const deleteMock = vi.mocked(deleteWorkspace)
 const listMindmapsMock = vi.mocked(listMindmaps)
 const createMindmapMock = vi.mocked(createMindmap)
 const deleteMindmapMock = vi.mocked(deleteMindmap)
+const renameMindmapMock = vi.mocked(renameMindmap)
 const listSessionsMock = vi.mocked(listSessions)
 const createSessionMock = vi.mocked(createSession)
 const deleteSessionMock = vi.mocked(deleteSession)
@@ -69,6 +71,7 @@ describe('App 首页', () => {
     listMindmapsMock.mockReset()
     createMindmapMock.mockReset()
     deleteMindmapMock.mockReset()
+    renameMindmapMock.mockReset()
     listSessionsMock.mockReset()
     createSessionMock.mockReset()
     deleteSessionMock.mockReset()
@@ -228,6 +231,24 @@ describe('App 首页', () => {
     fireEvent.click(await screen.findByText('删除'))
 
     await waitFor(() => expect(deleteMindmapMock).toHaveBeenCalledWith(10))
+  })
+
+  it('重命名导图调用接口并刷新列表（PRD B4）', async () => {
+    workspacesMock.mockResolvedValue([ws])
+    listMindmapsMock
+      .mockResolvedValueOnce([{ id: 10, name: '导图A', nodeCount: 3 }])
+      .mockResolvedValue([{ id: 10, name: '导图B', nodeCount: 3 }])
+    renameMindmapMock.mockResolvedValue({ id: 10, name: '导图B', nodeCount: 3 })
+    render(<App />)
+
+    fireEvent.click(await screen.findByText('项目A'))
+    fireEvent.click((await screen.findAllByText('重命名'))[0])
+    const input = screen.getByDisplayValue('导图A')
+    fireEvent.change(input, { target: { value: '导图B' } })
+    fireEvent.click(screen.getByText('保存'))
+
+    await waitFor(() => expect(renameMindmapMock).toHaveBeenCalledWith(10, '导图B'))
+    expect(await screen.findByText('导图B')).toBeInTheDocument()
   })
 
   it('工作区页显示会话列表并可开始新会话', async () => {

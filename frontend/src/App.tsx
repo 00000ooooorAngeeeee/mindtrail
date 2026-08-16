@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppStore } from './store/useAppStore'
 import { useSettingsStore } from './store/useSettingsStore'
-import { createMindmap, deleteMindmap, listMindmaps } from './api/mindmaps'
+import { createMindmap, deleteMindmap, listMindmaps, renameMindmap } from './api/mindmaps'
 import type { Mindmap, Workspace } from './api/types'
 import { MindMapEditor } from './features/mindmap/MindMapEditor'
 import { SessionSection } from './features/session/SessionSection'
@@ -246,6 +246,56 @@ function WorkspaceItem({
   )
 }
 
+/** 导图列表项（PRD B4）：行内重命名（与工作区重命名同款交互），M4 缺陷清理补全。 */
+function MindmapItem({
+  m,
+  onOpen,
+  onRename,
+  onDelete,
+}: {
+  m: Mindmap
+  onOpen: (id: number) => void
+  onRename: (id: number, name: string) => Promise<void>
+  onDelete: (id: number) => Promise<void>
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(m.name)
+
+  const submit = async () => {
+    const trimmed = draft.trim()
+    if (!trimmed || trimmed === m.name) {
+      setEditing(false)
+      return
+    }
+    await onRename(m.id, trimmed)
+    setEditing(false)
+  }
+
+  return (
+    <li className="workspace-item">
+      {editing ? (
+        <span className="item-edit">
+          <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} autoFocus />
+          <button onClick={submit}>保存</button>
+          <button onClick={() => setEditing(false)}>取消</button>
+        </span>
+      ) : (
+        <>
+          <span className="item-name">
+            {m.name}
+            <span className="item-stats">{m.nodeCount ?? 0} 节点</span>
+          </span>
+          <button onClick={() => onOpen(m.id)}>打开</button>
+          <button onClick={() => { setDraft(m.name); setEditing(true) }}>重命名</button>
+          <button className="danger" onClick={() => void onDelete(m.id)}>
+            删除
+          </button>
+        </>
+      )}
+    </li>
+  )
+}
+
 function WorkspaceHome({
   ws,
   onBack,
@@ -312,6 +362,15 @@ function WorkspaceHome({
     }
   }
 
+  const handleRename = async (id: number, name: string) => {
+    try {
+      await renameMindmap(id, name)
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '重命名导图失败')
+    }
+  }
+
   // 新工作区空态引导（03 §7.1）：导图与会话均为空时，居中引导「新建第一张导图 / 开始第一次会话」。
   const showEmptyGuide = !loading && sessionsEmpty === true && mindmaps.length === 0
 
@@ -351,16 +410,13 @@ function WorkspaceHome({
       ) : (
         <ul className="workspace-list">
           {mindmaps.map((m) => (
-            <li key={m.id} className="workspace-item">
-              <span className="item-name">
-                {m.name}
-                <span className="item-stats">{m.nodeCount ?? 0} 节点</span>
-              </span>
-              <button onClick={() => onOpenMindmap(m.id)}>打开</button>
-              <button className="danger" onClick={() => void handleDelete(m.id)}>
-                删除
-              </button>
-            </li>
+            <MindmapItem
+              key={m.id}
+              m={m}
+              onOpen={onOpenMindmap}
+              onRename={handleRename}
+              onDelete={handleDelete}
+            />
           ))}
         </ul>
       )}
