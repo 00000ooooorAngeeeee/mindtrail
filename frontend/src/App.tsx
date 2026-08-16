@@ -84,6 +84,15 @@ export default function App() {
     setOpenSessionId(sessionId)
   }
 
+  // 联动（v1.1 P1）：条目引用节点 chip 点击 → 打开导图并定位节点（复用 PRD D2 高亮闪烁机制）。
+  const handleOpenMindmapNode = (workspaceId: number, mindmapId: number, nodeId: string) => {
+    setOpen(workspaces.find((w) => w.id === workspaceId) ?? null)
+    setOpenSessionId(null)
+    setSessionJump(null)
+    setMindmapHighlight(nodeId)
+    setOpenMindmapId(mindmapId)
+  }
+
   // 搜索无结果空态（03 §7.3）：标签快速过滤入口——回到工作区首页标签面板并聚焦高亮。
   const handleBrowseTags = () => {
     setSearchOpen(false)
@@ -140,6 +149,7 @@ export default function App() {
           <MindMapEditor
             mindmapId={openMindmapId}
             highlightNodeId={mindmapHighlight}
+            onOpenEntry={handleOpenSessionEntry}
             onBack={() => {
               setOpenMindmapId(null)
               setMindmapHighlight(null)
@@ -150,6 +160,7 @@ export default function App() {
             sessionId={openSessionId}
             initialPage={sessionJump?.page}
             initialHighlightEntryId={sessionJump?.entryId}
+            onOpenMindmapNode={handleOpenMindmapNode}
             onBack={() => {
               setOpenSessionId(null)
               setSessionJump(null)

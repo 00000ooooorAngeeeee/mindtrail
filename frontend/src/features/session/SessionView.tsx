@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { addEntry, deleteEntry, updateEntry } from '../../api/entries'
+import { getSessionLinks } from '../../api/linkage'
 import { bindCommits, getCommitDetail, getCommits, getSessionCommits, unbindCommit } from '../../api/git'
 import { exportSessionJson, exportSessionMarkdown, getSession, updateSession } from '../../api/sessions'
 import { filterEntriesByTag, listTags } from '../../api/tags'
@@ -11,12 +12,14 @@ import {
   type Entry,
   type EntryType,
   type GitCommit,
+  type NodeRef,
   type Session,
   type TagInfo,
   type TaggedEntry,
 } from '../../api/types'
 import { CommitDetailModal } from './CommitDetailModal'
 import { EntryCard } from './EntryCard'
+import { EntryNodeLinkDialog } from '../linkage/EntryNodeLinkDialog'
 import {
   GIT_POLL_INTERVAL_MS,
   dismissSuggestion,
@@ -32,6 +35,7 @@ import { loadEntryType, saveEntryType } from './typeMemory'
 import { useInfiniteScroll } from './useInfiniteScroll'
 import { formatTime } from './time'
 import { downloadTextFile, sanitizeFileName } from '../../utils/download'
+import '../linkage/linkage.css'
 import './session.css'
 
 export const PAGE_SIZE = 50
@@ -50,6 +54,7 @@ export function SessionView({
   onBack,
   initialPage = 1,
   initialHighlightEntryId = null,
+  onOpenMindmapNode,
 }: {
   sessionId: number
   onBack: () => void
@@ -57,6 +62,8 @@ export function SessionView({
   initialPage?: number
   /** 搜索跳转：加载后闪烁定位的目标条目 id；本页不存在则静默忽略。 */
   initialHighlightEntryId?: number | null
+  /** 联动（v1.1 P1）：点击条目引用节点 chip → 打开导图并定位该节点（闪烁）。 */
+  onOpenMindmapNode?: (workspaceId: number, mindmapId: number, nodeId: string) => void
 }) {
   const [session, setSession] = useState<Session | null>(null)
   const [entries, setEntries] = useState<Entry[]>([])
@@ -101,6 +108,22 @@ export function SessionView({
   const [detailTarget, setDetailTarget] = useState<{ entryId: number; hash: string } | null>(null)
   const [detailData, setDetailData] = useState<GitCommit | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
+
+  // 联动（v1.1 P1）：会话内条目引用（entryId → 节点列表，批量回填避免 N+1）+ 引用管理对话框
+  const [linksByEntry, setLinksByEntry] = useState<Record<number, NodeRef[]>>({})
+  const [nodeDialogEntryId, setNodeDialogEntryId] = useState<number | null>(null)
+
+  const refreshLinks = useCallback(async () => {
+    try {
+      setLinksByEntry(await getSessionLinks(sessionId))
+    } catch {
+      setLinksByEntry({}) // 引用加载失败不阻塞时间线（chips 暂不展示）
+    }
+  }, [sessionId])
+
+  useEffect(() => {
+    void refreshLinks()
+  }, [refreshLinks])
 
   const load = useCallback(
     async (p: number) => {
@@ -624,6 +647,7 @@ export function SessionView({
               ) : (
                 <EntryCard
                   entry={entry}
+                  nodes={linksByEntry[entry.id] ?? []}
                   onEdit={(e) => {
                     setEditingId(e.id)
                     setEditType(e.type)
@@ -631,6 +655,8 @@ export function SessionView({
                   }}
                   onDelete={(e) => void handleDelete(e)}
                   onCommitClick={(e, hash) => openCommitDetail(e, hash)}
+                  onNodeClick={(r) => onOpenMindmapNode?.(r.workspaceId, r.mindmapId, r.nodeId)}
+                  onManageNodes={() => setNodeDialogEntryId(entry.id)}
                 />
               )}
             </li>
@@ -683,6 +709,17 @@ export function SessionView({
           error={detailError}
           onClose={closeCommitDetail}
           onUnbind={() => void unbindFromDetail()}
+        />
+      )}
+
+      {/* 联动（v1.1 P1）：条目「🔗 节点」→ 引用节点管理对话框 */}
+      {nodeDialogEntryId != null && session?.workspaceId != null && (
+        <EntryNodeLinkDialog
+          entryId={nodeDialogEntryId}
+          workspaceId={session.workspaceId}
+          initialRefs={linksByEntry[nodeDialogEntryId] ?? []}
+          onClose={() => setNodeDialogEntryId(null)}
+          onSaved={() => void refreshLinks()}
         />
       )}
     </section>
