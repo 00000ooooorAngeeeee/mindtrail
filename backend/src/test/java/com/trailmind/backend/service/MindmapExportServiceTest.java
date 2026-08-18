@@ -167,8 +167,8 @@ class MindmapExportServiceTest {
     }
 
     @Test
-    void renderer_draws_free_edge_label_pill() throws Exception {
-        // PRD B2.2 P1「可编辑标签」：PNG 导出应绘制自由边标签（白底胶囊 + 中点文本）。
+    void renderer_draws_free_edge_label_text() throws Exception {
+        // PRD B2.2 P1「可编辑标签」：PNG 导出应绘制自由边标签（中点纯文字 + 白字描边，缺陷修复后与前端同构）。
         // 断言方式：同几何内容「带标签 vs 标签为 null」两次渲染，除标签外几何完全一致，
         // 像素差异 > 0 即证明标签被绘制（几何/节点文本/箭头均相同，不会产生其他差异）。
         String withLabel = contentWithCanvas();
@@ -185,7 +185,7 @@ class MindmapExportServiceTest {
                 }
             }
         }
-        // 4 个中文字符的胶囊文本至少覆盖数百像素；20 为防抖阈值
+        // 4 个中文字符（含描边）至少覆盖数百像素；20 为防抖阈值
         assertTrue(diff > 20, "带标签渲染应有像素差异（自由边标签未绘制？diff=" + diff + "）");
     }
 
