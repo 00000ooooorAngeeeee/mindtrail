@@ -10,7 +10,7 @@
 
 - 壳：Electron（负责拉起 Java 后端子进程）
 - 前端：React 18 + TypeScript + Vite + Zustand + React Flow（画布）+ CodeMirror 6（Markdown）
-- 后端：Java 17 + Spring Boot 3 + MyBatis-Plus + JGit，REST API 监听 127.0.0.1:17860
+- 后端：Java 21 + Spring Boot 3 + MyBatis-Plus + JGit，REST API 监听 127.0.0.1:17860
 - 数据库：MySQL 8.x（库名 `trailmind`），schema 见 docs/05，幂等建表
 
 ## 必守规则（违反 = 返工）
