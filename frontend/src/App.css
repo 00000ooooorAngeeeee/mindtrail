@@ -56,6 +56,13 @@
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+  /* 多会话并行视图缺陷修复：长会话向下滚动时标签栏滚出视口无法切换标签。
+     改为 sticky 顶部常驻（与底部常驻快速记录框各占一端，互不冲突）；背景用页面底色防内容透视。 */
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--bg);
+  padding-block: 6px;
 }
 
 .session-tab {
