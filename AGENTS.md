@@ -44,7 +44,7 @@
   - [x] M2 任务一：画布模式基础（双模式切换、自由拖拽/连线、坐标持久化、严格树判定 + 三选一）
   - [x] 节点形状（圆角矩形/矩形/椭圆/菱形）+ 颜色
   - [x] 框选多选、批量删除/移动（P1）｜ 自由便签（P1）
-  - [x] M2 总验收（100 节点拖拽流畅、GUI 实机验证：`node scripts/verify-m2-gui.mjs` 输出 M2 GUI: ALL PASS；人工验收反馈修复见 CHANGELOG 会话 17-20，回归套件已扩至 31 项）
+  - [x] M2 总验收（100 节点拖拽流畅、GUI 实机验证：`node scripts/verify-m2-gui.mjs` 输出 M2 GUI: ALL PASS；人工验收反馈修复见 CHANGELOG 会话 17-20，回归套件已扩至 33 项）
 - [x] M3：过程记录（灵魂功能，含 Git 绑定）——已完成，总验收全过（07 §6 全清单：10 条条目 ≤10s/条、commit ≤10s 感知 + 一键绑定、徽标/详情弹层/解绑、强杀重启完整、1000 条目 8.6ms、Git 面板与 git log 一致、dogfooding 导出往返 21/21 还原）
   - [x] M3 任务一：会话管理 + 时间线条目（开始/结束/列表/删除、start_head/end_head、总结写 review 条目；条目追加/编辑/删除、seq 事务分配、标签即时创建；前端会话列表/详情页；后端 83 + 前端 79 单测、SMOKE ALL PASS，见 CHANGELOG 会话 21）
   - [x] M3 任务二：快速记录框 + 时间线视图（底部常驻/Enter 提交/类型记忆/Ctrl+E；类型着色/图标/时间戳/无限滚动每页 50；前端 92/92 单测、1000 条目分页 4.8~13.7ms；**本会话起过程记录迁移到产品本身**，见产品工作区「TrailMind 开发」）
@@ -66,7 +66,7 @@
 - [x] v1.1 P1「标签云」——已完成（07 §14 全清单，PRD D4「标签云视图 P1」）：工作区标签面板顶部标签云——TagCloud 组件按使用计数分档字号（sm/md/lg/xl）+ 热度降序 + 循环色板着色，点击即时过滤（与列表同一 openFilter 路径）；tagCloudUtil.ts 纯函数（档位/色板/稳定排序）；管理操作仍在列表；后端零改动（数据源既有 GET /tags）；前端 202 → 206 单测、SMOKE 16 段回归全过；防坑：Windows 大小写不敏感导致 TagCloud.tsx 与 tagCloud.ts 冲突（import 解析到纯函数文件），纯函数改名 tagCloudUtil.ts；过程记录见产品工作区「TrailMind 开发」，会话「v1.1 P1「标签云」」）
 - [x] v1.1 P1「自适应缩放」——已完成（07 §15 全清单，PRD §5 P1）：画布视图随内容变化自动适应——fitCheck.ts 纯函数 contentExceedsViewport（包围盒 vs 视口可见区 flow 坐标换算，padRatio 边距）；MindMapEditor 三触发点（内容/布局变化防抖 300ms、画布拖拽停止双 rAF、window resize），仅当超出视口才 fitView（padding 0.12 动画 300ms），未超出保持视野不打扰；实时节点取 React Flow 实例 getNodes（拖拽后闭包滞后）；v12 无 onResize prop 改 window resize 监听；前端 206 → 215 单测（fitCheck 9 条）、SMOKE 16 段回归全过；过程记录见产品工作区「TrailMind 开发」，会话「v1.1 P1「自适应缩放」」）
 - [x] v1.1 P1「多会话并行视图」——已完成（07 §16 全清单，PRD §5 P1 / 02 §7「v1.1 再评估」落地 Tab 式）：App 会话视图改标签式——sessionTabs 全部挂载（非激活 display:none）状态各自保留（滚动/过滤/编辑）；标签栏点击激活/× 关闭（关激活自动切前一个）/「＋」回工作区继续打开（标签保留）；「← 返回」=关当前标签；标题占位 + getSession(size=1) 轻量回填；搜索/标签/联动跳转 upsert 标签，进导图清空；ARIA tablist/tab/tabpanel；前端 215 → 216 单测（多会话全流程）、SMOKE 16 段回归全过；**v1.1 P1 至此全部完成**；过程记录见产品工作区「TrailMind 开发」，会话「v1.1 P1「多会话并行视图」」）
-- [x] v1.1 缺陷修复集（T4 评估落地）——已完成（07 §17）：① 会话标签栏 sticky 常驻；② 工作区计数实时刷新；③ 连线标签改纯文字浮于线条上方（去白底胶囊）；④ 进入导图在节点测量完成后才 fitView（修复内容停在左上角），按用户建议抽取 fitToView 与「适应视图」按钮共用并平滑动画（duration 300）；⑤ 连线标签 absolute 定位防多标签堆叠下移 + 上浮贴线；前端 218 单测、tsc 通过、后端 MindmapExportServiceTest 7/7、SMOKE 16 段回归；过程记录见产品工作区「TrailMind 开发」
+- [x] v1.1 缺陷修复集（T4 评估落地）——已完成（07 §17）：① 会话标签栏 sticky 常驻；② 工作区计数实时刷新；③ 连线标签改纯文字浮于线条上方（去白底胶囊）；④ 进入导图自动适应改 React Flow fitView prop（测量完成即解析，首开/二次打开一致），按用户建议抽取 fitToView 与「适应视图」按钮共用并平滑动画（duration 300），verify-m2-gui 新增 S0d/S6a1 回归（M2 GUI 33/33）；⑤ 连线标签 absolute 定位防多标签堆叠下移 + 上浮贴线；前端 218 单测、tsc 通过、后端 MindmapExportServiceTest 7/7、SMOKE 16 段回归；过程记录见产品工作区「TrailMind 开发」
 
 下一任务：**v1.2 / P2「导入恢复」**（07 §8 Backlog；备份导出已就绪，补齐恢复闭环）。
 
