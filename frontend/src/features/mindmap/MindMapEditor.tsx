@@ -10,7 +10,6 @@ import {
   MiniMap,
   ReactFlow,
   useEdgesState,
-  useNodesInitialized,
   useNodesState,
   useUpdateNodeInternals,
   type Connection,
@@ -55,29 +54,18 @@ const edgeTypes = { free: FreeEdge }
  * 在这些场景下不触发——未测量的节点保持 visibility:hidden（画布不可见）且 handleBounds 缺失（自由连线
  * 无法完成）。必须放在 <ReactFlow> 子树内：useUpdateNodeInternals 依赖 ReactFlow 内部 store 上下文，
  * 放在外面拿到的是外层 Provider 的空 store（本应用没有 Provider），调用会静默空转。
+ * 进入导图的 fitView 由 ReactFlow 的 fitView prop 承担：其 fitViewQueued 会在本组件触发的
+ * updateNodeInternals 测量完成时解析（React Flow 内部路径），不依赖 s.nodesInitialized
+ * （该值只在 setNodes 时重算，首开导图仅一次 setNodes 时永远为 false——此前二次打开才生效的根因）。
  */
-function NodeMeasureTrigger({
-  content,
-  onFitted,
-}: {
-  content: MindmapContent | null
-  /** 全部节点测量完成后的回调（进入导图首次 fitView 的时机锚点）。 */
-  onFitted?: () => void
-}) {
+function NodeMeasureTrigger({ content }: { content: MindmapContent | null }) {
   const updateNodeInternals = useUpdateNodeInternals()
-  const nodesInitialized = useNodesInitialized()
   useEffect(() => {
     if (!content) return
     const ids = Object.keys(content.nodes)
     const timer = setTimeout(() => updateNodeInternals(ids), 30)
     return () => clearTimeout(timer)
   }, [content, updateNodeInternals])
-  // 进入导图缺陷修复：fitView 必须在节点测量完成后执行（nodesInitialized=true）。
-  // 原实现用「内容就绪后双 rAF」触发，早于测量（本应用节点为异步重建，ResizeObserver 不自测），
-  // 0 尺寸包围盒导致 fit 失效——实测进入导图内容停在左上角，需手动点「适应视图」。
-  useEffect(() => {
-    if (content && nodesInitialized) onFitted?.()
-  }, [content, nodesInitialized, onFitted])
   return null
 }
 
@@ -253,7 +241,6 @@ export function MindMapEditor({
   const [exportError, setExportError] = useState<string | null>(null)
   const dragging = useRef(false)
   const dropTargetRef = useRef<string | null>(null)
-  const fittedRef = useRef(false)
   const rfRef = useRef<ReactFlowInstance<MindmapRFNode, Edge> | null>(null)
   // 自适应缩放（v1.1 P1）：内容变化后的防抖检查定时器 + 画布容器 ref
   const autoFitTimerRef = useRef<number | null>(null)
@@ -278,7 +265,6 @@ export function MindMapEditor({
 
   useEffect(() => {
     void load(mindmapId)
-    fittedRef.current = false
   }, [mindmapId, load])
 
   const positions = useMemo(() => {
@@ -367,20 +353,13 @@ export function MindMapEditor({
   }, [autoFitIfNeeded])
 
   /** 适应视图（用户建议：进入导图直接执行按钮同款函数并平滑处理）：
-   *  工具栏「适应视图」按钮、进入/切换导图首次 fitView 共用同一函数，
-   *  duration 300 平滑动画（与 v1.1 自适应缩放同节奏）。 */
+   *  工具栏「适应视图」按钮、模式切换共用同一函数，
+   *  duration 300 平滑动画（与 v1.1 自适应缩放同节奏）。
+   *  注意：进入/切换导图的首次 fitView 不再由本组件手动触发——由 ReactFlow 的
+   *  fitView prop（fitViewOptions）承担，测量完成即解析（见 NodeMeasureTrigger 注释）。 */
   const fitToView = useCallback(() => {
     void rfRef.current?.fitView({ padding: 0.2, duration: 300 })
   }, [])
-
-  /** 进入/切换导图的首次 fitView：fittedRef 保证只执行一次（mindmapId 变化时重置）。
-   *  由 NodeMeasureTrigger 在节点测量完成后触发（nodesInitialized），修复 0 尺寸包围盒导致 fit 失效。 */
-  const entryFitOnce = useCallback(() => {
-    if (!fittedRef.current) {
-      fittedRef.current = true
-      fitToView()
-    }
-  }, [fitToView])
 
   // 组件卸载清理自适应防抖定时器。
   useEffect(() => () => {
@@ -416,18 +395,16 @@ export function MindMapEditor({
         new Set(current.filter((e) => e.selected).map((e) => e.id)),
       ),
     )
-    if (fittedRef.current) {
-      // 自适应缩放（v1.1 P1）：编辑导致布局/内容变化后，仅当超出视口才自动适应（防抖 300ms）。
-      // 首次进入的 fitView 已移出本 effect——由 NodeMeasureTrigger 在节点测量完成后触发（entryFitOnce），
-      // 避免在 0 尺寸包围盒上计算（实测进入导图内容停在左上角的根因）。
-      scheduleAutoFit()
-    }
+    // 自适应缩放（v1.1 P1）：内容/布局变化后，仅当超出视口才自动适应（防抖 300ms）。
+    // 首次进入的 fitView 由 ReactFlow fitView prop 在节点测量完成时解析（fitViewQueued 机制），
+    // 本处为其兜底：若测量链路异常导致未 fit，内容超出默认视口时 300ms 后仍会自动适应。
+    scheduleAutoFit()
   }, [content, positions, childCount, selectedIds, mode, flashId, mindmapId, links, openNodeLinks, openLinkDialog, updateEdgeLabel, setNodes, setEdges, scheduleAutoFit])
 
-  // 切换模式后坐标来源变化（平铺/重排），重新适应视图。
+  // 切换模式后坐标来源变化（平铺/重排），重新适应视图（平滑动画与「适应视图」按钮同款）。
   useEffect(() => {
-    requestAnimationFrame(() => requestAnimationFrame(() => void rfRef.current?.fitView({ padding: 0.2 })))
-  }, [mode])
+    requestAnimationFrame(() => requestAnimationFrame(() => fitToView()))
+  }, [mode, fitToView])
 
   const trySwitch = useCallback(
     (next: MindmapMode) => {
@@ -776,7 +753,8 @@ export function MindMapEditor({
             }}
             nodesConnectable={mode === 'canvas'}
             nodesFocusable={false}
-            fitView={false}
+            fitView
+            fitViewOptions={{ padding: 0.2, duration: 300 }}
             minZoom={0.2}
             maxZoom={2.5}
             proOptions={{ hideAttribution: true }}
@@ -787,7 +765,7 @@ export function MindMapEditor({
             <Background variant={BackgroundVariant.Dots} gap={24} size={1} />
             <Controls showInteractive={false} />
             <MiniMap pannable zoomable />
-            <NodeMeasureTrigger content={content} onFitted={entryFitOnce} />
+            <NodeMeasureTrigger content={content} />
           </ReactFlow>
         </div>
       )}

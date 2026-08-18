@@ -21,6 +21,23 @@ import { spawn, execFile } from 'node:child_process'
 // 本地 DB 凭据不提交；Electron 主进程会自行从仓库根 .env 加载，本脚本也读一份供 API 冒烟兜底。
 try { process.loadEnvFile(new URL('../.env', import.meta.url)) } catch { /* 无 .env 时回落 shell 环境变量 */ }
 
+// 进入导图自动适应断言（S0/S6 复用，缺陷回归：进入导图应自动适配居中，无需手动点「适应视图」）：
+// 全部节点在画布内（5px 容差）且至少一个节点中心落在画布中部 40% 区域（未适配时内容停在左上角）。
+const FIT_EXPR = `(() => {
+  const canvas = document.querySelector('.mm-canvas')
+  if (!canvas) return { ok: false, reason: '无画布' }
+  const vp = canvas.getBoundingClientRect()
+  const nodes = [...document.querySelectorAll('.react-flow__node')]
+  if (!nodes.length) return { ok: false, reason: '无节点' }
+  const rects = nodes.map(el => { const r = el.getBoundingClientRect(); return { id: el.getAttribute('data-id'), l: r.left, t: r.top, r: r.right, b: r.bottom, cx: (r.left + r.right) / 2, cy: (r.top + r.bottom) / 2 } })
+  const inside = rects.every(r => r.l >= vp.left - 5 && r.t >= vp.top - 5 && r.r <= vp.right + 5 && r.b <= vp.bottom + 5)
+  const centered = rects.some(r => Math.abs(r.cx - (vp.left + vp.width / 2)) / vp.width < 0.4 && Math.abs(r.cy - (vp.top + vp.height / 2)) / vp.height < 0.4)
+  const outside = rects.filter(r => r.l < vp.left - 5 || r.t < vp.top - 5 || r.r > vp.right + 5 || r.b > vp.bottom + 5).slice(0, 4).map(r => ({ id: r.id, l: Math.round(r.l), t: Math.round(r.t), r: Math.round(r.r), b: Math.round(r.b) }))
+  const minIn = Math.min(...rects.map(r => Math.min(r.l - vp.left, r.t - vp.top, vp.right - r.r, vp.bottom - r.b)))
+  const vpTransform = document.querySelector('.react-flow__viewport')?.style?.transform ?? null
+  return { ok: inside && centered, inside, centered, outside, minIn: Math.round(minIn), nodeCount: rects.length, vp: { l: Math.round(vp.left), t: Math.round(vp.top), w: Math.round(vp.width), h: Math.round(vp.height) }, vpTransform }
+})()`
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const STATIC_PORT = 5177
 const CDP_PORT = 9222
@@ -500,6 +517,10 @@ async function main() {
       return { visible: cs.visibility === 'visible', hit: hit === el || el.contains(hit) }
     })()`)
     check('S0b 节点已测量且可见（visibility=visible + 命中检测命中节点）', nodeVisible?.visible === true && nodeVisible?.hit === true, JSON.stringify(nodeVisible))
+    // 进入导图自动适应（缺陷回归：重启后首开导图须自动适配居中，无需手动点「适应视图」）
+    await sleep(900) // 等测量 + fitView 动画（duration 300）结束
+    const fit0 = await d.evaluate(FIT_EXPR)
+    check('S0d 进入导图自动适应（首开即适配居中，无需点「适应视图」）', fit0?.ok === true, JSON.stringify(fit0))
     await d.screenshot('00-editor')
 
     // ---------- S1：树→画布位置合理 + 自由拖动任意节点 + 坐标持久化 ----------
@@ -791,6 +812,12 @@ async function main() {
     await d2.evaluate(`(() => { const li = [...document.querySelectorAll('.workspace-item')].find(li => li.textContent.includes('M2验收百节点'))
       const b = [...li.querySelectorAll('button')].find(x => x.textContent.trim() === '打开'); b.click(); return true })()`)
     await d2.waitFor(`[...document.querySelectorAll('.react-flow__node')].length === 101`, '100 节点+根全部渲染', 20000)
+    // 进入百节点导图自动适应（缺陷回归：节点多时首开即适配，无需二次打开）。
+    // 树模式 100 子节点布局高约 6400px，minZoom 0.2 下视口最多显示 3280px——全显不可能，
+    // 断言用 centered（fit 已触发并居中缩放）而非 inside（受 minZoom 限制属预期）。
+    await sleep(1000) // 等 100 节点测量 + fitView 动画结束
+    const fit6 = await d2.evaluate(FIT_EXPR)
+    check('S6a1 进入百节点导图自动适应（首开即适配居中缩放，无需二次打开）', fit6?.centered === true, JSON.stringify(fit6))
     await d2.clickText('.mm-mode-switch button', '画布')
     await d2.waitFor(`(document.querySelector('.mm-statusbar')?.textContent ?? '').includes('画布模式')`, '百节点切画布')
     await sleep(1000)
