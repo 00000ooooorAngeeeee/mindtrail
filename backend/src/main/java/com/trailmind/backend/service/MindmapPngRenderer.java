@@ -51,6 +51,8 @@ public final class MindmapPngRenderer {
     private static final Color TEXT_COLOR = new Color(0x1f, 0x23, 0x29);
     private static final Color TREE_EDGE = new Color(0xc3, 0xc8, 0xd4);
     private static final Color FREE_EDGE = new Color(0x4f, 0x6b, 0xff);
+    /** 自由边标签相对贝塞尔中点的上浮量（与前端 FreeEdge translateY(-10px) 同构，标签浮于线条上方）。 */
+    private static final int EDGE_LABEL_RAISE = 10;
 
     private static final Map<String, Color[]> COLORS = Map.ofEntries(
             Map.entry("default", colors("#ffffff", "#d9dbe2")),
@@ -358,8 +360,8 @@ public final class MindmapPngRenderer {
         }
     }
 
-    /** 自由边标签（PRD B2.2 P1「可编辑标签」，05 §4 edges[].label）：绘制于贝塞尔中点（t=0.5）的纯文字。
-     *  与前端同构（缺陷修复：原白底胶囊与胶囊标签易混淆，改纯文字 + 四向偏移白字模拟文字描边保证跨线可读）。 */
+    /** 自由边标签（PRD B2.2 P1「可编辑标签」，05 §4 edges[].label）：绘制于贝塞尔中点（t=0.5）上方 10px 的纯文字。
+     *  与前端同构：纯文字 + 四向偏移白字模拟文字描边（原白底胶囊易与胶囊标签混淆）；上浮 10px 对应前端 translateY(-10px)。 */
     private static void drawEdgeLabel(Graphics2D g, Point2D.Double a, Point2D.Double b, String label) {
         double dx = Math.max(40, Math.abs(b.x - a.x) * 0.5);
         // 三次贝塞尔 t=0.5 公式：B(0.5) = (P0 + 3P1 + 3P2 + P3) / 8；P1/P2 与 drawCurve 同构
@@ -370,7 +372,7 @@ public final class MindmapPngRenderer {
         g.setFont(old.deriveFont(11f));
         FontMetrics fm = g.getFontMetrics();
         int textX = (int) Math.round(mx - fm.stringWidth(label) / 2.0);
-        int textY = (int) Math.round(my + fm.getAscent() / 2.0 - 1);
+        int textY = (int) Math.round(my + fm.getAscent() / 2.0 - 1 - EDGE_LABEL_RAISE);
         // 文字描边：±1px 八向白字（与前端 text-shadow 同效），主体文字最后绘制
         g.setColor(Color.WHITE);
         for (int ox = -1; ox <= 1; ox++) {

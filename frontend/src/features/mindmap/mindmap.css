@@ -90,10 +90,14 @@
   stroke-width: 2.5;
 }
 
-/* 自由连线标签（PRD B2.2 P1「可编辑标签」）：纯文字浮于线条上方（缺陷修复：原白底胶囊与
-   胶囊标签/徽标视觉易混淆）。text-shadow 四向 + 模糊模拟描边保证跨线可读；pointer-events 继承
-   EdgeLabelRenderer 的 none，点击/双击穿透到连线本身（FreeEdge <g> 统一处理进入编辑）。 */
+/* 自由连线标签（PRD B2.2 P1「可编辑标签」）：纯文字浮于线条上方（text-shadow 四向 + 模糊模拟描边保证跨线可读）。
+   position absolute + left/top 0 是必须的：所有自由边的标签都渲染进同一个 EdgeLabelRenderer 容器（文档流），
+   缺 absolute 会按文档流堆叠、多标签时逐个下移（实测「文字距离连线太远」根因）；上浮 10px 由 FreeEdge 的
+   translateY(-10px) 承担。pointer-events 继承容器 none，点击/双击穿透到连线本身（FreeEdge <g> 统一处理编辑）。 */
 .mm-edge-label {
+  position: absolute;
+  left: 0;
+  top: 0;
   font-size: 11px;
   line-height: 1.7;
   color: var(--text);

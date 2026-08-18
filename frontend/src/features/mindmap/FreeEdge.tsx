@@ -45,6 +45,8 @@ export function EdgeLabelEditor({
       className="nodrag nopan"
       style={{
         position: 'absolute',
+        left: 0,
+        top: 0,
         transform: `translate(-50%, -50%) translate(${x}px, ${y}px)`,
         pointerEvents: 'all',
       }}
@@ -115,11 +117,14 @@ export function FreeEdge({
         </EdgeLabelRenderer>
       ) : label ? (
         <EdgeLabelRenderer>
-          {/* 标签胶囊：pointer-events 继承 EdgeLabelRenderer 的 none，点击/双击穿透到连线本身，
-              由 <g> 的 onDoubleClick 统一进入编辑（避免覆盖在连线上方挡住边的选中与删除）。 */}
+          {/* 标签：position absolute + left/top 0 是必须的——所有自由边的标签都渲染进同一个
+              EdgeLabelRenderer 容器（文档流），缺 absolute 会按文档流堆叠，多标签时逐个下移
+              （实测「文字距离连线太远」的根因）。translateY(-10px) 让文字浮于线条上方（原建议），
+              pointer-events 继承 EdgeLabelRenderer 的 none，点击/双击穿透到连线本身，
+              由 <g> 的 onDoubleClick 统一进入编辑。 */}
           <div
             className="mm-edge-label"
-            style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
+            style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px) translateY(-10px)` }}
           >
             {String(label)}
           </div>
