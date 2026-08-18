@@ -269,7 +269,10 @@ export default function App() {
         ) : open ? (
           <WorkspaceHome
             ws={open}
-            onBack={() => setOpen(null)}
+            onBack={() => {
+              setOpen(null)
+              void load() // 返回列表页时重拉工作区列表（listWithCounts 唯一计数源），列表项计数同步
+            }}
             onOpenMindmap={setOpenMindmapId}
             onOpenSession={(id) => openSessionTab(id)}
             onOpenSessionEntry={handleOpenSessionEntry}
@@ -427,6 +430,10 @@ function WorkspaceHome({
   const [name, setName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 缺陷修复（新建导图/会话后计数停滞）：头部计数改为实时——
+  // 导图数随本组件加载的列表更新，会话数由 SessionSection 上报；初始值取列表快照避免首帧闪烁。
+  const [mindmapCount, setMindmapCount] = useState(ws.mindmapCount ?? 0)
+  const [sessionCount, setSessionCount] = useState(ws.sessionCount ?? 0)
   // M4 任务五（03 §7.1）：会话是否为空（SessionSection 加载后上报），与导图空共同决定空态引导；
   // null = 会话尚未加载完成，此时不展示引导避免闪烁。
   const [sessionsEmpty, setSessionsEmpty] = useState<boolean | null>(null)
@@ -439,7 +446,9 @@ function WorkspaceHome({
     setLoading(true)
     setError(null)
     try {
-      setMindmaps(await listMindmaps(ws.id))
+      const list = await listMindmaps(ws.id)
+      setMindmaps(list)
+      setMindmapCount(list.length)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载导图失败')
     } finally {
@@ -501,7 +510,7 @@ function WorkspaceHome({
       {ws.description && <p className="muted">{ws.description}</p>}
       {ws.repoPath && <p className="muted">仓库：{ws.repoPath}</p>}
       <p className="muted">
-        导图 {ws.mindmapCount ?? 0} · 会话 {ws.sessionCount ?? 0}
+        导图 {mindmapCount} · 会话 {sessionCount}
       </p>
 
       {showEmptyGuide && (
@@ -550,6 +559,7 @@ function WorkspaceHome({
         onOpenSession={onOpenSession}
         titleInputRef={sessionTitleRef}
         onEmptyChange={setSessionsEmpty}
+        onCountChange={setSessionCount}
         suppressEmptyText={showEmptyGuide}
       />
 

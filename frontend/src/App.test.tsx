@@ -149,7 +149,8 @@ describe('App 首页', () => {
 
     fireEvent.click(await screen.findByText('项目A'))
 
-    expect(screen.getByText('导图 2 · 会话 1')).toBeInTheDocument()
+    // 统计随列表实时刷新（列表为空 → 0/0；旧实现停滞在列表快照的 2/1 属缺陷，已修复）
+    expect(await screen.findByText('导图 0 · 会话 0')).toBeInTheDocument()
     // 无导图无会话 → 居中引导卡片：双入口 + 30 秒快速上手
     expect(await screen.findByTestId('empty-guide')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /新建第一张导图/ })).toBeInTheDocument()
@@ -204,6 +205,44 @@ describe('App 首页', () => {
 
     expect(await screen.findByText('导图A')).toBeInTheDocument()
     expect(screen.getByText('3 节点')).toBeInTheDocument()
+  })
+
+  it('头部计数随列表实时刷新（缺陷修复：不再停滞在列表快照）', async () => {
+    // 列表快照计数为 2/1，但实际列表为空 → 应显示 0/0（列表为权威）
+    workspacesMock.mockResolvedValue([ws])
+    listMindmapsMock.mockResolvedValue([])
+    listSessionsMock.mockResolvedValue([])
+    render(<App />)
+
+    fireEvent.click(await screen.findByText('项目A'))
+    expect(await screen.findByText('导图 0 · 会话 0')).toBeInTheDocument()
+  })
+
+  it('新建导图/会话后头部计数即时 +1，返回列表页重拉计数（缺陷修复）', async () => {
+    workspacesMock.mockResolvedValue([ws])
+    listMindmapsMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([{ id: 11, name: '新导图', nodeCount: 1 }])
+    createMindmapMock.mockResolvedValue({ id: 11, name: '新导图', nodeCount: 1 })
+    listSessionsMock.mockResolvedValue([])
+    render(<App />)
+
+    fireEvent.click(await screen.findByText('项目A'))
+    expect(await screen.findByText('导图 0 · 会话 0')).toBeInTheDocument()
+
+    // 新建导图 → 导图计数 +1
+    fireEvent.change(screen.getByPlaceholderText('输入导图名称'), { target: { value: '新导图' } })
+    fireEvent.click(screen.getByText('新建导图'))
+    await waitFor(() => expect(screen.getByText('导图 1 · 会话 0')).toBeInTheDocument())
+
+    // 新建会话 → 会话计数 +1
+    fireEvent.change(screen.getByPlaceholderText('输入会话标题'), { target: { value: '新会话' } })
+    fireEvent.click(screen.getByText('开始会话'))
+    await waitFor(() => expect(screen.getByText('导图 1 · 会话 1')).toBeInTheDocument())
+
+    // ← 返回列表页 → 重拉工作区列表（listWithCounts 唯一计数源），列表项计数同步
+    fireEvent.click(screen.getByText('← 返回'))
+    await waitFor(() => expect(workspacesMock).toHaveBeenCalledTimes(2))
   })
 
   it('新建导图调用接口并刷新列表', async () => {

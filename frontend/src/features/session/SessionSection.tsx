@@ -13,12 +13,15 @@ export function SessionSection({
   onOpenSession,
   titleInputRef,
   onEmptyChange,
+  onCountChange,
   suppressEmptyText = false,
 }: {
   ws: Workspace
   onOpenSession: (id: number) => void
   titleInputRef?: React.Ref<HTMLInputElement>
   onEmptyChange?: (empty: boolean) => void
+  /** 会话数上报（缺陷修复：工作区头部实时计数，避免新建/删除会话后计数停滞在列表快照）。 */
+  onCountChange?: (count: number) => void
   /** 新工作区空态引导已接管空态展示时，隐藏本区「暂无会话」文本（03 §7.1）。 */
   suppressEmptyText?: boolean
 }) {
@@ -35,12 +38,13 @@ export function SessionSection({
       const list = await listSessions(ws.id)
       setSessions(list)
       onEmptyChange?.(list.length === 0)
+      onCountChange?.(list.length)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载会话失败')
     } finally {
       setLoading(false)
     }
-  }, [ws.id, onEmptyChange])
+  }, [ws.id, onEmptyChange, onCountChange])
 
   useEffect(() => {
     void load()
@@ -53,6 +57,7 @@ export function SessionSection({
     try {
       const created = await createSession(ws.id, { title: trimmed })
       setSessions((prev) => [...prev, created])
+      onCountChange?.(sessions.length + 1)
       setTitle('')
     } catch (e) {
       setError(e instanceof Error ? e.message : '开始会话失败')
