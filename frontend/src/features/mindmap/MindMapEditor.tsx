@@ -366,14 +366,21 @@ export function MindMapEditor({
     }, 300)
   }, [autoFitIfNeeded])
 
+  /** 适应视图（用户建议：进入导图直接执行按钮同款函数并平滑处理）：
+   *  工具栏「适应视图」按钮、进入/切换导图首次 fitView 共用同一函数，
+   *  duration 300 平滑动画（与 v1.1 自适应缩放同节奏）。 */
+  const fitToView = useCallback(() => {
+    void rfRef.current?.fitView({ padding: 0.2, duration: 300 })
+  }, [])
+
   /** 进入/切换导图的首次 fitView：fittedRef 保证只执行一次（mindmapId 变化时重置）。
    *  由 NodeMeasureTrigger 在节点测量完成后触发（nodesInitialized），修复 0 尺寸包围盒导致 fit 失效。 */
   const entryFitOnce = useCallback(() => {
     if (!fittedRef.current) {
       fittedRef.current = true
-      void rfRef.current?.fitView({ padding: 0.2 })
+      fitToView()
     }
-  }, [])
+  }, [fitToView])
 
   // 组件卸载清理自适应防抖定时器。
   useEffect(() => () => {
@@ -605,7 +612,7 @@ export function MindMapEditor({
               ＋便签
             </button>
           )}
-          <button onClick={() => void rfRef.current?.fitView({ padding: 0.2 })}>适应视图</button>
+          <button onClick={() => void fitToView()}>适应视图</button>
           <button onClick={() => void save()} disabled={saving || !dirty}>
             {saving ? '保存中…' : dirty ? '保存*' : '已保存'}
           </button>
