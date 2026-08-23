@@ -79,7 +79,10 @@ class WorkspaceControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.name").value("改名后"))
-                .andExpect(jsonPath("$.data.description").value("新描述"));
+                .andExpect(jsonPath("$.data.description").value("新描述"))
+                // BUG#1：重命名响应须带计数（selectWithCounts），不再为 null 致前端列表项「导图 0 · 会话 0」。
+                .andExpect(jsonPath("$.data.mindmapCount").value(0))
+                .andExpect(jsonPath("$.data.sessionCount").value(0));
 
         mapper.deleteById(id);
     }

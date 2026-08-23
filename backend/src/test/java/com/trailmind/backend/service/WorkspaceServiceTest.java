@@ -91,16 +91,28 @@ class WorkspaceServiceTest {
     }
 
     @Test
-    void update_success_trims_and_updates() {
+    void update_success_trims_updates_and_returns_with_counts() {
         Workspace w = new Workspace();
         w.setId(1L);
         when(mapper.selectById(1L)).thenReturn(w);
+        // update 重命名后回带计数的工作区（selectWithCounts，07 §17 修复二遗留的重命名路径），
+        // 避免 selectById 返回 null 计数导致前端列表项「导图 0 · 会话 0」。
+        Workspace reloaded = new Workspace();
+        reloaded.setId(1L);
+        reloaded.setName("新名");
+        reloaded.setDescription("新描述");
+        reloaded.setMindmapCount(3L);
+        reloaded.setSessionCount(2L);
+        when(mapper.selectWithCounts(1L)).thenReturn(reloaded);
 
         Workspace updated = service.update(1L, "  新名  ", "新描述", null);
 
         assertEquals("新名", updated.getName());
         assertEquals("新描述", updated.getDescription());
-        verify(mapper).updateById(w);
+        assertEquals(3L, updated.getMindmapCount());
+        assertEquals(2L, updated.getSessionCount());
+        verify(mapper).updateById(w);        // 先持久化改名
+        verify(mapper).selectWithCounts(1L); // 再回带计数
     }
 
     @Test

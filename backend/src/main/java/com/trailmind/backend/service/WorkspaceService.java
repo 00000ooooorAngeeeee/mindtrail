@@ -51,7 +51,9 @@ public class WorkspaceService {
         w.setDescription(description);
         w.setRepoPath(validateRepoPath(repoPath));
         mapper.updateById(w);
-        return w;
+        // 重命名不影响计数，但响应需带计数：selectById 不填充 mindmapCount/sessionCount（@TableField(exist=false)），
+        // 直接返回 w 会让前端列表项计数归零（07 §17 修复二遗留的重命名路径）。改回带计数的单行查询。
+        return mapper.selectWithCounts(id);
     }
 
     @Transactional

@@ -21,6 +21,17 @@ public interface WorkspaceMapper extends BaseMapper<Workspace> {
             "FROM workspace w ORDER BY w.id")
     List<Workspace> listWithCounts();
 
+    /**
+     * 单工作区带导图数/会话数统计（与 listWithCounts 同款子查询，单行）。
+     * 用途：PUT /workspaces/{id} 重命名后返回带计数的工作区——selectById 不填充 @TableField(exist=false)
+     * 的 mindmapCount/sessionCount（为 null），前端用此响应直接更新列表项会导致计数归零（需进工作区才刷新）。
+     */
+    @Select("SELECT w.*, " +
+            "(SELECT COUNT(*) FROM mindmap m WHERE m.workspace_id = w.id) AS mindmap_count, " +
+            "(SELECT COUNT(*) FROM session s WHERE s.workspace_id = w.id) AS session_count " +
+            "FROM workspace w WHERE w.id = #{id}")
+    Workspace selectWithCounts(Long id);
+
     @Delete("DELETE FROM entry_tag WHERE entry_id IN " +
             "(SELECT e.id FROM entry e JOIN session s ON e.session_id = s.id WHERE s.workspace_id = #{workspaceId})")
     int deleteEntryTagsByWorkspace(Long workspaceId);
