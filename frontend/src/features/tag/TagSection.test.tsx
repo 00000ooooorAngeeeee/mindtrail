@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { TagSection } from './TagSection'
-import { batchDeleteTags, createTag, deleteTag, filterEntriesByTag, listTags, mergeTag, renameTag } from '../../api/tags'
+import { batchDeleteTags, batchMergeTags, createTag, deleteTag, filterEntriesByTag, listTags, mergeTag, renameTag } from '../../api/tags'
 import type { TagInfo, Workspace } from '../../api/types'
 
 vi.mock('../../api/tags', () => ({
@@ -11,6 +11,7 @@ vi.mock('../../api/tags', () => ({
   mergeTag: vi.fn(),
   deleteTag: vi.fn(),
   batchDeleteTags: vi.fn(),
+  batchMergeTags: vi.fn(),
   filterEntriesByTag: vi.fn(),
 }))
 
@@ -20,6 +21,7 @@ const renameMock = vi.mocked(renameTag)
 const mergeMock = vi.mocked(mergeTag)
 const deleteMock = vi.mocked(deleteTag)
 const batchDeleteMock = vi.mocked(batchDeleteTags)
+const batchMergeMock = vi.mocked(batchMergeTags)
 const filterMock = vi.mocked(filterEntriesByTag)
 
 const ws = { id: 1, name: '项目A' } as Workspace
@@ -37,9 +39,11 @@ describe('TagSection 标签面板（M4 任务二）', () => {
     mergeMock.mockReset()
     deleteMock.mockReset()
     batchDeleteMock.mockReset()
+    batchMergeMock.mockReset()
     filterMock.mockReset()
     listMock.mockResolvedValue(tags)
     batchDeleteMock.mockResolvedValue(undefined)
+    batchMergeMock.mockResolvedValue({ id: 1, workspaceId: 1, name: '技术选型', entryCount: 3 })
     filterMock.mockResolvedValue([])
   })
 
@@ -184,5 +188,20 @@ describe('TagSection 标签面板（M4 任务二）', () => {
     fireEvent.click(screen.getByText('批量删除（2）'))
 
     await waitFor(() => expect(batchDeleteMock).toHaveBeenCalledWith([1, 2]))
+  })
+
+  it('批量合并标签：选择模式 + 选目标 + 二次确认调用接口（v1.2 P2）', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    batchMergeMock.mockResolvedValue({ id: 1, workspaceId: 1, name: '技术选型', entryCount: 3 })
+    listMock.mockResolvedValueOnce(tags).mockResolvedValue([tags[0]])
+    render(<TagSection ws={ws} onOpenSessionEntry={() => {}} />)
+    await screen.findAllByRole('button', { name: '技术选型' })
+
+    fireEvent.click(screen.getByText('批量操作'))
+    fireEvent.click(screen.getByText('全选'))
+    fireEvent.click(screen.getByText('批量合并（2）'))
+    fireEvent.click(screen.getByText('确认合并'))
+
+    await waitFor(() => expect(batchMergeMock).toHaveBeenCalledWith([1, 2], 1))
   })
 })

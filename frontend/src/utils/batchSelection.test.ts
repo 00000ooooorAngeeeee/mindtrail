@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   batchConfirmText,
+  batchMergeConfirmText,
   effectiveSelectedCount,
   isAllSelected,
   selectAllIds,
@@ -42,5 +43,13 @@ describe('batchSelection 纯函数', () => {
     expect(batchConfirmText('导图', 3)).toContain('3 个导图')
     expect(batchConfirmText('导图', 3)).toContain('不可撤销')
     expect(batchConfirmText('工作区', 2, true)).toContain('级联删除其全部子数据')
+  })
+
+  it('batchMergeConfirmText 含目标名、源删除数与不可撤销提示', () => {
+    const t = batchMergeConfirmText(3, '前端')
+    expect(t).toContain('3 个标签')
+    expect(t).toContain('「前端」')
+    expect(t).toContain('2 个标签将被删除')
+    expect(t).toContain('不可撤销')
   })
 })

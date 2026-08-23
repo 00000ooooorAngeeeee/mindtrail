@@ -131,6 +131,28 @@ public class TagService {
     }
 
     /**
+     * 批量合并标签（v1.2 P2，04 §5 POST /tags/batch-merge）：事务内将 ids 中除 targetId 外的每个源标签
+     * 合并到目标标签（复用 {@link #merge(Long, Long)}：条目重挂目标、源删除），返回目标标签最新信息。
+     * targetId 为空 → 400；ids 为空 → 幂等无操作返回目标信息；任一源不存在/跨工作区 → 抛错事务回滚。
+     */
+    @Transactional
+    public TagInfo mergeBatch(List<Long> ids, Long targetId) {
+        if (targetId == null) {
+            throw new BadRequestException("目标标签不能为空");
+        }
+        Tag target = requireTag(targetId);
+        if (ids == null || ids.isEmpty()) {
+            return info(target);
+        }
+        for (Long id : ids) {
+            if (!id.equals(targetId)) {
+                merge(id, targetId);
+            }
+        }
+        return info(target);
+    }
+
+    /**
      * 按标签筛条目（PRD D4）：tagId 必传（404 保护）；sessionId 可选（会话内过滤）。
      * 排序：会话开始时间倒序、会话内 seq 正序；批量回填各条目标签。
      */

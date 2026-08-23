@@ -793,8 +793,8 @@ export async function runChecks(deps = {}) {
     }
   }
 
-  // 6.6 标签往返（M4 任务二）：创建（重复 400）→ 条目打标签 → 列表计数 → 重命名（条目读回新名=全局生效）→
-  //     按标签筛（含会话内过滤）→ 合并（条目重挂目标、源删除）→ 删除（entry_tag 级联清理）
+  // 6.6 标签往返（M4 任务二 + v1.2 P2 批量合并）：创建（重复 400）→ 条目打标签 → 列表计数 → 重命名（条目读回新名=全局生效）→
+  //     按标签筛（含会话内过滤）→ 合并（条目重挂目标、源删除）→ 批量合并（多源进目标、源删除）→ 删除（entry_tag 级联清理）
   try {
     if (!workspaceId) throw new Error('依赖第 3 步的 workspace id')
     const tagKw = `标验${process.pid}${Date.now()}`
@@ -867,6 +867,37 @@ export async function runChecks(deps = {}) {
       throw new Error(`合并后条目标签错误：${JSON.stringify(afterFilter?.json?.data)}`)
     }
 
+    // 批量合并（v1.2 P2）：建丙丁两标签 + 各打一条目，批量合并进甲改 → 两源删除、条目归甲改（目标计数 +1）
+    const t3 = await request(`${BASE}/api/v1/tags`, { method: 'POST', body: { workspaceId, name: `${tagKw}丙` } })
+    const t4 = await request(`${BASE}/api/v1/tags`, { method: 'POST', body: { workspaceId, name: `${tagKw}丁` } })
+    const t3Id = t3?.json?.data?.id
+    const t4Id = t4?.json?.data?.id
+    if (t3?.json?.code !== 0 || t4?.json?.code !== 0 || !t3Id || !t4Id) {
+      throw new Error(`批量合并标签创建失败：${JSON.stringify(t3?.json)} / ${JSON.stringify(t4?.json)}`)
+    }
+    const bmEntry = await request(`${BASE}/api/v1/sessions/${tsid}/entries`, {
+      method: 'POST',
+      body: { type: 'note', contentMd: '批量合并条目', tags: [`${tagKw}丙`, `${tagKw}丁`] },
+    })
+    if (bmEntry?.json?.code !== 0) throw new Error('批量合并条目创建失败')
+    const bmCountBefore = (await request(`${BASE}/api/v1/tags?workspaceId=${workspaceId}`))?.json?.data?.find((t) => t.id === t1Id)?.entryCount
+    const bm = await request(`${BASE}/api/v1/tags/batch-merge`, {
+      method: 'POST',
+      body: { ids: [t3Id, t4Id], targetId: t1Id },
+    })
+    if (bm?.json?.code !== 0 || bm?.json?.data?.id !== t1Id) {
+      throw new Error(`批量合并失败：${JSON.stringify(bm?.json)}`)
+    }
+    const bmTagsAfter = await request(`${BASE}/api/v1/tags?workspaceId=${workspaceId}`)
+    const bmNames = (bmTagsAfter?.json?.data ?? []).map((t) => t.name)
+    if (bmNames.includes(`${tagKw}丙`) || bmNames.includes(`${tagKw}丁`)) {
+      throw new Error('批量合并后源标签应删除')
+    }
+    const bmTargetRow = bmTagsAfter?.json?.data?.find((t) => t.id === t1Id)
+    if (!bmTargetRow || bmTargetRow.entryCount !== bmCountBefore + 1) {
+      throw new Error(`批量合并后目标计数应 +1：${JSON.stringify(bmTargetRow)}`)
+    }
+
     // 删除：entry_tag 级联清理
     const delTag = await request(`${BASE}/api/v1/tags/${t1Id}`, { method: 'DELETE' })
     if (delTag?.json?.code !== 0) throw new Error('删除标签失败')
@@ -878,7 +909,7 @@ export async function runChecks(deps = {}) {
 
     results.push({
       ok: true,
-      name: '标签往返（创建/重复 400/计数/重命名全局生效/按标签筛/合并/删除级联）',
+      name: '标签往返（创建/重复 400/计数/重命名全局生效/按标签筛/合并/批量合并/删除级联）',
     })
   } catch (e) {
     results.push({ ok: false, name: '标签往返', error: e.message })

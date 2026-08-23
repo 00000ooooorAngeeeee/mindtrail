@@ -27,6 +27,11 @@ export function batchDeleteTags(ids: number[]): Promise<void> {
   return post('/tags/batch-delete', { ids })
 }
 
+/** 批量合并标签（v1.2 P2 POST /tags/batch-merge，ids 中除 targetId 外的源合并进目标、源删除，事务回滚）。 */
+export function batchMergeTags(ids: number[], targetId: number): Promise<TagInfo> {
+  return post('/tags/batch-merge', { ids, targetId })
+}
+
 /** 按标签筛条目（PRD D4；sessionId 可选会话内过滤）。 */
 export function filterEntriesByTag(tagId: number, sessionId?: number): Promise<TaggedEntry[]> {
   const q = new URLSearchParams({ tagId: String(tagId) })

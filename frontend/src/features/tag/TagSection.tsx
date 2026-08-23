@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { batchDeleteTags, createTag, deleteTag, filterEntriesByTag, listTags, mergeTag, renameTag } from '../../api/tags'
+import { batchDeleteTags, batchMergeTags, createTag, deleteTag, filterEntriesByTag, listTags, mergeTag, renameTag } from '../../api/tags'
 import type { TagInfo, TaggedEntry, Workspace } from '../../api/types'
 import { ENTRY_TYPE_LABELS } from '../../api/types'
 import { formatTime } from '../session/time'
 import { TagCloud } from './TagCloud'
 import { BatchSelectToolbar } from '../../components/BatchSelectToolbar'
 import { useBatchSelect } from '../../utils/useBatchSelect'
-import { batchConfirmText } from '../../utils/batchSelection'
+import { batchConfirmText, batchMergeConfirmText } from '../../utils/batchSelection'
 import { focusLeftEditor } from '../../utils/renameBlur'
 import './tag.css'
 
@@ -40,6 +40,9 @@ export function TagSection({
   const [filterLoading, setFilterLoading] = useState(false)
   // 批量删除（标签列表，「选择模式」开关 + 复选框 + 全选，04 §5）
   const tBatch = useBatchSelect(tags.map((t) => t.id))
+  // 批量合并（v1.2 P2：选 N 个 → 合并到目标，复用选择模式）
+  const [batchMergeOpen, setBatchMergeOpen] = useState(false)
+  const [batchMergeTarget, setBatchMergeTarget] = useState<number | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -148,6 +151,30 @@ export function TagSection({
     }
   }
 
+  // 批量合并标签（v1.2 P2 POST /tags/batch-merge：所选标签除目标外合并进目标、源删除）
+  const handleBatchMergeTags = async () => {
+    const selectedTags = tags.filter((t) => tBatch.selected.has(t.id))
+    const ids = selectedTags.map((t) => t.id)
+    if (ids.length < 2 || batchMergeTarget == null) return
+    const target = selectedTags.find((t) => t.id === batchMergeTarget)
+    if (!target) return
+    if (!confirm(batchMergeConfirmText(ids.length, target.name))) return
+    try {
+      await batchMergeTags(ids, batchMergeTarget)
+      // 被删源若正被过滤视图聚焦则清空（目标保留，名不变）
+      if (filterTag && ids.includes(filterTag.id) && filterTag.id !== batchMergeTarget) {
+        setFilterTag(null)
+        setFiltered([])
+      }
+      setBatchMergeOpen(false)
+      setBatchMergeTarget(null)
+      tBatch.exit()
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '批量合并标签失败')
+    }
+  }
+
   const firstLine = (md: string) => md.split('\n')[0].trim()
 
   return (
@@ -161,7 +188,28 @@ export function TagSection({
         batch={tBatch}
         canEnter={tags.length > 0}
         onDelete={() => void handleBatchDeleteTags()}
+        onMerge={() => {
+          const first = tags.find((t) => tBatch.selected.has(t.id))
+          setBatchMergeTarget(first ? first.id : null)
+          setBatchMergeOpen(true)
+        }}
       />
+      {batchMergeOpen && (
+        <div className="batch-merge-picker">
+          <span>合并到：</span>
+          <select
+            value={batchMergeTarget ?? ''}
+            onChange={(e) => setBatchMergeTarget(Number(e.target.value))}
+            aria-label="合并目标标签"
+          >
+            {tags.filter((t) => tBatch.selected.has(t.id)).map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+          <button onClick={() => void handleBatchMergeTags()}>确认合并</button>
+          <button onClick={() => { setBatchMergeOpen(false); setBatchMergeTarget(null) }}>取消</button>
+        </div>
+      )}
       {loading ? (
         <p className="muted">加载中…</p>
       ) : tags.length === 0 ? (

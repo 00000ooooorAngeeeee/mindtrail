@@ -247,4 +247,60 @@ class TagServiceTest {
         verify(entryTagMapper, never()).deleteByTag(2L);
         verify(tagMapper, never()).deleteById(2L);
     }
+
+    @Test
+    void mergeBatch_merges_each_source_into_target_and_deletes_sources() {
+        // 目标 3 被每次 merge 的 requireTag(targetId) 重取，故对同一 id 多次 when
+        when(tagMapper.selectById(3L)).thenReturn(tag(3L, 3L, "目标"));
+        when(tagMapper.selectById(1L)).thenReturn(tag(1L, 3L, "源甲"));
+        when(tagMapper.selectById(2L)).thenReturn(tag(2L, 3L, "源乙"));
+        when(entryTagMapper.countByTag(3L)).thenReturn(5L);
+
+        TagService.TagInfo info = service.mergeBatch(List.of(1L, 2L), 3L);
+
+        assertEquals(3L, info.id());
+        assertEquals(5L, info.entryCount());
+        verify(entryTagMapper).retagEntries(1L, 3L);
+        verify(entryTagMapper).retagEntries(2L, 3L);
+        verify(entryTagMapper).deleteByTag(1L);
+        verify(entryTagMapper).deleteByTag(2L);
+        verify(tagMapper).deleteById(1L);
+        verify(tagMapper).deleteById(2L);
+        verify(tagMapper, never()).deleteById(3L); // 目标保留
+    }
+
+    @Test
+    void mergeBatch_null_target_throws_400() {
+        assertThrows(BadRequestException.class, () -> service.mergeBatch(List.of(1L), null));
+        verify(tagMapper, never()).deleteById(anyLong());
+        verify(entryTagMapper, never()).retagEntries(anyLong(), anyLong());
+    }
+
+    @Test
+    void mergeBatch_empty_ids_is_noop_returns_target() {
+        when(tagMapper.selectById(3L)).thenReturn(tag(3L, 3L, "目标"));
+        when(entryTagMapper.countByTag(3L)).thenReturn(2L);
+
+        TagService.TagInfo info = service.mergeBatch(List.of(), 3L);
+
+        assertEquals(3L, info.id());
+        assertEquals(2L, info.entryCount());
+        verify(entryTagMapper, never()).retagEntries(anyLong(), anyLong());
+        verify(tagMapper, never()).deleteById(anyLong());
+    }
+
+    @Test
+    void mergeBatch_source_not_found_throws_404_and_skips_remaining() {
+        when(tagMapper.selectById(3L)).thenReturn(tag(3L, 3L, "目标"));
+        when(tagMapper.selectById(1L)).thenReturn(tag(1L, 3L, "源甲"));
+        when(tagMapper.selectById(2L)).thenReturn(null); // 第二个源不存在
+
+        assertThrows(NotFoundException.class, () -> service.mergeBatch(List.of(1L, 2L), 3L));
+
+        // 第一个源已合并完成，第二个源因不存在抛 404（未 retag/删除）
+        verify(entryTagMapper).retagEntries(1L, 3L);
+        verify(tagMapper).deleteById(1L);
+        verify(entryTagMapper, never()).retagEntries(2L, 3L);
+        verify(tagMapper, never()).deleteById(2L);
+    }
 }

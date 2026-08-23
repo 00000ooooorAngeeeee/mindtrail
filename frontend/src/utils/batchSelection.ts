@@ -32,3 +32,8 @@ export function batchConfirmText(entityLabel: string, count: number, cascade = f
   const note = cascade ? '（将级联删除其全部子数据，此操作不可撤销）' : '（此操作不可撤销）'
   return `确认删除选中的 ${count} 个${entityLabel}？${note}`
 }
+
+/** 批量合并二次确认文案（合并前 confirm() 调用；提示 N-1 个源将被删除、条目改挂目标）。 */
+export function batchMergeConfirmText(sourceCount: number, targetName: string): string {
+  return `确认将选中的 ${sourceCount} 个标签合并到「${targetName}」？其余 ${sourceCount - 1} 个标签将被删除，其条目改挂到「${targetName}」（此操作不可撤销）`
+}

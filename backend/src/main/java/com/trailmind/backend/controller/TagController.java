@@ -64,6 +64,12 @@ public class TagController {
         return ApiResponse.ok(null);
     }
 
+    /** 批量合并标签（v1.2 P2 POST /tags/batch-merge，ids 中除 targetId 外的源合并进目标、源删除，事务回滚）。 */
+    @PostMapping("/tags/batch-merge")
+    public ApiResponse<TagService.TagInfo> batchMerge(@RequestBody BatchMergeRequest req) {
+        return ApiResponse.ok(service.mergeBatch(req.ids(), req.targetId()));
+    }
+
     @GetMapping("/entries")
     public ApiResponse<List<TagService.FilteredEntry>> filterEntries(@RequestParam Long tagId,
                                                                      @RequestParam(required = false) Long sessionId) {
@@ -80,5 +86,9 @@ public class TagController {
 
     /** 合并请求体：源标签（路径 id）合并到 targetId。 */
     public record MergeRequest(Long targetId) {
+    }
+
+    /** 批量合并请求体：ids 为所选标签，targetId 为幸存目标（须为有效标签，余者合并进它后删除）。 */
+    public record BatchMergeRequest(List<Long> ids, Long targetId) {
     }
 }
