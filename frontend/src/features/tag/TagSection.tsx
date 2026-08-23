@@ -7,6 +7,7 @@ import { TagCloud } from './TagCloud'
 import { BatchSelectToolbar } from '../../components/BatchSelectToolbar'
 import { useBatchSelect } from '../../utils/useBatchSelect'
 import { batchConfirmText } from '../../utils/batchSelection'
+import { focusLeftEditor } from '../../utils/renameBlur'
 import './tag.css'
 
 /**
@@ -188,7 +189,13 @@ export function TagSection({
                 </>
               ) : editingId === t.id ? (
                 <span className="item-edit">
-                  <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void submitRename(t.id)} autoFocus />
+                  <input
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && void submitRename(t.id)}
+                    onBlur={(e) => { if (focusLeftEditor(e.relatedTarget)) setEditingId(null) }}
+                    autoFocus
+                  />
                   <button onClick={() => void submitRename(t.id)}>保存</button>
                   <button onClick={() => setEditingId(null)}>取消</button>
                 </span>

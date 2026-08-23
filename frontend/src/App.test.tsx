@@ -143,6 +143,22 @@ describe('App 首页', () => {
     await waitFor(() => expect(screen.getByText('项目B')).toBeInTheDocument())
   })
 
+  it('重命名时点击空白处退出且不保存（保留原内容）', async () => {
+    workspacesMock.mockResolvedValue([ws])
+    render(<App />)
+    await screen.findByText('项目A')
+
+    fireEvent.click(screen.getByText('重命名'))
+    const input = screen.getByDisplayValue('项目A')
+    fireEvent.change(input, { target: { value: '项目B' } })
+    // 点击旁边空白处 → input 失焦（relatedTarget=null）→ 退出重命名，丢弃草稿保留原内容
+    fireEvent.blur(input, { relatedTarget: null })
+
+    await waitFor(() => expect(screen.queryByDisplayValue('项目B')).not.toBeInTheDocument())
+    expect(updateMock).not.toHaveBeenCalled()
+    expect(screen.getByText('项目A')).toBeInTheDocument() // 原内容保留
+  })
+
   it('删除工作区二次确认后调用删除接口', async () => {
     workspacesMock.mockResolvedValue([ws])
     vi.spyOn(window, 'confirm').mockReturnValue(true)

@@ -14,6 +14,7 @@ import { EmptyGuide } from './features/workspace/EmptyGuide'
 import { BatchSelectToolbar } from './components/BatchSelectToolbar'
 import { useBatchSelect } from './utils/useBatchSelect'
 import { batchConfirmText } from './utils/batchSelection'
+import { focusLeftEditor } from './utils/renameBlur'
 import './App.css'
 
 /** 多会话并行视图（v1.1 P1）标签：会话 + 跳转定位参数（打开瞬间有效）。 */
@@ -389,7 +390,13 @@ function WorkspaceItem({
         </>
       ) : editing ? (
         <span className="item-edit">
-          <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} autoFocus />
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+            onBlur={(e) => { if (focusLeftEditor(e.relatedTarget)) setEditing(false) }}
+            autoFocus
+          />
           <button onClick={submit}>保存</button>
           <button onClick={() => setEditing(false)}>取消</button>
         </span>
@@ -460,7 +467,13 @@ function MindmapItem({
         </>
       ) : editing ? (
         <span className="item-edit">
-          <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} autoFocus />
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+            onBlur={(e) => { if (focusLeftEditor(e.relatedTarget)) setEditing(false) }}
+            autoFocus
+          />
           <button onClick={submit}>保存</button>
           <button onClick={() => setEditing(false)}>取消</button>
         </span>

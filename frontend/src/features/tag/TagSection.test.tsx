@@ -94,6 +94,21 @@ describe('TagSection 标签面板（M4 任务二）', () => {
     expect((await screen.findAllByRole('button', { name: '技术选型V2' })).length).toBe(2)
   })
 
+  it('重命名时点击空白处退出且不保存（保留原内容）', async () => {
+    render(<TagSection ws={ws} onOpenSessionEntry={() => {}} />)
+    await screen.findAllByRole('button', { name: '技术选型' })
+
+    fireEvent.click(screen.getAllByText('重命名')[0])
+    const input = screen.getByDisplayValue('技术选型')
+    fireEvent.change(input, { target: { value: '技术选型V2' } })
+    // 点击旁边空白处 → input 失焦（relatedTarget=null）→ 退出重命名，丢弃草稿保留原内容
+    fireEvent.blur(input, { relatedTarget: null })
+
+    await waitFor(() => expect(screen.queryByDisplayValue('技术选型V2')).not.toBeInTheDocument())
+    expect(renameMock).not.toHaveBeenCalled()
+    expect((await screen.findAllByRole('button', { name: '技术选型' })).length).toBe(2) // 原内容保留（云 + 列表）
+  })
+
   it('合并标签调用接口（源合并进目标）', async () => {
     mergeMock.mockResolvedValue(tags[1])
     render(<TagSection ws={ws} onOpenSessionEntry={() => {}} />)
