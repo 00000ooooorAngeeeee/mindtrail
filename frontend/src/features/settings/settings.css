@@ -136,3 +136,39 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* 数据恢复（v1.2 P2，PRD E5「导入恢复」） */
+.settings-restore {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.settings-restore button {
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-restore button:hover {
+  border-color: var(--brand);
+  background: var(--brand-bg);
+}
+
+.settings-restore button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-panel .ok {
+  font-size: 12px;
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--brand-bg);
+  color: var(--brand);
+}
