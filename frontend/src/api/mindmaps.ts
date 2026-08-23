@@ -29,6 +29,11 @@ export function deleteMindmap(id: number): Promise<void> {
   return del<void>(`/mindmaps/${id}`)
 }
 
+/** 批量删除导图（04 §5 POST /mindmaps/batch-delete，事务级联，任一不存在 404 整体回滚）。 */
+export function batchDeleteMindmaps(ids: number[]): Promise<void> {
+  return post<void>('/mindmaps/batch-delete', { ids })
+}
+
 /** 导图导出（PRD B5）：PNG 返回 Base64，OPML 返回 XML 原文；文件名由后端清理后给出。 */
 export function exportMindmap(id: number, type: MindmapExportType): Promise<MindmapExportFile> {
   return post<MindmapExportFile>(`/mindmaps/${id}/export?type=${type}`)

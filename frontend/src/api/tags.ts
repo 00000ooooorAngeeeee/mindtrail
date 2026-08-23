@@ -22,6 +22,11 @@ export function deleteTag(id: number): Promise<void> {
   return del(`/tags/${id}`)
 }
 
+/** 批量删除标签（04 §5 POST /tags/batch-delete，事务级联清 entry_tag，任一不存在 404 整体回滚）。 */
+export function batchDeleteTags(ids: number[]): Promise<void> {
+  return post('/tags/batch-delete', { ids })
+}
+
 /** 按标签筛条目（PRD D4；sessionId 可选会话内过滤）。 */
 export function filterEntriesByTag(tagId: number, sessionId?: number): Promise<TaggedEntry[]> {
   const q = new URLSearchParams({ tagId: String(tagId) })

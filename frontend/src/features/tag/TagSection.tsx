@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { createTag, deleteTag, filterEntriesByTag, listTags, mergeTag, renameTag } from '../../api/tags'
+import { batchDeleteTags, createTag, deleteTag, filterEntriesByTag, listTags, mergeTag, renameTag } from '../../api/tags'
 import type { TagInfo, TaggedEntry, Workspace } from '../../api/types'
 import { ENTRY_TYPE_LABELS } from '../../api/types'
 import { formatTime } from '../session/time'
 import { TagCloud } from './TagCloud'
+import { BatchSelectToolbar } from '../../components/BatchSelectToolbar'
+import { useBatchSelect } from '../../utils/useBatchSelect'
+import { batchConfirmText } from '../../utils/batchSelection'
 import './tag.css'
 
 /**
@@ -34,6 +37,8 @@ export function TagSection({
   const [filterTag, setFilterTag] = useState<TagInfo | null>(null)
   const [filtered, setFiltered] = useState<TaggedEntry[]>([])
   const [filterLoading, setFilterLoading] = useState(false)
+  // 批量删除（标签列表，「选择模式」开关 + 复选框 + 全选，04 §5）
+  const tBatch = useBatchSelect(tags.map((t) => t.id))
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -124,6 +129,24 @@ export function TagSection({
     }
   }
 
+  // 批量删除标签（二次确认，仅解除关联不删条目；04 §5 POST /tags/batch-delete）
+  const handleBatchDeleteTags = async () => {
+    const ids = tags.filter((t) => tBatch.selected.has(t.id)).map((t) => t.id)
+    if (ids.length === 0) return
+    if (!confirm(batchConfirmText('标签', ids.length))) return
+    try {
+      await batchDeleteTags(ids)
+      if (filterTag && ids.includes(filterTag.id)) {
+        setFilterTag(null)
+        setFiltered([])
+      }
+      tBatch.exit()
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '批量删除标签失败')
+    }
+  }
+
   const firstLine = (md: string) => md.split('\n')[0].trim()
 
   return (
@@ -133,6 +156,11 @@ export function TagSection({
           {error}
         </p>
       )}
+      <BatchSelectToolbar
+        batch={tBatch}
+        canEnter={tags.length > 0}
+        onDelete={() => void handleBatchDeleteTags()}
+      />
       {loading ? (
         <p className="muted">加载中…</p>
       ) : tags.length === 0 ? (
@@ -143,8 +171,22 @@ export function TagSection({
           <TagCloud tags={tags} activeTagId={filterTag?.id} onPick={(t) => void openFilter(t)} />
           <ul className="tag-list">
           {tags.map((t) => (
-            <li key={t.id} className="tag-row">
-              {editingId === t.id ? (
+            <li key={t.id} className={`tag-row${tBatch.selected.has(t.id) ? ' selected' : ''}`}>
+              {tBatch.selectMode ? (
+                <>
+                  <input
+                    type="checkbox"
+                    className="batch-checkbox"
+                    checked={tBatch.selected.has(t.id)}
+                    onChange={() => tBatch.toggle(t.id)}
+                    aria-label={`选择 ${t.name}`}
+                  />
+                  <button className="tag-name" onClick={() => tBatch.toggle(t.id)}>
+                    {t.name}
+                    <span className="tag-count">{t.entryCount}</span>
+                  </button>
+                </>
+              ) : editingId === t.id ? (
                 <span className="item-edit">
                   <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void submitRename(t.id)} autoFocus />
                   <button onClick={() => void submitRename(t.id)}>保存</button>

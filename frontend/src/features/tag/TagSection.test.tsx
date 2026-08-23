@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { TagSection } from './TagSection'
-import { createTag, deleteTag, filterEntriesByTag, listTags, mergeTag, renameTag } from '../../api/tags'
+import { batchDeleteTags, createTag, deleteTag, filterEntriesByTag, listTags, mergeTag, renameTag } from '../../api/tags'
 import type { TagInfo, Workspace } from '../../api/types'
 
 vi.mock('../../api/tags', () => ({
@@ -10,6 +10,7 @@ vi.mock('../../api/tags', () => ({
   renameTag: vi.fn(),
   mergeTag: vi.fn(),
   deleteTag: vi.fn(),
+  batchDeleteTags: vi.fn(),
   filterEntriesByTag: vi.fn(),
 }))
 
@@ -18,6 +19,7 @@ const createMock = vi.mocked(createTag)
 const renameMock = vi.mocked(renameTag)
 const mergeMock = vi.mocked(mergeTag)
 const deleteMock = vi.mocked(deleteTag)
+const batchDeleteMock = vi.mocked(batchDeleteTags)
 const filterMock = vi.mocked(filterEntriesByTag)
 
 const ws = { id: 1, name: '项目A' } as Workspace
@@ -34,8 +36,10 @@ describe('TagSection 标签面板（M4 任务二）', () => {
     renameMock.mockReset()
     mergeMock.mockReset()
     deleteMock.mockReset()
+    batchDeleteMock.mockReset()
     filterMock.mockReset()
     listMock.mockResolvedValue(tags)
+    batchDeleteMock.mockResolvedValue(undefined)
     filterMock.mockResolvedValue([])
   })
 
@@ -152,5 +156,18 @@ describe('TagSection 标签面板（M4 任务二）', () => {
     fireEvent.click(screen.getAllByRole('button', { name: '技术选型' })[0])
 
     expect(await screen.findByText('该标签暂无条目')).toBeInTheDocument()
+  })
+
+  it('批量删除标签：选择模式 + 全选 + 二次确认调用接口（04 §5）', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    listMock.mockResolvedValueOnce(tags).mockResolvedValue([])
+    render(<TagSection ws={ws} onOpenSessionEntry={() => {}} />)
+    await screen.findAllByRole('button', { name: '技术选型' })
+
+    fireEvent.click(screen.getByText('批量操作')) // 进入选择模式
+    fireEvent.click(screen.getByText('全选'))
+    fireEvent.click(screen.getByText('批量删除（2）'))
+
+    await waitFor(() => expect(batchDeleteMock).toHaveBeenCalledWith([1, 2]))
   })
 })

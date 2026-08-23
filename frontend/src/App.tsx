@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppStore } from './store/useAppStore'
 import { useSettingsStore } from './store/useSettingsStore'
-import { createMindmap, deleteMindmap, listMindmaps, renameMindmap } from './api/mindmaps'
+import { batchDeleteMindmaps, createMindmap, deleteMindmap, listMindmaps, renameMindmap } from './api/mindmaps'
 import { getSession } from './api/sessions'
 import type { Mindmap, Workspace } from './api/types'
 import { MindMapEditor } from './features/mindmap/MindMapEditor'
@@ -11,6 +11,9 @@ import { SearchOverlay, type SearchNavigateTarget } from './features/search/Sear
 import { SettingsPanel } from './features/settings/SettingsPanel'
 import { TagSection } from './features/tag/TagSection'
 import { EmptyGuide } from './features/workspace/EmptyGuide'
+import { BatchSelectToolbar } from './components/BatchSelectToolbar'
+import { useBatchSelect } from './utils/useBatchSelect'
+import { batchConfirmText } from './utils/batchSelection'
 import './App.css'
 
 /** 多会话并行视图（v1.1 P1）标签：会话 + 跳转定位参数（打开瞬间有效）。 */
@@ -24,7 +27,7 @@ interface SessionTab {
 }
 
 export default function App() {
-  const { health, workspaces, loading, creating, error, load, create, rename, remove } = useAppStore()
+  const { health, workspaces, loading, creating, error, load, create, rename, remove, removeBatch } = useAppStore()
   const [name, setName] = useState('')
   const [open, setOpen] = useState<Workspace | null>(null)
   const [openMindmapId, setOpenMindmapId] = useState<number | null>(null)
@@ -40,6 +43,9 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   // 搜索无结果空态（03 §7.3）：标签快速过滤入口 → 打开工作区首页标签面板并高亮（信号递增触发滚动）
   const [tagFocusSignal, setTagFocusSignal] = useState(0)
+
+  // 批量删除（工作区列表，「选择模式」开关 + 复选框 + 全选，04 §5）
+  const wsBatch = useBatchSelect(workspaces.map((w) => w.id))
 
   useEffect(() => {
     void load()
@@ -166,6 +172,15 @@ export default function App() {
     setName('')
   }
 
+  // 批量删除工作区（级联删全部子数据，二次确认；04 §5 POST /workspaces/batch-delete）
+  const handleBatchDeleteWorkspaces = async () => {
+    const ids = workspaces.filter((w) => wsBatch.selected.has(w.id)).map((w) => w.id)
+    if (ids.length === 0) return
+    if (!confirm(batchConfirmText('工作区', ids.length, true))) return
+    await removeBatch(ids)
+    wsBatch.exit()
+  }
+
   return (
     <div className="app">
       <header className="app-header">
@@ -281,6 +296,11 @@ export default function App() {
         ) : (
           <section className="workspace-panel">
             <h2>工作区</h2>
+            <BatchSelectToolbar
+              batch={wsBatch}
+              canEnter={workspaces.length > 0}
+              onDelete={() => void handleBatchDeleteWorkspaces()}
+            />
             {loading ? (
               <p className="muted">加载中…</p>
             ) : workspaces.length === 0 ? (
@@ -288,7 +308,16 @@ export default function App() {
             ) : (
               <ul className="workspace-list">
                 {workspaces.map((w) => (
-                  <WorkspaceItem key={w.id} ws={w} onOpen={setOpen} onRename={rename} onRemove={remove} />
+                  <WorkspaceItem
+                    key={w.id}
+                    ws={w}
+                    onOpen={setOpen}
+                    onRename={rename}
+                    onRemove={remove}
+                    selectMode={wsBatch.selectMode}
+                    selected={wsBatch.selected.has(w.id)}
+                    onToggleSelect={wsBatch.toggle}
+                  />
                 ))}
               </ul>
             )}
@@ -315,11 +344,17 @@ function WorkspaceItem({
   onOpen,
   onRename,
   onRemove,
+  selectMode = false,
+  selected = false,
+  onToggleSelect,
 }: {
   ws: Workspace
   onOpen: (w: Workspace) => void
   onRename: (id: number, name: string) => Promise<void>
   onRemove: (id: number) => Promise<void>
+  selectMode?: boolean
+  selected?: boolean
+  onToggleSelect?: (id: number) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(ws.name)
@@ -335,8 +370,24 @@ function WorkspaceItem({
   }
 
   return (
-    <li className="workspace-item">
-      {editing ? (
+    <li className={`workspace-item${selected ? ' selected' : ''}`}>
+      {selectMode ? (
+        <>
+          <input
+            type="checkbox"
+            className="batch-checkbox"
+            checked={selected}
+            onChange={() => onToggleSelect?.(ws.id)}
+            aria-label={`选择 ${ws.name}`}
+          />
+          <button className="item-name" onClick={() => onToggleSelect?.(ws.id)}>
+            {ws.name}
+            <span className="item-stats">
+              导图 {ws.mindmapCount ?? 0} · 会话 {ws.sessionCount ?? 0}
+            </span>
+          </button>
+        </>
+      ) : editing ? (
         <span className="item-edit">
           <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} autoFocus />
           <button onClick={submit}>保存</button>
@@ -366,11 +417,17 @@ function MindmapItem({
   onOpen,
   onRename,
   onDelete,
+  selectMode = false,
+  selected = false,
+  onToggleSelect,
 }: {
   m: Mindmap
   onOpen: (id: number) => void
   onRename: (id: number, name: string) => Promise<void>
   onDelete: (id: number) => Promise<void>
+  selectMode?: boolean
+  selected?: boolean
+  onToggleSelect?: (id: number) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(m.name)
@@ -386,8 +443,22 @@ function MindmapItem({
   }
 
   return (
-    <li className="workspace-item">
-      {editing ? (
+    <li className={`workspace-item${selected ? ' selected' : ''}`}>
+      {selectMode ? (
+        <>
+          <input
+            type="checkbox"
+            className="batch-checkbox"
+            checked={selected}
+            onChange={() => onToggleSelect?.(m.id)}
+            aria-label={`选择 ${m.name}`}
+          />
+          <button className="item-name" onClick={() => onToggleSelect?.(m.id)}>
+            {m.name}
+            <span className="item-stats">{m.nodeCount ?? 0} 节点</span>
+          </button>
+        </>
+      ) : editing ? (
         <span className="item-edit">
           <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} autoFocus />
           <button onClick={submit}>保存</button>
@@ -427,6 +498,8 @@ function WorkspaceHome({
   tagFocusSignal?: number
 }) {
   const [mindmaps, setMindmaps] = useState<Mindmap[]>([])
+  // 批量删除（导图列表，「选择模式」开关 + 复选框 + 全选，04 §5）
+  const mmBatch = useBatchSelect(mindmaps.map((m) => m.id))
   const [name, setName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -482,6 +555,20 @@ function WorkspaceHome({
     }
   }
 
+  // 批量删除导图（二次确认；04 §5 POST /mindmaps/batch-delete）
+  const handleBatchDeleteMindmaps = async () => {
+    const ids = mindmaps.filter((m) => mmBatch.selected.has(m.id)).map((m) => m.id)
+    if (ids.length === 0) return
+    if (!confirm(batchConfirmText('导图', ids.length))) return
+    try {
+      await batchDeleteMindmaps(ids)
+      mmBatch.exit()
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '批量删除导图失败')
+    }
+  }
+
   const handleRename = async (id: number, name: string) => {
     try {
       await renameMindmap(id, name)
@@ -522,6 +609,11 @@ function WorkspaceHome({
       )}
 
       <h3>导图</h3>
+      <BatchSelectToolbar
+        batch={mmBatch}
+        canEnter={mindmaps.length > 0}
+        onDelete={() => void handleBatchDeleteMindmaps()}
+      />
       {error && <p className="error" role="alert">{error}</p>}
       {loading ? (
         <p className="muted">加载中…</p>
@@ -536,6 +628,9 @@ function WorkspaceHome({
               onOpen={onOpenMindmap}
               onRename={handleRename}
               onDelete={handleDelete}
+              selectMode={mmBatch.selectMode}
+              selected={mmBatch.selected.has(m.id)}
+              onToggleSelect={mmBatch.toggle}
             />
           ))}
         </ul>

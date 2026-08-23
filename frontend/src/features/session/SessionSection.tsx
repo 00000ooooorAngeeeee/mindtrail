@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { createSession, deleteSession, listSessions } from '../../api/sessions'
+import { batchDeleteSessions, createSession, deleteSession, listSessions } from '../../api/sessions'
 import type { Session, Workspace } from '../../api/types'
 import { formatTime } from './time'
+import { BatchSelectToolbar } from '../../components/BatchSelectToolbar'
+import { useBatchSelect } from '../../utils/useBatchSelect'
+import { batchConfirmText } from '../../utils/batchSelection'
 
 /**
  * 工作区首页的会话区（07 §6 任务一）：
@@ -30,6 +33,8 @@ export function SessionSection({
   const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 批量删除（会话列表，「选择模式」开关 + 复选框 + 全选，04 §5）
+  const sBatch = useBatchSelect(sessions.map((s) => s.id))
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -76,6 +81,20 @@ export function SessionSection({
     }
   }
 
+  // 批量删除会话（二次确认，级联条目；04 §5 POST /sessions/batch-delete）
+  const handleBatchDeleteSessions = async () => {
+    const ids = sessions.filter((s) => sBatch.selected.has(s.id)).map((s) => s.id)
+    if (ids.length === 0) return
+    if (!confirm(batchConfirmText('会话', ids.length))) return
+    try {
+      await batchDeleteSessions(ids)
+      sBatch.exit()
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '批量删除会话失败')
+    }
+  }
+
   return (
     <div className="session-section">
       {error && (
@@ -83,6 +102,11 @@ export function SessionSection({
           {error}
         </p>
       )}
+      <BatchSelectToolbar
+        batch={sBatch}
+        canEnter={sessions.length > 0}
+        onDelete={() => void handleBatchDeleteSessions()}
+      />
       {loading ? (
         <p className="muted">加载中…</p>
       ) : sessions.length === 0 ? (
@@ -90,19 +114,42 @@ export function SessionSection({
       ) : (
         <ul className="workspace-list">
           {sessions.map((s) => (
-            <li key={s.id} className="workspace-item">
-              <button className="item-name" onClick={() => onOpenSession(s.id)}>
-                {s.title}
-                <span className="item-stats">
-                  {s.entryCount ?? 0} 条 · {formatTime(s.startedAt)}
-                </span>
-              </button>
-              <span className={`status-badge status-${s.status}`}>
-                {s.status === 'completed' ? '已完成' : '进行中'}
-              </span>
-              <button className="danger" onClick={() => void handleDelete(s.id)}>
-                删除
-              </button>
+            <li key={s.id} className={`workspace-item${sBatch.selected.has(s.id) ? ' selected' : ''}`}>
+              {sBatch.selectMode ? (
+                <>
+                  <input
+                    type="checkbox"
+                    className="batch-checkbox"
+                    checked={sBatch.selected.has(s.id)}
+                    onChange={() => sBatch.toggle(s.id)}
+                    aria-label={`选择 ${s.title}`}
+                  />
+                  <button className="item-name" onClick={() => sBatch.toggle(s.id)}>
+                    {s.title}
+                    <span className="item-stats">
+                      {s.entryCount ?? 0} 条 · {formatTime(s.startedAt)}
+                    </span>
+                  </button>
+                  <span className={`status-badge status-${s.status}`}>
+                    {s.status === 'completed' ? '已完成' : '进行中'}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <button className="item-name" onClick={() => onOpenSession(s.id)}>
+                    {s.title}
+                    <span className="item-stats">
+                      {s.entryCount ?? 0} 条 · {formatTime(s.startedAt)}
+                    </span>
+                  </button>
+                  <span className={`status-badge status-${s.status}`}>
+                    {s.status === 'completed' ? '已完成' : '进行中'}
+                  </span>
+                  <button className="danger" onClick={() => void handleDelete(s.id)}>
+                    删除
+                  </button>
+                </>
+              )}
             </li>
           ))}
         </ul>

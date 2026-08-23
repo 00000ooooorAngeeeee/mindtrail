@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { fetchHealth } from '../api/health'
-import { createWorkspace, deleteWorkspace, fetchWorkspaces, updateWorkspace } from '../api/workspaces'
+import { batchDeleteWorkspaces, createWorkspace, deleteWorkspace, fetchWorkspaces, updateWorkspace } from '../api/workspaces'
 import type { Health, Workspace } from '../api/types'
 
 interface AppState {
@@ -13,6 +13,7 @@ interface AppState {
   create: (name: string) => Promise<void>
   rename: (id: number, name: string) => Promise<void>
   remove: (id: number) => Promise<void>
+  removeBatch: (ids: number[]) => Promise<void>
 }
 
 export const useAppStore = create<AppState>()((set) => ({
@@ -59,6 +60,15 @@ export const useAppStore = create<AppState>()((set) => ({
       set((s) => ({ workspaces: s.workspaces.filter((w) => w.id !== id) }))
     } catch (e) {
       set({ error: e instanceof Error ? e.message : '删除失败' })
+    }
+  },
+  removeBatch: async (ids) => {
+    if (!ids.length) return
+    try {
+      await batchDeleteWorkspaces(ids)
+      set((s) => ({ workspaces: s.workspaces.filter((w) => !ids.includes(w.id)) }))
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : '批量删除失败' })
     }
   },
 }))

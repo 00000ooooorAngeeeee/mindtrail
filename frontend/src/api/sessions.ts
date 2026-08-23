@@ -27,6 +27,11 @@ export function deleteSession(id: number): Promise<void> {
   return del<void>(`/sessions/${id}`)
 }
 
+/** 批量删除会话（04 §5 POST /sessions/batch-delete，事务级联，任一不存在 404 整体回滚）。 */
+export function batchDeleteSessions(ids: number[]): Promise<void> {
+  return post<void>('/sessions/batch-delete', { ids })
+}
+
 /** 会话导出 Markdown（严格 06 §4 协议；data 为 Markdown 文本）。 */
 export function exportSessionMarkdown(id: number): Promise<string> {
   return get<string>(`/sessions/${id}/export/markdown`)

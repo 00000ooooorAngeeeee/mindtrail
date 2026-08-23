@@ -20,3 +20,8 @@ export function updateWorkspace(id: number, patch: { name: string }): Promise<Wo
 export function deleteWorkspace(id: number): Promise<void> {
   return del<void>(`/workspaces/${id}`)
 }
+
+/** 批量删除工作区（04 §5 POST /workspaces/batch-delete，事务级联，任一不存在 404 整体回滚）。 */
+export function batchDeleteWorkspaces(ids: number[]): Promise<void> {
+  return post<void>('/workspaces/batch-delete', { ids })
+}

@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import App from './App'
 import { fetchHealth } from './api/health'
-import { deleteWorkspace, fetchWorkspaces, updateWorkspace } from './api/workspaces'
-import { createMindmap, deleteMindmap, listMindmaps, renameMindmap } from './api/mindmaps'
-import { createSession, deleteSession, getSession, listSessions } from './api/sessions'
+import { batchDeleteWorkspaces, deleteWorkspace, fetchWorkspaces, updateWorkspace } from './api/workspaces'
+import { batchDeleteMindmaps, createMindmap, deleteMindmap, listMindmaps, renameMindmap } from './api/mindmaps'
+import { batchDeleteSessions, createSession, deleteSession, getSession, listSessions } from './api/sessions'
 import { listTags } from './api/tags'
 import { fetchSettings } from './api/settings'
 import { searchGlobal } from './api/search'
@@ -16,12 +16,14 @@ vi.mock('./api/workspaces', () => ({
   createWorkspace: vi.fn(),
   updateWorkspace: vi.fn(),
   deleteWorkspace: vi.fn(),
+  batchDeleteWorkspaces: vi.fn(),
 }))
 vi.mock('./api/mindmaps', () => ({
   listMindmaps: vi.fn(),
   createMindmap: vi.fn(),
   deleteMindmap: vi.fn(),
   renameMindmap: vi.fn(),
+  batchDeleteMindmaps: vi.fn(),
 }))
 vi.mock('./api/sessions', () => ({
   listSessions: vi.fn(),
@@ -29,6 +31,7 @@ vi.mock('./api/sessions', () => ({
   deleteSession: vi.fn(),
   getSession: vi.fn(),
   updateSession: vi.fn(),
+  batchDeleteSessions: vi.fn(),
 }))
 vi.mock('./api/tags', () => ({
   listTags: vi.fn(),
@@ -49,13 +52,16 @@ const healthMock = vi.mocked(fetchHealth)
 const workspacesMock = vi.mocked(fetchWorkspaces)
 const updateMock = vi.mocked(updateWorkspace)
 const deleteMock = vi.mocked(deleteWorkspace)
+const batchDeleteWsMock = vi.mocked(batchDeleteWorkspaces)
 const listMindmapsMock = vi.mocked(listMindmaps)
 const createMindmapMock = vi.mocked(createMindmap)
 const deleteMindmapMock = vi.mocked(deleteMindmap)
+const batchDeleteMindmapMock = vi.mocked(batchDeleteMindmaps)
 const renameMindmapMock = vi.mocked(renameMindmap)
 const listSessionsMock = vi.mocked(listSessions)
 const createSessionMock = vi.mocked(createSession)
 const deleteSessionMock = vi.mocked(deleteSession)
+const batchDeleteSessionMock = vi.mocked(batchDeleteSessions)
 const getSessionMock = vi.mocked(getSession)
 const listTagsMock = vi.mocked(listTags)
 const settingsMock = vi.mocked(fetchSettings)
@@ -69,6 +75,9 @@ describe('App 首页', () => {
     workspacesMock.mockReset()
     updateMock.mockReset()
     deleteMock.mockReset()
+    batchDeleteWsMock.mockReset()
+    batchDeleteMindmapMock.mockReset()
+    batchDeleteSessionMock.mockReset()
     listMindmapsMock.mockReset()
     createMindmapMock.mockReset()
     deleteMindmapMock.mockReset()
@@ -89,6 +98,9 @@ describe('App 首页', () => {
     workspacesMock.mockResolvedValue([])
     updateMock.mockResolvedValue({ ...ws })
     deleteMock.mockResolvedValue(undefined)
+    batchDeleteWsMock.mockResolvedValue(undefined)
+    batchDeleteMindmapMock.mockResolvedValue(undefined)
+    batchDeleteSessionMock.mockResolvedValue(undefined)
     listMindmapsMock.mockResolvedValue([])
     createMindmapMock.mockResolvedValue({ id: 10, name: '新导图', nodeCount: 1 })
     deleteMindmapMock.mockResolvedValue(undefined)
@@ -387,5 +399,58 @@ describe('App 首页', () => {
 
     fireEvent.click(screen.getByText('← 返回'))
     expect(screen.getByText('暂无工作区')).toBeInTheDocument()
+  })
+
+  it('批量删除工作区：选择模式 + 全选 + 二次确认调用接口（04 §5）', async () => {
+    workspacesMock.mockResolvedValue([ws, { ...ws, id: 2, name: '项目B' }])
+    batchDeleteWsMock.mockResolvedValue(undefined)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<App />)
+    await screen.findByText('项目A')
+
+    fireEvent.click(screen.getByText('批量操作')) // 进入选择模式
+    fireEvent.click(screen.getByText('全选'))
+    fireEvent.click(screen.getByText('批量删除（2）'))
+
+    await waitFor(() => expect(batchDeleteWsMock).toHaveBeenCalledWith([1, 2]))
+  })
+
+  it('批量删除导图：进入工作区后选择模式批量删除（04 §5）', async () => {
+    workspacesMock.mockResolvedValue([ws])
+    listMindmapsMock.mockResolvedValueOnce([
+      { id: 10, name: '导图A', nodeCount: 1 },
+      { id: 11, name: '导图B', nodeCount: 2 },
+    ]).mockResolvedValue([])
+    batchDeleteMindmapMock.mockResolvedValue(undefined)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<App />)
+    fireEvent.click(await screen.findByText('项目A'))
+    await screen.findByText('导图A')
+
+    fireEvent.click(screen.getByText('批量操作'))
+    fireEvent.click(screen.getByText('全选'))
+    fireEvent.click(screen.getByText('批量删除（2）'))
+
+    await waitFor(() => expect(batchDeleteMindmapMock).toHaveBeenCalledWith([10, 11]))
+  })
+
+  it('批量删除会话：选择模式批量删除（04 §5）', async () => {
+    workspacesMock.mockResolvedValue([ws])
+    listMindmapsMock.mockResolvedValue([])
+    listSessionsMock.mockResolvedValueOnce([
+      { id: 1, title: '会话A', status: 'active' },
+      { id: 2, title: '会话B', status: 'active' },
+    ]).mockResolvedValue([])
+    batchDeleteSessionMock.mockResolvedValue(undefined)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<App />)
+    fireEvent.click(await screen.findByText('项目A'))
+    await screen.findByText('会话A')
+
+    fireEvent.click(screen.getByText('批量操作'))
+    fireEvent.click(screen.getByText('全选'))
+    fireEvent.click(screen.getByText('批量删除（2）'))
+
+    await waitFor(() => expect(batchDeleteSessionMock).toHaveBeenCalledWith([1, 2]))
   })
 })
