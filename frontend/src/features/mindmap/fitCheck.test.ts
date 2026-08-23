@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeFitViewport, contentExceedsViewport } from './fitCheck'
+import { computeFitViewport, contentExceedsViewport, nodesReadyForFit } from './fitCheck'
 
 describe('自适应缩放判定（v1.1 P1）', () => {
   // 视口 1000×600、zoom=1、viewport {x:0,y:0} → 可见区 left=0 top=0 w=1000 h=600；pad=80/48
@@ -158,5 +158,40 @@ describe('computeFitViewport（首开适应兜底，确定性由坐标计算）'
     expect(r).not.toBeNull()
     expect(r!.zoom).toBe(2.5)
     expect(r!.x + -720 * r!.zoom).toBeCloseTo(500, 5)
+  })
+})
+
+describe('fit 前就绪判定 nodesReadyForFit（07 §25 切换导图 fit 竞态）', () => {
+  const mk = (id: string, w = 100, h = 44) => ({ id, measured: { width: w, height: h } })
+  const positions = new Map<string, unknown>([
+    ['a', {}],
+    ['b', {}],
+    ['c', {}],
+  ])
+
+  it('store 节点恰好为本图全部且宽高齐：就绪', () => {
+    expect(nodesReadyForFit([mk('a'), mk('b'), mk('c')], positions)).toBe(true)
+  })
+
+  it('store 为空：未就绪', () => {
+    expect(nodesReadyForFit([], positions)).toBe(false)
+  })
+
+  it('切图后 store 残留上一图节点（数量不等）：未就绪', () => {
+    expect(nodesReadyForFit([mk('a'), mk('b')], positions)).toBe(false)
+  })
+
+  it('数量相等但 id 不属于本图（两张同节点数导图切换）：未就绪', () => {
+    expect(nodesReadyForFit([mk('x'), mk('y'), mk('z')], positions)).toBe(false)
+  })
+
+  it('宽度已测、高度缺失（包围盒纵向残缺）：未就绪', () => {
+    const partial = [mk('a'), mk('b'), { id: 'c', measured: { width: 100 } }]
+    expect(nodesReadyForFit(partial, positions)).toBe(false)
+  })
+
+  it('部分节点未测量：未就绪', () => {
+    const partial = [mk('a'), mk('b'), { id: 'c' }]
+    expect(nodesReadyForFit(partial, positions)).toBe(false)
   })
 })

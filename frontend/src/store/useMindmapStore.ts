@@ -139,7 +139,19 @@ export const useMindmapStore = create<MindmapState>()((set, get) => {
 
     load: async (id) => {
       clearTimer()
-      set({ loading: true, error: null })
+      // 07 §25：切换导图时立即清空旧内容——旧 content/positions 残留会与「新 mindmapId + 旧 positions」
+      // 组合，使自动适应门控（nodesReadyForFit）对上一图边界成立 → fitView 用错边界且 doneKey 记到
+      // 新图 key 上，新图真正内容到达后不再适应（「切图往返随机无法适应」根因，实机打点证实）。
+      set({
+        loading: true,
+        error: null,
+        mindmap: null,
+        content: null,
+        history: { past: [], future: [] },
+        selectedIds: [],
+        mode: 'tree',
+        dirty: false,
+      })
       try {
         const mindmap = await getMindmap(id)
         set({

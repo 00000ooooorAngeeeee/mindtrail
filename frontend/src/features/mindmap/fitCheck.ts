@@ -72,8 +72,7 @@ export function computeFitViewport(
   padding: number,
   minZoom: number,
   maxZoom: number,
-): { x: number; y: number; zoom: number } | null {
-  if (positions.length === 0 || viewportWidth <= 0 || viewportHeight <= 0) return null
+): { x: number; y: number; zoom: number } | null {  if (positions.length === 0 || viewportWidth <= 0 || viewportHeight <= 0) return null
   let minX = Infinity
   let minY = Infinity
   let maxX = -Infinity
@@ -104,4 +103,29 @@ export function computeFitViewport(
     y: viewportHeight / 2 - cy * zoom,
     zoom,
   }
+}
+
+/**
+ * 首开/切图自动适应前的就绪判定（07 §25 切换导图 fit 竞态根因修复）：
+ * React Flow store 中的节点必须「恰好是本图全部节点且宽高均已测量」，才允许 fitView。
+ *
+ * 两类时序竞态（Electron 实机 CDP 打点证实）：
+ * 1) 切换导图时 MindMapEditor 不重挂载、RF store 持久——新图 positions 先于 setNodes 到位，
+ *    store 内仍是上一图的已测量节点（数量/边界均错误），旧门控「store 节点全部已测量」对残留
+ *    节点成立 → fitView 用旧图边界算缩放，新图渲染进错误视口（「进入导图无法自动适应」，往返
+ *    切换随机复现）。
+ * 2) 节点宽度已测量而高度尚未回填时，包围盒纵向残缺 → fit 缩放偏大、底部溢出。
+ *
+ * 判定：数量相等 + 每个 id 均属于本图 + width/height 均已测量（真实环境由 ResizeObserver 回填；
+ * jsdom 无真实布局不会翻转 → 主路径放弃，由 800ms 确定性兜底 computeFitViewport 接管）。
+ */
+export function nodesReadyForFit(
+  storeNodes: Array<{ id: string; measured?: { width?: number; height?: number } }>,
+  positions: Map<string, unknown>,
+): boolean {
+  return (
+    storeNodes.length > 0 &&
+    storeNodes.length === positions.size &&
+    storeNodes.every((n) => positions.has(n.id) && !!n.measured?.width && !!n.measured?.height)
+  )
 }

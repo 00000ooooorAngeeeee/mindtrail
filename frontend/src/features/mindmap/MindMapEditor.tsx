@@ -29,7 +29,7 @@ import { downloadBase64File, downloadTextFile } from '../../utils/download'
 import { descendants } from './content'
 import type { MindmapContent } from './content'
 import { computeTreeLayout, type LayoutPoint } from './treeLayout'
-import { computeFitViewport, contentExceedsViewport } from './fitCheck'
+import { computeFitViewport, contentExceedsViewport, nodesReadyForFit } from './fitCheck'
 import { MindmapNode, type MindmapRFNode } from './MindmapNode'
 import { FreeEdge, type FreeEdgeData } from './FreeEdge'
 import { NODE_COLORS, NODE_SHAPES } from './nodeStyle'
@@ -94,9 +94,11 @@ function NodeMeasureTrigger({ content }: { content: MindmapContent | null }) {
  * 首开失效，已回退。
  *
  * 现改为：主路径 effect 不再依赖 useNodesInitialized（避免重建翻 false 触发清理取消 fitView），改为
- * positions 就绪后以 rAF 轮询 rf.getNodes() 的 measured，全部测量完成即一次性 fitView 并置 doneKey。
- * 重建造成的瞬时 measured 重置不再取消已排程的拟合（effect 不重排），fitView 必然执行。保留
- * computeFitViewport 兜底（jsdom 无真实布局 / 极端未测量情况，由节点坐标确定性计算）。
+ * positions 就绪后以 rAF 轮询 nodesReadyForFit(rf.getNodes(), positions)——store 节点须恰为本图全部
+ * 节点且宽高测量完整（07 §25：防切图时 store 残留上一图已测量节点致 fitView 用错边界），就绪即
+ * 一次性 fitView 并置 doneKey。重建造成的瞬时 measured 重置不再取消已排程的拟合（effect 不重排），
+ * fitView 必然执行。保留 computeFitViewport 兜底（jsdom 无真实布局 / 极端未测量情况，由节点坐标
+ * 确定性计算）。
  */
 function InitialFitController({
   positions,
@@ -129,15 +131,16 @@ function InitialFitController({
     let tries = 0
     const tick = () => {
       if (doneKeyRef.current === key) return // 同 key 重排时直接退出，避免重复 fit
-      const ns = rf.getNodes()
-      const allMeasured = ns.length > 0 && ns.every((n) => n.measured?.width)
+      // 就绪判定（07 §25）：store 节点须恰为本图全部节点且宽高测量完整——
+      // 防切图时 store 残留上一图已测量节点 / 高度未回填两类竞态导致 fitView 用残缺边界。
+      const allMeasured = nodesReadyForFit(rf.getNodes(), positions)
       if (allMeasured) {
         doneKeyRef.current = key
         rf.fitView({ padding: 0.2, duration: 300 })
         onFitDone(key, performance.now() + 350)
         return
       }
-      if (tries > 30) return // ~500ms 仍未测量完成：放弃主路径，交由下方 800ms 兜底确定性计算
+      if (tries > 30) return // ~500ms 仍未就绪：放弃主路径，交由下方 800ms 兜底确定性计算
       tries++
       raf = requestAnimationFrame(tick)
     }
