@@ -25,6 +25,8 @@
   --mark-bg: #fff3bf;
   --overlay: rgba(15, 18, 26, 0.45);
   --edge: #8b93a7;
+  /* 浮岛投影（v1.2 P2 悬浮岛式壳层）：柔和低投影，浅色克制 */
+  --shadow: 0 2px 10px rgba(15, 18, 26, 0.06), 0 1px 2px rgba(15, 18, 26, 0.04);
   /* 节点为内容色板（浅底深字，05 §4 style.color），深浅主题下均保持便签效果 */
   --node-text: #1f2430;
 }
@@ -53,6 +55,7 @@
   --mark-bg: #5a4b1a;
   --overlay: rgba(0, 0, 0, 0.6);
   --edge: #4a5162;
+  --shadow: 0 2px 10px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.25);
 }
 
 * {

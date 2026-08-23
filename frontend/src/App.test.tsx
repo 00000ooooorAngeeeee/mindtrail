@@ -71,6 +71,7 @@ const ws = { id: 1, name: '项目A', mindmapCount: 2, sessionCount: 1 }
 
 describe('App 首页', () => {
   beforeEach(() => {
+    vi.useRealTimers()
     healthMock.mockReset()
     workspacesMock.mockReset()
     updateMock.mockReset()
@@ -160,17 +161,34 @@ describe('App 首页', () => {
     expect(screen.getByText('项目A')).toBeInTheDocument() // 原内容保留
   })
 
-  it('删除工作区二次确认后调用删除接口', async () => {
+  it('删除工作区带撤销：到期未撤销调用删除接口（v1.2 P2）', async () => {
     workspacesMock.mockResolvedValue([ws])
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<App />)
-
-    fireEvent.click(await screen.findByText('删除'))
-
-    await waitFor(() => expect(deleteMock).toHaveBeenCalledWith(1))
+    await screen.findByText('项目A')
+    // 工作区未展开 → 仅工作区行「删除」唯一
+    vi.useFakeTimers()
+    fireEvent.click(screen.getByText('删除'))
+    vi.advanceTimersByTime(5000)
+    await vi.runAllTicks()
+    expect(deleteMock).toHaveBeenCalledWith(1)
+    vi.useRealTimers()
   })
 
-  it('点击工作区进入详情页显示统计与空态引导（03 §7.1）', async () => {
+  it('删除工作区带撤销：撤销则不删除并恢复（v1.2 P2）', async () => {
+    workspacesMock.mockResolvedValue([ws])
+    render(<App />)
+    await screen.findByText('项目A')
+    vi.useFakeTimers()
+    fireEvent.click(screen.getByText('删除'))
+    fireEvent.click(screen.getByText('撤销'))
+    vi.advanceTimersByTime(5000)
+    await vi.runAllTicks()
+    expect(deleteMock).not.toHaveBeenCalled()
+    expect(screen.getByText('项目A')).toBeInTheDocument() // 恢复
+    vi.useRealTimers()
+  })
+
+  it('点击工作区进入 overview 显示统计与空态引导（03 §7.1）', async () => {
     workspacesMock.mockResolvedValue([ws])
     listMindmapsMock.mockResolvedValue([])
     listSessionsMock.mockResolvedValue([])
@@ -178,19 +196,19 @@ describe('App 首页', () => {
 
     fireEvent.click(await screen.findByText('项目A'))
 
-    // 统计随列表实时刷新（列表为空 → 0/0；旧实现停滞在列表快照的 2/1 属缺陷，已修复）
+    // 侧边栏工作区行计数随列表实时刷新（0/0；旧实现停滞在快照 2/1 属缺陷，已修复）
     expect(await screen.findByText('导图 0 · 会话 0')).toBeInTheDocument()
-    // 无导图无会话 → 居中引导卡片：双入口 + 30 秒快速上手
+    // 两列表均空 → 右侧 overview 居中引导卡片：双入口 + 30 秒快速上手
     expect(await screen.findByTestId('empty-guide')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /新建第一张导图/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /开始第一次会话/ })).toBeInTheDocument()
     expect(screen.getByText('30 秒快速上手')).toBeInTheDocument()
-    // 空态引导接管后，不再显示「暂无导图/暂无会话」文本
+    // 空态引导接管后，侧边栏列表不再显示「暂无导图/暂无会话」文本
     expect(screen.queryByText(/暂无导图/)).not.toBeInTheDocument()
     expect(screen.queryByText(/暂无会话/)).not.toBeInTheDocument()
   })
 
-  it('空态引导入口聚焦对应创建输入框（03 §7.1）', async () => {
+  it('空态引导入口聚焦对应侧边栏创建输入框（03 §7.1）', async () => {
     workspacesMock.mockResolvedValue([ws])
     listMindmapsMock.mockResolvedValue([])
     listSessionsMock.mockResolvedValue([])
@@ -206,7 +224,7 @@ describe('App 首页', () => {
     expect(screen.getByPlaceholderText('输入会话标题')).toHaveFocus()
   })
 
-  it('搜索无结果时「按标签浏览」入口跳转工作区标签面板（03 §7.3）', async () => {
+  it('搜索无结果时「按标签浏览」入口打开右侧标签云并闪烁（03 §7.3）', async () => {
     workspacesMock.mockResolvedValue([ws])
     listMindmapsMock.mockResolvedValue([])
     listSessionsMock.mockResolvedValue([])
@@ -219,13 +237,13 @@ describe('App 首页', () => {
     fireEvent.change(screen.getByLabelText('搜索关键词'), { target: { value: '不存在词' } })
     fireEvent.click(await screen.findByRole('button', { name: /按标签浏览/ }))
 
-    // 浮层关闭，回到工作区首页，标签面板聚焦闪烁
+    // 浮层关闭，右侧标签云视图出现并闪烁高亮
     await waitFor(() => expect(screen.queryByLabelText('搜索关键词')).not.toBeInTheDocument())
-    expect(await screen.findByText(/新建第一张导图/)).toBeInTheDocument()
+    expect(await screen.findByText(/暂无标签/)).toBeInTheDocument()
     expect(document.querySelector('.tag-section-flash')).not.toBeNull()
   })
 
-  it('进入工作区详情显示导图列表', async () => {
+  it('展开工作区显示导图列表', async () => {
     workspacesMock.mockResolvedValue([ws])
     listMindmapsMock.mockResolvedValue([{ id: 10, name: '导图A', nodeCount: 3 }])
     render(<App />)
@@ -236,7 +254,7 @@ describe('App 首页', () => {
     expect(screen.getByText('3 节点')).toBeInTheDocument()
   })
 
-  it('头部计数随列表实时刷新（缺陷修复：不再停滞在列表快照）', async () => {
+  it('侧边栏工作区行计数随列表实时刷新（缺陷修复：不再停滞在快照）', async () => {
     // 列表快照计数为 2/1，但实际列表为空 → 应显示 0/0（列表为权威）
     workspacesMock.mockResolvedValue([ws])
     listMindmapsMock.mockResolvedValue([])
@@ -247,7 +265,7 @@ describe('App 首页', () => {
     expect(await screen.findByText('导图 0 · 会话 0')).toBeInTheDocument()
   })
 
-  it('新建导图/会话后头部计数即时 +1，返回列表页重拉计数（缺陷修复）', async () => {
+  it('新建导图/会话后侧边栏行计数即时 +1（缺陷修复）', async () => {
     workspacesMock.mockResolvedValue([ws])
     listMindmapsMock
       .mockResolvedValueOnce([])
@@ -268,10 +286,6 @@ describe('App 首页', () => {
     fireEvent.change(screen.getByPlaceholderText('输入会话标题'), { target: { value: '新会话' } })
     fireEvent.click(screen.getByText('开始会话'))
     await waitFor(() => expect(screen.getByText('导图 1 · 会话 1')).toBeInTheDocument())
-
-    // ← 返回列表页 → 重拉工作区列表（listWithCounts 唯一计数源），列表项计数同步
-    fireEvent.click(screen.getByText('← 返回'))
-    await waitFor(() => expect(workspacesMock).toHaveBeenCalledTimes(2))
   })
 
   it('新建导图调用接口并刷新列表', async () => {
@@ -290,37 +304,54 @@ describe('App 首页', () => {
     expect(await screen.findByText('新导图')).toBeInTheDocument()
   })
 
-  it('删除导图二次确认后调用接口', async () => {
+  it('删除导图带撤销：到期未撤销调用接口（v1.2 P2）', async () => {
     workspacesMock.mockResolvedValue([ws])
     listMindmapsMock.mockResolvedValue([{ id: 10, name: '导图A', nodeCount: 3 }])
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<App />)
-
     fireEvent.click(await screen.findByText('项目A'))
-    fireEvent.click(await screen.findByText('删除'))
+    const mmGroup = await screen.findByTestId('mindmap-group')
+    vi.useFakeTimers()
+    fireEvent.click(within(mmGroup).getByText('删除'))
+    vi.advanceTimersByTime(5000)
+    await vi.runAllTicks()
+    expect(deleteMindmapMock).toHaveBeenCalledWith(10)
+    vi.useRealTimers()
+  })
 
-    await waitFor(() => expect(deleteMindmapMock).toHaveBeenCalledWith(10))
+  it('删除导图带撤销：撤销则不删除并恢复（v1.2 P2）', async () => {
+    workspacesMock.mockResolvedValue([ws])
+    listMindmapsMock.mockResolvedValue([{ id: 10, name: '导图A', nodeCount: 3 }])
+    render(<App />)
+    fireEvent.click(await screen.findByText('项目A'))
+    await screen.findByTestId('mindmap-group')
+    vi.useFakeTimers()
+    fireEvent.click(within(screen.getByTestId('mindmap-group')).getByText('删除'))
+    fireEvent.click(screen.getByText('撤销'))
+    vi.advanceTimersByTime(5000)
+    await vi.runAllTicks()
+    expect(deleteMindmapMock).not.toHaveBeenCalled()
+    expect(screen.getByText('导图A')).toBeInTheDocument() // 恢复
+    vi.useRealTimers()
   })
 
   it('重命名导图调用接口并刷新列表（PRD B4）', async () => {
     workspacesMock.mockResolvedValue([ws])
-    listMindmapsMock
-      .mockResolvedValueOnce([{ id: 10, name: '导图A', nodeCount: 3 }])
-      .mockResolvedValue([{ id: 10, name: '导图B', nodeCount: 3 }])
+    listMindmapsMock.mockResolvedValueOnce([{ id: 10, name: '导图A', nodeCount: 3 }])
     renameMindmapMock.mockResolvedValue({ id: 10, name: '导图B', nodeCount: 3 })
     render(<App />)
 
     fireEvent.click(await screen.findByText('项目A'))
-    fireEvent.click((await screen.findAllByText('重命名'))[0])
-    const input = screen.getByDisplayValue('导图A')
+    const mmGroup = await screen.findByTestId('mindmap-group')
+    fireEvent.click(within(mmGroup).getByText('重命名'))
+    const input = within(mmGroup).getByDisplayValue('导图A')
     fireEvent.change(input, { target: { value: '导图B' } })
-    fireEvent.click(screen.getByText('保存'))
+    fireEvent.click(within(mmGroup).getByText('保存'))
 
     await waitFor(() => expect(renameMindmapMock).toHaveBeenCalledWith(10, '导图B'))
-    expect(await screen.findByText('导图B')).toBeInTheDocument()
+    expect(await within(mmGroup).findByText('导图B')).toBeInTheDocument()
   })
 
-  it('工作区页显示会话列表并可开始新会话', async () => {
+  it('展开工作区显示会话列表并可开始新会话', async () => {
     workspacesMock.mockResolvedValue([ws])
     listSessionsMock.mockResolvedValue([
       { id: 7, title: '会话A', status: 'active', entryCount: 3, startedAt: '2025-06-01T09:00:00' },
@@ -358,7 +389,6 @@ describe('App 首页', () => {
     fireEvent.click(await screen.findByText('会话A'))
 
     expect(await screen.findByText('目标内容')).toBeInTheDocument()
-    expect(within(screen.getByRole('list')).getByText('目标')).toBeInTheDocument()
   })
 
   it('多会话并行视图：打开第二个会话保留标签，标签切换状态互不丢失（v1.1 P1）', async () => {
@@ -387,8 +417,7 @@ describe('App 首页', () => {
 
     // 「＋」回工作区（标签保留）→ 打开会话B → 两个标签，内容B 可见、内容A 隐藏但状态保留
     fireEvent.click(screen.getByRole('button', { name: '打开更多会话' }))
-    expect(await screen.findByText('会话B')).toBeInTheDocument() // 回到工作区会话列表
-    fireEvent.click(screen.getByText('会话B'))
+    fireEvent.click(await screen.findByText('会话B'))
     expect(await screen.findByText('内容B')).toBeVisible()
     expect(screen.getByText('内容A')).not.toBeVisible() // display:none 保留挂载状态
 
@@ -402,7 +431,6 @@ describe('App 首页', () => {
     expect(screen.getByText('内容B')).toBeVisible()
     expect(screen.queryByRole('tab', { name: /会话A/ })).not.toBeInTheDocument()
     fireEvent.click(screen.getByText('← 返回'))
-    expect(await screen.findByText('会话B')).toBeInTheDocument() // 工作区列表
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
   })
 
@@ -432,7 +460,7 @@ describe('App 首页', () => {
     await waitFor(() => expect(batchDeleteWsMock).toHaveBeenCalledWith([1, 2]))
   })
 
-  it('批量删除导图：进入工作区后选择模式批量删除（04 §5）', async () => {
+  it('批量删除导图：侧边栏导图组选择模式批量删除（04 §5）', async () => {
     workspacesMock.mockResolvedValue([ws])
     listMindmapsMock.mockResolvedValueOnce([
       { id: 10, name: '导图A', nodeCount: 1 },
@@ -442,16 +470,16 @@ describe('App 首页', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<App />)
     fireEvent.click(await screen.findByText('项目A'))
-    await screen.findByText('导图A')
+    const mmGroup = await screen.findByTestId('mindmap-group')
 
-    fireEvent.click(screen.getByText('批量操作'))
-    fireEvent.click(screen.getByText('全选'))
-    fireEvent.click(screen.getByText('批量删除（2）'))
+    fireEvent.click(within(mmGroup).getByText('批量操作'))
+    fireEvent.click(within(mmGroup).getByText('全选'))
+    fireEvent.click(within(mmGroup).getByText('批量删除（2）'))
 
     await waitFor(() => expect(batchDeleteMindmapMock).toHaveBeenCalledWith([10, 11]))
   })
 
-  it('批量删除会话：选择模式批量删除（04 §5）', async () => {
+  it('批量删除会话：侧边栏会话组选择模式批量删除（04 §5）', async () => {
     workspacesMock.mockResolvedValue([ws])
     listMindmapsMock.mockResolvedValue([])
     listSessionsMock.mockResolvedValueOnce([
@@ -462,11 +490,11 @@ describe('App 首页', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<App />)
     fireEvent.click(await screen.findByText('项目A'))
-    await screen.findByText('会话A')
+    const ssGroup = await screen.findByTestId('session-group')
 
-    fireEvent.click(screen.getByText('批量操作'))
-    fireEvent.click(screen.getByText('全选'))
-    fireEvent.click(screen.getByText('批量删除（2）'))
+    fireEvent.click(within(ssGroup).getByText('批量操作'))
+    fireEvent.click(within(ssGroup).getByText('全选'))
+    fireEvent.click(within(ssGroup).getByText('批量删除（2）'))
 
     await waitFor(() => expect(batchDeleteSessionMock).toHaveBeenCalledWith([1, 2]))
   })

@@ -1,0 +1,161 @@
+/* 悬浮岛式多级侧边栏树（v1.2 P2）：工作区父节点 → 导图/会话/标签组。 */
+
+.sidebar-tree {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-create {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.sidebar-create input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--card-soft);
+  color: var(--text);
+  min-width: 0;
+}
+
+.sidebar-create button {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sidebar-create button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sidebar-empty {
+  margin-top: 8px;
+}
+
+.tree-workspace {
+  border-radius: 10px;
+  transition: background 120ms ease-out;
+}
+
+.tree-workspace.selected {
+  background: var(--brand-bg);
+}
+
+.tree-workspace-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  flex-wrap: wrap;
+}
+
+.tree-chevron {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  width: 18px;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.tree-chevron:hover {
+  color: var(--text);
+}
+
+.tree-workspace-name {
+  flex: 1;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.tree-workspace-name:hover {
+  color: var(--brand);
+}
+
+.tree-counts {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.tree-children {
+  padding: 4px 0 6px 10px;
+  margin-left: 12px;
+  border-left: 1px solid var(--border-faint);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tree-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tree-group-header {
+  font-size: 10px;
+  color: var(--muted);
+  padding: 2px 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.tree-group-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.tree-group-nav:hover {
+  background: var(--card-soft);
+  color: var(--brand);
+}
+
+/* 侧边栏组内挂载的列表区段（MindmapListSection/SessionSection）紧凑化 */
+.mindmap-section,
+.session-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mindmap-section .workspace-list,
+.session-section .workspace-list,
+.session-section .session-timeline-list {
+  margin-bottom: 4px;
+}

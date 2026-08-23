@@ -2,14 +2,19 @@ import { useCallback, useEffect, useState } from 'react'
 import { batchDeleteSessions, createSession, deleteSession, listSessions } from '../../api/sessions'
 import type { Session, Workspace } from '../../api/types'
 import { formatTime } from './time'
+import { deleteWithUndo } from '../../utils/undoDelete'
 import { BatchSelectToolbar } from '../../components/BatchSelectToolbar'
 import { useBatchSelect } from '../../utils/useBatchSelect'
 import { batchConfirmText } from '../../utils/batchSelection'
 
 /**
- * 工作区首页的会话区（07 §6 任务一）：
- * 列表（标题/状态徽标/条目数/开始时间）、开始会话（仓库缺省继承工作区）、删除（二次确认，级联条目）。
- * M4 任务五：titleInputRef 供新工作区空态引导聚焦输入框；onEmptyChange 上报会话是否为空（空态引导判定）。
+ * 会话列表区段（07 §6 任务一）：列表（标题/状态徽标/条目数/开始时间，时间序）+ 开始会话 +
+ * 单条删除带撤销轻提示（v1.2 P2）+ 批量删除（二次确认，级联条目）。
+ * 供悬浮岛式侧边栏「会话」组挂载；时间序 + 状态点体现「时间轴展示」。
+ *
+ * 单条删除走 deleteWithUndo：乐观移除（pendingDelete 过滤）→ 撤销 toast → 到期真删；撤销恢复。
+ * 计数/空态随可见列表上报（侧边栏工作区行计数 + 右侧 overview 空态引导）。
+ * M4 任务五：titleInputRef 供空态引导聚焦；suppressEmptyText 由空态引导接管时隐藏「暂无会话」。
  */
 export function SessionSection({
   ws,
@@ -23,12 +28,12 @@ export function SessionSection({
   onOpenSession: (id: number) => void
   titleInputRef?: React.Ref<HTMLInputElement>
   onEmptyChange?: (empty: boolean) => void
-  /** 会话数上报（缺陷修复：工作区头部实时计数，避免新建/删除会话后计数停滞在列表快照）。 */
   onCountChange?: (count: number) => void
-  /** 新工作区空态引导已接管空态展示时，隐藏本区「暂无会话」文本（03 §7.1）。 */
   suppressEmptyText?: boolean
 }) {
   const [sessions, setSessions] = useState<Session[]>([])
+  // undo 删除窗口：乐观移除但未真删的 id，渲染时过滤（避免重拉把项拉回）。
+  const [pendingDelete, setPendingDelete] = useState<Set<number>>(() => new Set())
   const [title, setTitle] = useState('')
   const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -40,20 +45,29 @@ export function SessionSection({
     setLoading(true)
     setError(null)
     try {
-      const list = await listSessions(ws.id)
-      setSessions(list)
-      onEmptyChange?.(list.length === 0)
-      onCountChange?.(list.length)
+      setSessions(await listSessions(ws.id))
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载会话失败')
     } finally {
       setLoading(false)
     }
-  }, [ws.id, onEmptyChange, onCountChange])
+  }, [ws.id])
 
   useEffect(() => {
     void load()
   }, [load])
+
+  const visible = sessions.filter((s) => !pendingDelete.has(s.id))
+
+  // 计数/空态随可见列表上报（乐观移除即时反映）。
+  useEffect(() => {
+    onCountChange?.(visible.length)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible.length])
+  useEffect(() => {
+    onEmptyChange?.(visible.length === 0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible.length])
 
   const handleCreate = async () => {
     const trimmed = title.trim()
@@ -62,7 +76,6 @@ export function SessionSection({
     try {
       const created = await createSession(ws.id, { title: trimmed })
       setSessions((prev) => [...prev, created])
-      onCountChange?.(sessions.length + 1)
       setTitle('')
     } catch (e) {
       setError(e instanceof Error ? e.message : '开始会话失败')
@@ -71,14 +84,18 @@ export function SessionSection({
     }
   }
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('删除该会话及其全部条目？')) return
-    try {
-      await deleteSession(id)
-      await load()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '删除会话失败')
-    }
+  const handleDelete = (s: Session) => {
+    deleteWithUndo({
+      label: `会话「${s.title}」`,
+      performDelete: () => deleteSession(s.id),
+      optimisticRemove: () => setPendingDelete((prev) => new Set(prev).add(s.id)),
+      optimisticRestore: () =>
+        setPendingDelete((prev) => {
+          const next = new Set(prev)
+          next.delete(s.id)
+          return next
+        }),
+    })
   }
 
   // 批量删除会话（二次确认，级联条目；04 §5 POST /sessions/batch-delete）
@@ -109,12 +126,15 @@ export function SessionSection({
       />
       {loading ? (
         <p className="muted">加载中…</p>
-      ) : sessions.length === 0 ? (
+      ) : visible.length === 0 ? (
         suppressEmptyText ? null : <p className="muted">暂无会话</p>
       ) : (
-        <ul className="workspace-list">
-          {sessions.map((s) => (
-            <li key={s.id} className={`workspace-item${sBatch.selected.has(s.id) ? ' selected' : ''}`}>
+        <ul className="session-timeline-list">
+          {visible.map((s) => (
+            <li
+              key={s.id}
+              className={`session-timeline-item${sBatch.selected.has(s.id) ? ' selected' : ''}`}
+            >
               {sBatch.selectMode ? (
                 <>
                   <input
@@ -136,6 +156,7 @@ export function SessionSection({
                 </>
               ) : (
                 <>
+                  <span className={`session-timeline-dot status-${s.status}`} aria-hidden="true" />
                   <button className="item-name" onClick={() => onOpenSession(s.id)}>
                     {s.title}
                     <span className="item-stats">
@@ -145,7 +166,7 @@ export function SessionSection({
                   <span className={`status-badge status-${s.status}`}>
                     {s.status === 'completed' ? '已完成' : '进行中'}
                   </span>
-                  <button className="danger" onClick={() => void handleDelete(s.id)}>
+                  <button className="danger" onClick={() => handleDelete(s)}>
                     删除
                   </button>
                 </>
