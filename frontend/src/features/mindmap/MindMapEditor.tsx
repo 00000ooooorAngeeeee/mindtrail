@@ -10,7 +10,6 @@ import {
   MiniMap,
   ReactFlow,
   useEdgesState,
-  useNodesInitialized,
   useNodesState,
   useReactFlow,
   useUpdateNodeInternals,
@@ -59,8 +58,8 @@ const edgeTypes = { free: FreeEdge }
  * 在这些场景下不触发——未测量的节点保持 visibility:hidden（画布不可见）且 handleBounds 缺失（自由连线
  * 无法完成）。必须放在 <ReactFlow> 子树内：useUpdateNodeInternals 依赖 ReactFlow 内部 store 上下文，
  * 放在外面拿到的是外层 Provider 的空 store（本应用没有 Provider），调用会静默空转。
- * 注：进入导图的自动适应不再依赖此处的测量触发——改由 InitialFitController 以 useNodesInitialized
- * 为准（见下）。本组件仅负责补齐 handleBounds 供自由连线连接。
+ * 注：进入导图的自动适应不再依赖此处的测量触发——改由 InitialFitController 以 rAF 轮询
+ * rf.getNodes() 的 measured 为准（见下）。本组件仅负责补齐 handleBounds 供自由连线连接。
  */
 function NodeMeasureTrigger({ content }: { content: MindmapContent | null }) {
   const updateNodeInternals = useUpdateNodeInternals()
@@ -75,17 +74,28 @@ function NodeMeasureTrigger({ content }: { content: MindmapContent | null }) {
 
 /**
  * 首开/切图/切模式自动适应控制器（根因修复：v1.1 缺陷集「进入导图自动适应」遗留的时序竞态）。
- * 必须挂在 <ReactFlow> 子树内（useNodesInitialized / useReactFlow 依赖 RF store 上下文；父组件
- * MindMapEditor 在 <ReactFlow> 之外拿不到 store）。
+ * 必须挂在 <ReactFlow> 子树内（useReactFlow 依赖 RF store 上下文；父组件 MindMapEditor 在
+ * <ReactFlow> 之外拿不到 store）。
  *
  * 旧实现用 ReactFlow 的 fitView prop：其内部 fitViewQueued 在首个 updateNodeInternals 成功时即解析，
  * 而该时刻往往仅部分节点完成测量——getFitViewNodes 会过滤掉未测量节点，包围盒残缺→错配；之后
  * fitViewQueued 已置 false 不再重算。autoFit 兜底又仅在「内容超出视口」时触发，当错配视图缩放过小
  * （内容恰好可见但极小）时也不触发 → 用户须手动多次缩放（百节点/主图/asdfsda 等大图复现）。
  *
- * 现改为等待 useNodesInitialized 翻转（全部节点已测量，包围盒完整）再调 fitView，彻底消除竞态；
- * 并以 computeFitViewport 兜底（真实环境理论不触发——节点 min-width≥72 保证非零尺寸必被测量；
- * 亦供 jsdom 单测：无真实布局时 nodesInitialized 不翻转，由兜底给出可断言的适应视口）。
+ * 07 §19 修复二根因（GUI 实机打点证实，见 docs/07 §19）：曾用 useNodesInitialized() 作为主路径 effect
+ * 依赖——全部节点测量完成（nodesInitialized=true）时排程双 rAF 调 fitView 并置 doneKey。但本应用
+ * 内容 effect 每次 setNodes(buildNodes(...)) 重建全部节点对象（内容重载 / 挂接 links 到达等触发），
+ * React Flow adoptUserNodes 把 measured 重置为 undefined → useNodesInitialized 翻 false → 主 effect
+ * 清理函数 cancelAnimationFrame 掉已排程的 fitView（doneKey 已置位阻断重排与 800ms 兜底）。是否失效
+ * 取决于 outer rAF 与 cleanup 的子帧竞态：outer 先 fire（排程未追踪的 inner）则 cancel 无效、fitView
+ * 照常执行；cleanup 先到则取消 outer、fitView 永不执行、视口停左上角。打点亦证 measured 确会经
+ * ResizeObserver 回填（0/11→11/11 约 4ms），故旧 carryMeasured 尝试（保留旧 measured）前提错误、反致
+ * 首开失效，已回退。
+ *
+ * 现改为：主路径 effect 不再依赖 useNodesInitialized（避免重建翻 false 触发清理取消 fitView），改为
+ * positions 就绪后以 rAF 轮询 rf.getNodes() 的 measured，全部测量完成即一次性 fitView 并置 doneKey。
+ * 重建造成的瞬时 measured 重置不再取消已排程的拟合（effect 不重排），fitView 必然执行。保留
+ * computeFitViewport 兜底（jsdom 无真实布局 / 极端未测量情况，由节点坐标确定性计算）。
  */
 function InitialFitController({
   positions,
@@ -100,31 +110,47 @@ function InitialFitController({
   canvasRef: { current: HTMLDivElement | null }
   onFitDone: (key: string, settlesAt: number) => void
 }) {
-  const nodesInitialized = useNodesInitialized()
   const rf = useReactFlow()
   const doneKeyRef = useRef<string | null>(null)
 
-  // 主路径：全部节点测量完成 → 精确 fitView（包围盒完整，根除残缺错配）。
+  // 主路径：内容就绪后以 rAF 轮询「全部节点已测量」，就绪即一次性 fitView（包围盒完整，根除残缺错配）。
+  // 不依赖 useNodesInitialized：内容 effect 每次 setNodes(buildNodes) 重建节点对象，React Flow
+  // adoptUserNodes 把 measured 重置为 undefined → useNodesInitialized 翻 false；若作为 effect 依赖，
+  // 其翻 false 时清理函数会 cancelAnimationFrame 掉已排程的 fitView，且 doneKey 已置位阻断重排与
+  // 兜底，导致 fitView 永不执行、视口停左上角（07 §19 修复二根因，GUI 实机打点证实）。改为 effect
+  // 仅依赖 positions/mindmapId/mode，内部 rAF 轮询 rf.getNodes() 实测 measured，全部测量完成即 fitView
+  // 并置 doneKey；重建造成的瞬时 measured 重置不再取消已排程的拟合（effect 不因 nodesInitialized 重排）。
   useEffect(() => {
     if (positions.size === 0) return
     const key = `${mindmapId}:${mode}`
     if (doneKeyRef.current === key) return
-    if (!nodesInitialized) return
-    doneKeyRef.current = key
-    const raf = requestAnimationFrame(() =>
-      requestAnimationFrame(() => rf.fitView({ padding: 0.2, duration: 300 })),
-    )
-    onFitDone(key, performance.now() + 350)
+    let raf = 0
+    let tries = 0
+    const tick = () => {
+      if (doneKeyRef.current === key) return // 同 key 重排时直接退出，避免重复 fit
+      const ns = rf.getNodes()
+      const allMeasured = ns.length > 0 && ns.every((n) => n.measured?.width)
+      if (allMeasured) {
+        doneKeyRef.current = key
+        rf.fitView({ padding: 0.2, duration: 300 })
+        onFitDone(key, performance.now() + 350)
+        return
+      }
+      if (tries > 30) return // ~500ms 仍未测量完成：放弃主路径，交由下方 800ms 兜底确定性计算
+      tries++
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [positions, nodesInitialized, mindmapId, mode, rf, onFitDone])
+  }, [positions, mindmapId, mode, rf, onFitDone])
 
-  // 兜底：useNodesInitialized 未翻转时（真实环境理论不发生 / jsdom 无布局），由节点坐标确定性计算。
+  // 兜底：主路径 rAF 轮询超时仍未测量完成时（真实环境理论不发生 / jsdom 无真实布局），由节点坐标确定性计算。
   useEffect(() => {
     if (positions.size === 0) return
     const key = `${mindmapId}:${mode}`
     if (doneKeyRef.current === key) return
     const timer = window.setTimeout(() => {
-      if (doneKeyRef.current === key) return // 已由 nodesInitialized 路径完成
+      if (doneKeyRef.current === key) return // 已由主路径（rAF 轮询测量完成）完成
       const wrap = canvasRef.current
       if (!wrap || wrap.clientWidth === 0) return
       const vp = computeFitViewport(
