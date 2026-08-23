@@ -131,6 +131,33 @@ class MindmapExportServiceTest {
     void export_unknown_type_throws_bad_request() {
         initService();
         when(mapper.selectById(1L)).thenReturn(mindmap("图", contentWithTree()));
+        assertThrows(BadRequestException.class, () -> service.export(1L, "XYZ"));
+    }
+
+    @Test
+    void exportMarkdown_emits_outline_with_title_bullets_notes_and_tags() {
+        initService();
+        when(mapper.selectById(1L)).thenReturn(mindmap("验收/导图", contentWithTree()));
+
+        MindmapExportService.ExportFile file = service.export(1L, "md");
+
+        assertEquals("验收_导图.md", file.filename());
+        assertTrue(file.contentType().startsWith("text/markdown"));
+        String md = file.content();
+        assertTrue(md.startsWith("# 验收/导图\n\n"), () -> "应以 H1 导图名开头：" + md);
+        assertTrue(md.contains("- 中心主题 #根标签"));
+        assertTrue(md.contains("  - 子节点 <&> #标签甲 #标签乙"));
+        assertTrue(md.contains("    - 孙节点"));
+        assertTrue(md.contains("> 根备注"));
+        assertTrue(md.contains("> 子备注"));
+        // 自由连线无法用大纲表达，导出时忽略
+        assertFalse(md.contains("自由连线"));
+    }
+
+    @Test
+    void exportMarkdown_empty_content_throws_bad_request() {
+        initService();
+        when(mapper.selectById(1L)).thenReturn(mindmap("空图", "{\"version\":1,\"rootNodeId\":null,\"nodes\":{}}"));
         assertThrows(BadRequestException.class, () -> service.export(1L, "MD"));
     }
 

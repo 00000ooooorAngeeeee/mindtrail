@@ -1,7 +1,7 @@
 import { del, get, patch, post, put } from './client'
 import type { Mindmap, MindmapExportFile } from './types'
 
-export type MindmapExportType = 'PNG' | 'OPML'
+export type MindmapExportType = 'PNG' | 'OPML' | 'MD'
 
 export function listMindmaps(workspaceId: number): Promise<Mindmap[]> {
   return get<Mindmap[]>(`/workspaces/${workspaceId}/mindmaps`)

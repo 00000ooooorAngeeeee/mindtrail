@@ -1,7 +1,8 @@
-// 导图导出产物校验/解析（M4 任务三，PRD B5「OPML 可被其他工具导入、PNG 完整」的验收冒烟侧）：
+// 导图导出产物校验/解析（M4 任务三 + v1.2 P2，PRD B5「OPML 可被其他工具导入、PNG 完整、MD 大纲可还原层级」的验收冒烟侧）：
 // 仅依赖 Node 内建（Buffer/正则），与 session-export.mjs 同为「协议解析器 + verify.mjs 实机断言」。
 // parseOpmlOutlines 解析本产品生成的 OPML 2.0 子集（outline 嵌套 + text/_note/category 属性），
-// 返回树结构供 verify 比对层级；pngInfoFromBase64 校验 PNG 魔数与 IHDR 尺寸（完整图片至少尺寸 > 0）。
+// 返回树结构供 verify 比对层级；parseMarkdownOutline 解析 Markdown 大纲（H1 + 嵌套无序列表 + blockquote 备注 + # 标签）；
+// pngInfoFromBase64 校验 PNG 魔数与 IHDR 尺寸（完整图片至少尺寸 > 0）。
 
 /** XML 属性实体还原（本产品只转义这 5 类，docs/06 §4 同类子集解析器约定）。 */
 function decodeXmlEntities(value) {
@@ -84,4 +85,64 @@ export function pngInfoFromBase64(base64) {
   const height = bytes.readUInt32BE(20)
   if (width <= 0 || height <= 0) throw new Error(`PNG 尺寸非法：${width}×${height}`)
   return { width, height }
+}
+
+/**
+ * 解析本产品生成的 Markdown 大纲，返回 outline 树（根节点数组）。
+ * 节点结构：{ text, note, tags, children }；note 缺失为 null、tags 缺失为 null。
+ * 格式：首行 `# 标题`；其后嵌套无序列表（`- text #tag...`，2 空格/层缩进）；
+ *      紧随 bullet 的缩进 `> ...` 行为该节点 note（多行合并为 \n）。
+ * 格式非法（无 H1 / 缩进非 2 的倍数 / 非 bullet 非 blockquote 行 / blockquote 无所属列表项）抛错。
+ */
+export function parseMarkdownOutline(md) {
+  if (typeof md !== 'string') throw new Error('Markdown 内容非字符串')
+  const lines = md.split('\n')
+  let i = 0
+  while (i < lines.length && lines[i].trim() === '') i++
+  if (i >= lines.length || !/^# /.test(lines[i])) {
+    throw new Error('Markdown 大纲缺少 H1 标题行')
+  }
+  i++ // 跳过标题行
+  while (i < lines.length && lines[i].trim() === '') i++ // 跳过标题后空行
+
+  const roots = []
+  const stack = [] // { depth, node }
+  for (; i < lines.length; i++) {
+    const line = lines[i]
+    if (line.trim() === '') continue
+    // blockquote note：归属栈顶节点
+    const bq = /^(\s*)> ?(.*)$/.exec(line)
+    if (bq) {
+      const top = stack[stack.length - 1]
+      if (!top) throw new Error('blockquote 行无所属列表项')
+      const text = bq[2]
+      top.node.note = top.node.note === null ? text : top.node.note + '\n' + text
+      continue
+    }
+    // 列表项：`<indent>- text [#tag ...]`
+    const item = /^(\s*)- (.*)$/.exec(line)
+    if (!item) throw new Error(`无法解析的行：${line}`)
+    const indent = item[1]
+    if (indent.length % 2 !== 0) throw new Error(`缩进非 2 的倍数：${line}`)
+    const depth = indent.length / 2
+    const tokens = item[2].split(/\s+/)
+    let textEnd = tokens.length
+    const tags = []
+    for (let k = tokens.length - 1; k >= 0; k--) {
+      if (/^#./.test(tokens[k])) {
+        tags.unshift(tokens[k].slice(1))
+        textEnd = k
+      } else {
+        break
+      }
+    }
+    const text = tokens.slice(0, textEnd).join(' ')
+    const node = { text, note: null, tags: tags.length ? tags : null, children: [] }
+    while (stack.length && stack[stack.length - 1].depth >= depth) stack.pop()
+    const parent = stack[stack.length - 1]
+    if (parent) parent.node.children.push(node)
+    else roots.push(node)
+    stack.push({ depth, node })
+  }
+  return roots
 }

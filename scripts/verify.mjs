@@ -12,7 +12,7 @@ import zlib from 'node:zlib'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { execFile } from 'node:child_process'
 import { parseSessionMarkdown } from './session-export.mjs'
-import { parseOpmlOutlines, pngInfoFromBase64 } from './mindmap-export.mjs'
+import { parseOpmlOutlines, parseMarkdownOutline, pngInfoFromBase64 } from './mindmap-export.mjs'
 
 export const BASE = 'http://127.0.0.1:17860'
 export const EXPECTED_TABLES = [
@@ -940,7 +940,26 @@ export async function runChecks(deps = {}) {
     const pngInfo = pngInfoFromBase64(png.json.data.content)
     if (pngInfo.width <= 0 || pngInfo.height <= 0) throw new Error(`PNG 尺寸非法：${JSON.stringify(pngInfo)}`)
 
-    const badType = await request(`${BASE}/api/v1/mindmaps/${emId}/export?type=MD`, { method: 'POST' })
+    // 导图 → Markdown 大纲（v1.2 P2，PRD B5）：H1 标题 + 嵌套无序列表 + 备注 blockquote + 标签 # 前缀；自由连线忽略
+    const md = await request(`${BASE}/api/v1/mindmaps/${emId}/export?type=MD`, { method: 'POST' })
+    if (md?.json?.code !== 0) throw new Error(`MD 导出失败：${JSON.stringify(md?.json)}`)
+    if (md.json.data.filename !== '导出导图.md' || !md.json.data.contentType.startsWith('text/markdown')) {
+      throw new Error(`MD 产物元数据错误：${JSON.stringify(md.json.data)}`)
+    }
+    const mdRoots = parseMarkdownOutline(md.json.data.content)
+    if (mdRoots.length !== 1) throw new Error(`MD 根节点数 ${mdRoots.length} ≠ 1`)
+    const mdRoot = mdRoots[0]
+    if (mdRoot.text !== '导出根' || mdRoot.note !== '根备注' || !mdRoot.tags?.includes('导出标签')) {
+      throw new Error(`MD 根节点属性错误：${JSON.stringify(mdRoot)}`)
+    }
+    if (mdRoot.children?.[0]?.text !== '导出子' || mdRoot.children[0].note !== '子备注') {
+      throw new Error(`MD 子节点属性错误：${JSON.stringify(mdRoot.children?.[0])}`)
+    }
+    if (mdRoot.children[0]?.children?.[0]?.text !== '导出孙') throw new Error('MD 孙节点层级未还原')
+    if (!md.json.data.content.startsWith('# 导出导图\n\n')) throw new Error('MD 应以 H1 导图名开头')
+    if (md.json.data.content.includes('自由连线应忽略')) throw new Error('MD 不应包含自由连线（无法表达）')
+
+    const badType = await request(`${BASE}/api/v1/mindmaps/${emId}/export?type=DOC`, { method: 'POST' })
     if (badType?.json?.code !== 400) throw new Error('非法导图导出类型应返回 400')
 
     // 会话 → JSON：2 条不同类型条目 + 标签，字段逐项还原（PRD C5，机器可读协议）

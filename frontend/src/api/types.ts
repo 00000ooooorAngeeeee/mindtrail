@@ -243,7 +243,7 @@ export interface SessionJsonExport {
   entryCount: number
 }
 
-/** 导图导出产物（POST /mindmaps/{id}/export）：PNG content 为 Base64，OPML content 为 XML 原文。 */
+/** 导图导出产物（POST /mindmaps/{id}/export）：PNG content 为 Base64，OPML content 为 XML 原文，MD content 为 Markdown 大纲原文。 */
 export interface MindmapExportFile {
   filename: string
   contentType: string

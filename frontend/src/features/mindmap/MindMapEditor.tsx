@@ -712,6 +712,9 @@ export function MindMapEditor({
           <button onClick={() => void handleExport('OPML')} disabled={exporting != null} title="导出树状大纲为 OPML">
             {exporting === 'OPML' ? 'OPML 导出中…' : '导出 OPML'}
           </button>
+          <button onClick={() => void handleExport('MD')} disabled={exporting != null} title="导出树状大纲为 Markdown">
+            {exporting === 'MD' ? 'MD 导出中…' : '导出 MD'}
+          </button>
         </div>
       </div>
 

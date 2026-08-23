@@ -1,7 +1,7 @@
 // 导图导出校验器单测（node:test）：OPML 树解析 + PNG Base64 校验（M4 任务三验收侧）。
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { parseOpmlOutlines, pngInfoFromBase64 } from '../mindmap-export.mjs'
+import { parseOpmlOutlines, parseMarkdownOutline, pngInfoFromBase64 } from '../mindmap-export.mjs'
 
 const fixture = `<?xml version="1.0" encoding="UTF-8"?>
 <opml version="2.0">
@@ -63,4 +63,35 @@ test('pngInfoFromBase64：校验魔数并读取 IHDR 尺寸', () => {
 test('pngInfoFromBase64：魔数不符/空内容抛错', () => {
   assert.throws(() => pngInfoFromBase64('aGVsbG8='), /魔数/)
   assert.throws(() => pngInfoFromBase64(''), /为空/)
+})
+
+const mdFixture = `# 验收/导图
+
+- 中心主题 #根标签
+  > 根备注
+  - 子节点 <&> #标签甲 #标签乙
+    > 子备注
+    - 孙节点`
+
+test('parseMarkdownOutline：还原文本/备注/标签与嵌套层级', () => {
+  const roots = parseMarkdownOutline(mdFixture)
+  assert.strictEqual(roots.length, 1)
+  const r = roots[0]
+  assert.strictEqual(r.text, '中心主题')
+  assert.deepStrictEqual(r.tags, ['根标签'])
+  assert.strictEqual(r.note, '根备注')
+  assert.strictEqual(r.children.length, 1)
+  const c = r.children[0]
+  assert.strictEqual(c.text, '子节点 <&>')
+  assert.deepStrictEqual(c.tags, ['标签甲', '标签乙'])
+  assert.strictEqual(c.note, '子备注')
+  assert.strictEqual(c.children.length, 1)
+  assert.strictEqual(c.children[0].text, '孙节点')
+  assert.strictEqual(c.children[0].tags, null)
+})
+
+test('parseMarkdownOutline：缺 H1 / 非法缩进抛错', () => {
+  assert.throws(() => parseMarkdownOutline('正文\n- 项'), /H1/)
+  assert.throws(() => parseMarkdownOutline('# 标题\n   - 奇数缩进'), /2 的倍数/)
+  assert.throws(() => parseMarkdownOutline('# 标题\n普通行'), /无法解析/)
 })
