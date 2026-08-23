@@ -26,7 +26,7 @@
 ## 快速命令（M0 落地后）
 
 - `npm run dev`：一键前后端联调
-- `npm run launch`：一键拉起 Electron 壳（vite + 后端 jar，无需 mvn；项目根「启动 TrailMind」快捷方式即调用它）
+- `npm run launch`：一键拉起桌面端（Electron 自拉后端 jar，同源加载 17860；无需 vite/浏览器；项目根「启动 TrailMind」快捷方式即调用它）
 - `npm run package`：打包 exe
 - `scripts/verify`：里程碑验收冒烟
 
