@@ -11,6 +11,9 @@ backend/src/main/resources/static/
 # Electron 运行期临时用户数据目录（沙箱下 --user-data-dir 指到工作区的产物）
 .electron-dev/
 
+# MariaDB 便携版下载产物（specs 自包含打包 Phase 2/4：体积大，打包脚本运行时下载）
+desktop/vendor/
+
 # 日志
 *.log
 
