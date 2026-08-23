@@ -4,7 +4,7 @@
 
 ## 这是什么
 
-**思迹 TrailMind**：Windows 桌面端工具 = 双模式思维导图 + Git 绑定的 vibecoding 过程记录。当前仓库已完成 **M0–M4 全部里程碑**、**v1.1 P1 全部任务**（07 §8 Backlog P1 行全部勾选）与 **v1.2 P2**（导入恢复 §20、Markdown 大纲导出 §21），下一任务 **v1.2 P2 剩余项**（PRD §5 P2：多标签批量操作、自定义快捷键；暂缓项：AI 会话自动摘要、每周复盘报告、会话/工作区模板、主题定制，见 09 §3 与 07 §8）。
+**思迹 TrailMind**：Windows 桌面端工具 = 双模式思维导图 + Git 绑定的 vibecoding 过程记录。当前仓库已完成 **M0–M4 全部里程碑**、**v1.1 P1 全部任务**（07 §8 Backlog P1 行全部勾选）与 **v1.2 P2**（导入恢复 §20、Markdown 大纲导出 §21、多标签批量合并 §22），下一任务 **v1.2 P2 剩余项**（PRD §5 P2：自定义快捷键；暂缓项：AI 会话自动摘要、每周复盘报告、会话/工作区模板、主题定制，见 09 §3 与 07 §8）。
 
 ## 技术栈（一句话）
 
@@ -75,9 +75,11 @@
 
 - [x] v1.2 P2：Markdown 大纲导出——已完成（07 §21 全清单，PRD B5）：导图第三种导出格式 type=MD，与 OPML 同棵 parentId 派生树，输出 ATX H1 标题 + 嵌套无序列表（2 空格/层）+ note 作 blockquote 子行 + tags 以 # 前缀内联（自由连线忽略）；抽取 buildChildren/resolveRoot 供 OPML/MD 共享；前端工具栏「导出 MD」按钮复用 downloadTextFile；scripts/mindmap-export.mjs 增 parseMarkdownOutline 还原层级/文本/备注/标签；非 06 会话导出协议（同 OPML，无需升 version，落 04 §6.7）；后端 252 → 254（+MindmapExportServiceTest 2）、脚本 41 → 43（+parseMarkdownOutline 2）、前端 251、tsc 通过、SMOKE 17 段 ALL PASS（导出段增 MD 往返，原 type=MD 非法断言改 DOC）；过程记录见产品工作区「TrailMind 开发」，会话「v1.2 P2 Markdown 大纲导出」
 
+- [x] v1.2 P2：多标签批量合并——已完成（07 §22 全清单，PRD D3）：选 N 个标签→合并到一个目标（条目重挂目标、源删除）；后端 TagService.mergeBatch 循环 merge（跳过 target、事务回滚）+ POST /tags/batch-merge；前端 BatchSelectToolbar 增可选 onMerge（≥2 选中可用）、TagSection 增目标选择器 + batchMergeConfirmText 二次确认（复用 §18 useBatchSelect）；与单合并、§18 批量删除对称配套；后端 254 → 258（+TagServiceTest 4）、前端 251 → 253（+TagSection 1 + batchSelection 1）、脚本 43、tsc 通过、SMOKE 17 段 ALL PASS（标签段增批量合并子块）；过程记录见产品工作区「TrailMind 开发」，会话「v1.2 P2 多标签批量合并」
+
 - _注：以下 P2 项**暂不实现**，列入待排期：AI 会话自动摘要（方案已定，[09 §3](docs/09-风险清单与开放问题.md)：自带 Key 外部 API 为主 + 规则模板兜底，本地大模型预留 provider 接口）、每周复盘报告、会话模板、工作区模板、主题定制（基础 light/dark/system 主题已随 M4 任务四落地，此项指进阶自定义）。_
 
-下一任务：**v1.2 P2 剩余项**（PRD §5 P2：多标签批量操作、自定义快捷键；暂缓项：AI 会话自动摘要、每周复盘报告、会话/工作区模板、主题定制，见 09 §3 与 07 §8 Backlog P2 行）。
+下一任务：**v1.2 P2 剩余项**（PRD §5 P2：自定义快捷键；暂缓项：AI 会话自动摘要、每周复盘报告、会话/工作区模板、主题定制，见 09 §3 与 07 §8 Backlog P2 行）。
 
 ## 文档索引
 
