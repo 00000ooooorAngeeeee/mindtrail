@@ -47,7 +47,18 @@ export const useAppStore = create<AppState>()((set) => ({
     try {
       const updated = await updateWorkspace(id, { name })
       set((s) => ({
-        workspaces: s.workspaces.map((w) => (w.id === id ? updated : w)),
+        // 重命名不改计数：后端 update 现已带计数返回（07 §17 修复二遗留的重命名路径）；
+        // 防御——若响应缺计数则保留列表已有计数，避免重命名后列表项「导图 0 · 会话 0」需进工作区才刷新。
+        workspaces: s.workspaces.map((w) =>
+          w.id === id
+            ? {
+                ...w,
+                ...updated,
+                mindmapCount: updated.mindmapCount ?? w.mindmapCount,
+                sessionCount: updated.sessionCount ?? w.sessionCount,
+              }
+            : w,
+        ),
       }))
     } catch (e) {
       set({ error: e instanceof Error ? e.message : '重命名失败' })
