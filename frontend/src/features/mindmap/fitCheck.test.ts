@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { carryMeasured, computeFitViewport, contentExceedsViewport } from './fitCheck'
+import { computeFitViewport, contentExceedsViewport } from './fitCheck'
 
 describe('自适应缩放判定（v1.1 P1）', () => {
   // 视口 1000×600、zoom=1、viewport {x:0,y:0} → 可见区 left=0 top=0 w=1000 h=600；pad=80/48
@@ -158,54 +158,5 @@ describe('computeFitViewport（首开适应兜底，确定性由坐标计算）'
     expect(r).not.toBeNull()
     expect(r!.zoom).toBe(2.5)
     expect(r!.x + -720 * r!.zoom).toBeCloseTo(500, 5)
-  })
-})
-
-describe('carryMeasured（重建节点对象时携带上一帧 measured，防 nodesInitialized 翻 false 取消首开 fitView）', () => {
-  const n = (id: string, width?: number, height?: number) => ({
-    id,
-    measured: width == null ? undefined : { width, height },
-  })
-
-  it('prev 为空/undefined：原样返回 next（无携带）', () => {
-    const next = [n('1'), n('2')]
-    expect(carryMeasured(next, undefined)).toBe(next)
-    expect(carryMeasured(next, [])).toBe(next)
-  })
-
-  it('同 id 节点携带 prev 的 measured（修复根因：重建对象不丢测量）', () => {
-    const next = [n('1'), n('2')]
-    const prev = [n('1', 160, 44), n('3', 100, 40)]
-    const out = carryMeasured(next, prev)
-    expect(out[0].measured).toEqual({ width: 160, height: 44 }) // 同 id 携带
-    expect(out[1].measured).toBeUndefined() // '2' 不在 prev（新增节点，待 ResizeObserver 测量）
-  })
-
-  it('next 已有 measured 不被覆盖（保留真实测量结果）', () => {
-    const next = [n('1', 200, 60)]
-    const prev = [n('1', 160, 44)]
-    const out = carryMeasured(next, prev)
-    expect(out[0].measured).toEqual({ width: 200, height: 60 })
-  })
-
-  it('无同 id 可携带：返回原 next 引用（避免无谓重渲染）', () => {
-    const next = [n('1')]
-    const prev = [n('9', 160, 44)]
-    expect(carryMeasured(next, prev)).toBe(next)
-  })
-
-  it('prev 全无 measured：返回原 next 引用', () => {
-    const next = [n('1')]
-    const prev = [n('1')]
-    expect(carryMeasured(next, prev)).toBe(next)
-  })
-
-  it('混合：部分携带 / 部分新增 / 部分已有', () => {
-    const next = [n('1'), n('2'), n('3', 200, 60)]
-    const prev = [n('1', 160, 44), n('2', 160, 44), n('9', 100, 40)]
-    const out = carryMeasured(next, prev)
-    expect(out[0].measured).toEqual({ width: 160, height: 44 }) // 携带
-    expect(out[1].measured).toEqual({ width: 160, height: 44 }) // 携带
-    expect(out[2].measured).toEqual({ width: 200, height: 60 }) // 已有保留
   })
 })
