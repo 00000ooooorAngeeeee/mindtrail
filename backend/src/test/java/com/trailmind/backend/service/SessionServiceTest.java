@@ -290,4 +290,47 @@ class SessionServiceTest {
 
         verify(entryService).page(10L, 1, 100);
     }
+
+    // ---------- 批量删除（04 §5 POST /sessions/batch-delete） ----------
+
+    @Test
+    void deleteBatch_empty_or_null_is_noop() {
+        service.deleteBatch(null);
+        service.deleteBatch(List.of());
+        verify(sessionMapper, never()).deleteById(anyLong());
+        verify(entryMapper, never()).deleteBySession(anyLong());
+    }
+
+    @Test
+    void deleteBatch_all_exist_cascades_each() {
+        Session a = activeSession();
+        a.setId(10L);
+        Session b = activeSession();
+        b.setId(11L);
+        when(sessionMapper.selectById(10L)).thenReturn(a);
+        when(sessionMapper.selectById(11L)).thenReturn(b);
+
+        service.deleteBatch(List.of(10L, 11L));
+
+        // 每个会话各走完整级联（关联表 → 条目 → 会话，05 §3）
+        verify(entryMapper).deleteBySession(10L);
+        verify(entryMapper).deleteBySession(11L);
+        verify(nodeEntryMapper).deleteBySession(10L);
+        verify(nodeEntryMapper).deleteBySession(11L);
+        verify(sessionMapper).deleteById(10L);
+        verify(sessionMapper).deleteById(11L);
+    }
+
+    @Test
+    void deleteBatch_missing_id_throws_404_and_skips_that_cascade() {
+        Session a = activeSession();
+        a.setId(10L);
+        when(sessionMapper.selectById(10L)).thenReturn(a);
+        when(sessionMapper.selectById(11L)).thenReturn(null); // 第二个不存在
+
+        assertThrows(NotFoundException.class, () -> service.deleteBatch(List.of(10L, 11L)));
+
+        verify(entryMapper, never()).deleteBySession(11L);
+        verify(sessionMapper, never()).deleteById(11L);
+    }
 }

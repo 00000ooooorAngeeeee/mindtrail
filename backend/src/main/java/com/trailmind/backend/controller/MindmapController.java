@@ -1,6 +1,7 @@
 package com.trailmind.backend.controller;
 
 import com.trailmind.backend.common.ApiResponse;
+import com.trailmind.backend.common.BatchDeleteRequest;
 import com.trailmind.backend.entity.Mindmap;
 import com.trailmind.backend.service.MindmapExportService;
 import com.trailmind.backend.service.MindmapService;
@@ -62,6 +63,13 @@ public class MindmapController {
     @DeleteMapping("/mindmaps/{id}")
     public ApiResponse<Void> delete(@PathVariable Long id) {
         service.delete(id);
+        return ApiResponse.ok(null);
+    }
+
+    /** 批量删除导图（04 §5 POST /mindmaps/batch-delete，事务级联，任一不存在 404 整体回滚）。 */
+    @PostMapping("/mindmaps/batch-delete")
+    public ApiResponse<Void> batchDelete(@RequestBody BatchDeleteRequest req) {
+        service.deleteBatch(req.ids());
         return ApiResponse.ok(null);
     }
 

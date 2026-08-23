@@ -10,6 +10,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -125,5 +127,39 @@ class WorkspaceServiceTest {
         verify(mapper).deleteMindmapsByWorkspace(1L);
         verify(mapper).deleteTagsByWorkspace(1L);
         verify(mapper).deleteById(1L);
+    }
+
+    @Test
+    void deleteBatch_empty_or_null_is_noop() {
+        service.deleteBatch(null);
+        service.deleteBatch(List.of());
+        verify(mapper, never()).deleteById(anyLong());
+        verify(mapper, never()).deleteEntryTagsByWorkspace(anyLong());
+    }
+
+    @Test
+    void deleteBatch_all_exist_cascades_each() {
+        when(mapper.selectById(1L)).thenReturn(new Workspace());
+        when(mapper.selectById(2L)).thenReturn(new Workspace());
+
+        service.deleteBatch(List.of(1L, 2L));
+
+        // 每个工作区各走一遍完整级联（事务内逐个 delete）
+        verify(mapper).deleteEntryTagsByWorkspace(1L);
+        verify(mapper).deleteEntryTagsByWorkspace(2L);
+        verify(mapper).deleteById(1L);
+        verify(mapper).deleteById(2L);
+    }
+
+    @Test
+    void deleteBatch_missing_id_throws_404_and_skips_that_cascade() {
+        when(mapper.selectById(1L)).thenReturn(new Workspace());
+        when(mapper.selectById(2L)).thenReturn(null); // 第二个不存在
+
+        assertThrows(NotFoundException.class, () -> service.deleteBatch(List.of(1L, 2L)));
+
+        // 不存在的 id 不触发其级联（真实事务整体回滚由 @SpringBootTest/verify.mjs 验证）
+        verify(mapper, never()).deleteEntryTagsByWorkspace(2L);
+        verify(mapper, never()).deleteById(2L);
     }
 }

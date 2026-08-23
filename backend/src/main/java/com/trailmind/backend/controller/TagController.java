@@ -1,6 +1,7 @@
 package com.trailmind.backend.controller;
 
 import com.trailmind.backend.common.ApiResponse;
+import com.trailmind.backend.common.BatchDeleteRequest;
 import com.trailmind.backend.service.TagService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -53,6 +54,13 @@ public class TagController {
     @DeleteMapping("/tags/{id}")
     public ApiResponse<Void> delete(@PathVariable Long id) {
         service.delete(id);
+        return ApiResponse.ok(null);
+    }
+
+    /** 批量删除标签（04 §5 POST /tags/batch-delete，事务级联清 entry_tag，任一不存在 404 整体回滚）。 */
+    @PostMapping("/tags/batch-delete")
+    public ApiResponse<Void> batchDelete(@RequestBody BatchDeleteRequest req) {
+        service.deleteBatch(req.ids());
         return ApiResponse.ok(null);
     }
 

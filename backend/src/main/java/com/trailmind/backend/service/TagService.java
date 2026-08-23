@@ -119,6 +119,18 @@ public class TagService {
     }
 
     /**
+     * 批量删除标签（04 §5 POST /tags/batch-delete）：事务内逐个级联删除（复用 {@link #delete(Long)}，
+     * 先清 entry_tag 关联再删标签），任一 id 不存在抛 404 并整体回滚；空集合幂等无操作。
+     */
+    @Transactional
+    public void deleteBatch(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) return;
+        for (Long id : ids) {
+            delete(id);
+        }
+    }
+
+    /**
      * 按标签筛条目（PRD D4）：tagId 必传（404 保护）；sessionId 可选（会话内过滤）。
      * 排序：会话开始时间倒序、会话内 seq 正序；批量回填各条目标签。
      */

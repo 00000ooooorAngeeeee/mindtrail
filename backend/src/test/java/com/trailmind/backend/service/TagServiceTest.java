@@ -212,4 +212,39 @@ class TagServiceTest {
         assertEquals(0, entries.size());
         verify(entryTagMapper, never()).selectTagNamesByEntries(any());
     }
+
+    // ---------- 批量删除（04 §5 POST /tags/batch-delete） ----------
+
+    @Test
+    void deleteBatch_empty_or_null_is_noop() {
+        service.deleteBatch(null);
+        service.deleteBatch(List.of());
+        verify(entryTagMapper, never()).deleteByTag(anyLong());
+        verify(tagMapper, never()).deleteById(anyLong());
+    }
+
+    @Test
+    void deleteBatch_all_exist_clears_links_then_deletes_each() {
+        when(tagMapper.selectById(1L)).thenReturn(tag(1L, 3L, "A"));
+        when(tagMapper.selectById(2L)).thenReturn(tag(2L, 3L, "B"));
+
+        service.deleteBatch(List.of(1L, 2L));
+
+        // 每个标签先清 entry_tag 关联再删自身（05 §3 显式级联）
+        verify(entryTagMapper).deleteByTag(1L);
+        verify(entryTagMapper).deleteByTag(2L);
+        verify(tagMapper).deleteById(1L);
+        verify(tagMapper).deleteById(2L);
+    }
+
+    @Test
+    void deleteBatch_missing_id_throws_404_and_skips_that_delete() {
+        when(tagMapper.selectById(1L)).thenReturn(tag(1L, 3L, "A"));
+        when(tagMapper.selectById(2L)).thenReturn(null); // 第二个不存在
+
+        assertThrows(NotFoundException.class, () -> service.deleteBatch(List.of(1L, 2L)));
+
+        verify(entryTagMapper, never()).deleteByTag(2L);
+        verify(tagMapper, never()).deleteById(2L);
+    }
 }

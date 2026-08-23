@@ -1,6 +1,7 @@
 package com.trailmind.backend.controller;
 
 import com.trailmind.backend.common.ApiResponse;
+import com.trailmind.backend.common.BatchDeleteRequest;
 import com.trailmind.backend.entity.Workspace;
 import com.trailmind.backend.service.WorkspaceService;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -50,6 +51,13 @@ public class WorkspaceController {
     @DeleteMapping("/{id}")
     public ApiResponse<Void> delete(@PathVariable Long id) {
         service.delete(id);
+        return ApiResponse.ok(null);
+    }
+
+    /** 批量删除工作区（04 §5 POST /workspaces/batch-delete，事务级联，任一不存在 404 整体回滚）。 */
+    @PostMapping("/batch-delete")
+    public ApiResponse<Void> batchDelete(@RequestBody BatchDeleteRequest req) {
+        service.deleteBatch(req.ids());
         return ApiResponse.ok(null);
     }
 }

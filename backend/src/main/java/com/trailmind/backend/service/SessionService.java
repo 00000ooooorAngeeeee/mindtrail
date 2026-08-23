@@ -131,6 +131,18 @@ public class SessionService {
         sessionMapper.deleteById(id);
     }
 
+    /**
+     * 批量删除会话（04 §5 POST /sessions/batch-delete）：事务内逐个级联删除（复用 {@link #delete(Long)}，
+     * 含条目/关联表/联动级联），任一 id 不存在抛 404 并整体回滚；空集合幂等无操作。
+     */
+    @Transactional
+    public void deleteBatch(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) return;
+        for (Long id : ids) {
+            delete(id);
+        }
+    }
+
     private String validateTitle(String title) {
         if (title == null || title.isBlank()) {
             throw new BadRequestException("会话标题不能为空");

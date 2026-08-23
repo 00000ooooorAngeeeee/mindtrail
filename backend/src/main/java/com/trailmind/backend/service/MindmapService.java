@@ -8,6 +8,7 @@ import com.trailmind.backend.repository.MindmapMapper;
 import com.trailmind.backend.repository.NodeEntryMapper;
 import com.trailmind.backend.repository.WorkspaceMapper;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -89,6 +90,18 @@ public class MindmapService {
         get(id); // 不存在则抛 404
         nodeEntryMapper.deleteByMindmap(id); // v1.1 联动级联：删除导图先清其节点挂接（05 §3 显式级联）
         mapper.deleteById(id);
+    }
+
+    /**
+     * 批量删除导图（04 §5 POST /mindmaps/batch-delete）：事务内逐个级联删除（复用 {@link #delete(Long)}，
+     * 含 node_entry 级联清理），任一 id 不存在抛 404 并整体回滚；空集合幂等无操作。
+     */
+    @Transactional
+    public void deleteBatch(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) return;
+        for (Long id : ids) {
+            delete(id);
+        }
     }
 
     private void ensureWorkspaceExists(Long workspaceId) {

@@ -15,6 +15,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -218,5 +219,46 @@ class MindmapServiceTest {
         // search_text 应含新名与节点文本（05 §4：name + 节点 text 拼接）
         verify(mapper).updateName(eq(1L), eq("新名"), argThat(s -> s.contains("新名") && s.contains("根")));
         assertSame(fresh, renamed);
+    }
+
+    // ---------- 批量删除（04 §5 POST /mindmaps/batch-delete） ----------
+
+    @Test
+    void deleteBatch_empty_or_null_is_noop() {
+        service.deleteBatch(null);
+        service.deleteBatch(List.of());
+        verify(mapper, never()).deleteById(anyLong());
+        verify(nodeEntryMapper, never()).deleteByMindmap(anyLong());
+    }
+
+    @Test
+    void deleteBatch_all_exist_cascades_each() {
+        Mindmap a = new Mindmap();
+        a.setId(1L);
+        Mindmap b = new Mindmap();
+        b.setId(2L);
+        when(mapper.selectById(1L)).thenReturn(a);
+        when(mapper.selectById(2L)).thenReturn(b);
+
+        service.deleteBatch(List.of(1L, 2L));
+
+        // 每张导图先清 node_entry 再删自身（v1.1 联动级联）
+        verify(nodeEntryMapper).deleteByMindmap(1L);
+        verify(nodeEntryMapper).deleteByMindmap(2L);
+        verify(mapper).deleteById(1L);
+        verify(mapper).deleteById(2L);
+    }
+
+    @Test
+    void deleteBatch_missing_id_throws_404_and_skips_that_delete() {
+        Mindmap a = new Mindmap();
+        a.setId(1L);
+        when(mapper.selectById(1L)).thenReturn(a);
+        when(mapper.selectById(2L)).thenReturn(null); // 第二个不存在
+
+        assertThrows(NotFoundException.class, () -> service.deleteBatch(List.of(1L, 2L)));
+
+        verify(nodeEntryMapper, never()).deleteByMindmap(2L);
+        verify(mapper, never()).deleteById(2L);
     }
 }

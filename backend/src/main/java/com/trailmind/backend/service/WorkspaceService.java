@@ -68,6 +68,18 @@ public class WorkspaceService {
         mapper.deleteById(id);
     }
 
+    /**
+     * 批量删除工作区（04 §5 POST /workspaces/batch-delete）：事务内逐个级联删除（复用 {@link #delete(Long)}），
+     * 任一 id 不存在抛 404 并整体回滚；空集合幂等无操作。前端选中项来自已加载列表，正常路径下均存在。
+     */
+    @Transactional
+    public void deleteBatch(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) return;
+        for (Long id : ids) {
+            delete(id);
+        }
+    }
+
     public List<Workspace> list() {
         return mapper.listWithCounts();
     }
