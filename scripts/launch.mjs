@@ -41,10 +41,10 @@ process.on('SIGINT', () => shutdown(0))
 process.on('SIGTERM', () => shutdown(0))
 
 console.log('[launch] 拉起 Electron 桌面端（自拉后端 jar，同源加载 http://127.0.0.1:17860；无需 vite）…')
-// DEV_SERVER_URL 让 electron 加载后端同源地址（Phase 0 起后端服务前端），而非默认 5173 vite dev server
+// TRAILMIND_DEV_URL（desktop/main/index.js 第 7 行读取的变量名）让 electron 加载后端同源地址（Phase 0 起后端服务前端），而非默认 5173 vite dev server
 spawnCmd(
   'npm --prefix desktop start',
-  { cwd: ROOT, env: { ...process.env, DEV_SERVER_URL: 'http://127.0.0.1:17860' } },
+  { cwd: ROOT, env: { ...process.env, TRAILMIND_DEV_URL: 'http://127.0.0.1:17860' } },
   (code) => {
     console.log(`[launch] Electron 已退出（code=${code}）。`)
     void shutdown(code ?? 0)
