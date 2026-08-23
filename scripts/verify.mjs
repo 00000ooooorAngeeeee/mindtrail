@@ -130,7 +130,7 @@ export function unzipBackupJson(buf) {
 }
 
 // HTTP 请求（内建 http），返回 { status, json }
-function request(url, { method = 'GET', body } = {}) {
+function request(url, { method = 'GET', body, timeout = 5000 } = {}) {
   return new Promise((resolve, reject) => {
     const headers = body !== undefined ? { 'Content-Type': 'application/json' } : undefined
     const req = http.request(url, { method, headers }, (res) => {
@@ -146,7 +146,7 @@ function request(url, { method = 'GET', body } = {}) {
       })
     })
     req.on('error', reject)
-    req.setTimeout(5000, () => req.destroy(new Error('请求超时')))
+    req.setTimeout(timeout, () => req.destroy(new Error('请求超时')))
     if (body !== undefined) req.write(JSON.stringify(body))
     req.end()
   })
@@ -1279,6 +1279,52 @@ export async function runChecks(deps = {}) {
     })
   } catch (e) {
     results.push({ ok: false, name: '备份往返', error: e.message })
+  }
+
+  // 6.10 备份导入恢复往返（v1.2 P2，PRD E5「导入恢复」/ 04 §5 POST /backup/import）：
+  //     导出当前全量 → 新建临时工作区（不在备份内）→ 导入恢复（事务全量替换）→ 临时工作区消失 + 已有工作区 ID 不变 + 非法备份 400
+  try {
+    const bk = await request(`${BASE}/api/v1/backup/export`, { method: 'POST' })
+    if (bk?.json?.code !== 0) throw new Error(`备份导出失败：${JSON.stringify(bk?.json)}`)
+    const backupContent = bk?.json?.data?.content
+    if (!backupContent) throw new Error('导入恢复用备份内容为空')
+
+    // 新建临时工作区（不在备份内），用于验证「全量替换」语义
+    const tmp = await request(`${BASE}/api/v1/workspaces`, {
+      method: 'POST', body: { name: `import-restore-${process.pid}-${Date.now()}` },
+    })
+    const tmpId = tmp?.json?.data?.id
+    if (tmp?.json?.code !== 0 || !tmpId) throw new Error(`临时工作区创建失败：${JSON.stringify(tmp?.json)}`)
+
+    // 导入恢复（全量替换）：临时工作区应消失，已有工作区 ID 不变（导入超时放宽至 30s，事务在服务端提交）
+    const imp = await request(`${BASE}/api/v1/backup/import`, {
+      method: 'POST', body: { content: backupContent }, timeout: 30000,
+    })
+    if (imp?.json?.code !== 0) throw new Error(`导入恢复失败：${JSON.stringify(imp?.json)}`)
+    const summary = imp?.json?.data
+    if (!summary || typeof summary.total !== 'number' || !summary.exportedAt) {
+      throw new Error(`导入恢复摘要异常：${JSON.stringify(summary)}`)
+    }
+
+    // 临时工作区已消失（被备份覆盖）
+    const after = await request(`${BASE}/api/v1/workspaces`)
+    const tmpGone = !(after?.json?.data || []).some((w) => w.id === tmpId)
+    if (!tmpGone) throw new Error('导入恢复后临时工作区仍存在（未全量替换）')
+
+    // 已有工作区 ID 不变（恢复）
+    const wsRestored = (after?.json?.data || []).some((w) => w.id === workspaceId)
+    if (!wsRestored) throw new Error(`导入恢复后未恢复工作区 ${workspaceId}`)
+
+    // 非法备份 → 400（合法 Base64 但非 zip）
+    const bad = await request(`${BASE}/api/v1/backup/import`, { method: 'POST', body: { content: 'bm90LWEtemlw' } })
+    if (bad?.json?.code === 0) throw new Error('非法备份应返回非 0 code')
+
+    results.push({
+      ok: true,
+      name: `备份导入恢复（全量替换：临时工作区消失 + 工作区 ${workspaceId} ID 不变 + 非法备份 400，恢复 ${summary.total} 行）`,
+    })
+  } catch (e) {
+    results.push({ ok: false, name: '备份导入恢复', error: e.message })
   }
 
   // 7. M3 总验收：10 条不同类型条目计时（单条 ≤10s，NFR）+ 会话 Markdown 导出往返（06 §4 解析 → 与库中数据逐一比对）
