@@ -3,9 +3,10 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import App from './App'
 import { fetchHealth } from './api/health'
 import { batchDeleteWorkspaces, deleteWorkspace, fetchWorkspaces, updateWorkspace } from './api/workspaces'
-import { batchDeleteMindmaps, createMindmap, deleteMindmap, listMindmaps, renameMindmap } from './api/mindmaps'
+import { batchDeleteMindmaps, createMindmap, deleteMindmap, getMindmap, listMindmaps, renameMindmap } from './api/mindmaps'
 import { batchDeleteSessions, createSession, deleteSession, getSession, listSessions } from './api/sessions'
 import { listTags } from './api/tags'
+import { getMindmapLinks, getSessionLinks } from './api/linkage'
 import { fetchSettings } from './api/settings'
 import { searchGlobal } from './api/search'
 import type { Session } from './api/types'
@@ -21,6 +22,7 @@ vi.mock('./api/workspaces', () => ({
 vi.mock('./api/mindmaps', () => ({
   listMindmaps: vi.fn(),
   createMindmap: vi.fn(),
+  getMindmap: vi.fn(),
   deleteMindmap: vi.fn(),
   renameMindmap: vi.fn(),
   batchDeleteMindmaps: vi.fn(),
@@ -40,6 +42,15 @@ vi.mock('./api/tags', () => ({
   mergeTag: vi.fn(),
   deleteTag: vi.fn(),
   filterEntriesByTag: vi.fn(),
+}))
+vi.mock('./api/linkage', () => ({
+  getMindmapLinks: vi.fn(),
+  getNodeLinks: vi.fn(),
+  replaceNodeLinks: vi.fn(),
+  searchMindmapNodes: vi.fn(),
+  getEntryNodes: vi.fn(),
+  getSessionLinks: vi.fn(),
+  getRecentEntries: vi.fn(),
 }))
 vi.mock('./api/settings', () => ({
   fetchSettings: vi.fn(),
@@ -64,6 +75,9 @@ const deleteSessionMock = vi.mocked(deleteSession)
 const batchDeleteSessionMock = vi.mocked(batchDeleteSessions)
 const getSessionMock = vi.mocked(getSession)
 const listTagsMock = vi.mocked(listTags)
+const getMindmapMock = vi.mocked(getMindmap)
+const getMindmapLinksMock = vi.mocked(getMindmapLinks)
+const getSessionLinksMock = vi.mocked(getSessionLinks)
 const settingsMock = vi.mocked(fetchSettings)
 const searchMock = vi.mocked(searchGlobal)
 
@@ -110,6 +124,20 @@ describe('App 首页', () => {
     createSessionMock.mockResolvedValue({ id: 1, title: '新会话', status: 'active' })
     deleteSessionMock.mockResolvedValue(undefined)
     searchMock.mockReset()
+    getMindmapMock.mockReset()
+    getMindmapMock.mockResolvedValue({
+      id: 10,
+      workspaceId: 1,
+      name: '导图A',
+      contentJson: '',
+      nodeCount: 1,
+      updatedAt: '2025-01-01T00:00:00',
+    })
+    getMindmapLinksMock.mockReset()
+    getMindmapLinksMock.mockResolvedValue({})
+    getSessionLinksMock.mockReset()
+    getSessionLinksMock.mockResolvedValue({})
+    window.localStorage.removeItem('trailmind.sidebarWidth')
   })
 
   it('渲染品牌名与后端版本号', async () => {
@@ -497,5 +525,63 @@ describe('App 首页', () => {
     fireEvent.click(within(ssGroup).getByText('批量删除（2）'))
 
     await waitFor(() => expect(batchDeleteSessionMock).toHaveBeenCalledWith([1, 2]))
+  })
+
+  it('打开导图在右侧内联渲染（不再全屏跳转），侧边栏保持可见（v1.2 P2 美化）', async () => {
+    workspacesMock.mockResolvedValue([ws])
+    listMindmapsMock.mockResolvedValue([{ id: 10, name: '导图A', nodeCount: 1 }])
+    render(<App />)
+    fireEvent.click(await screen.findByText('项目A'))
+    // 侧边栏导图列表项名称 → onOpen → 右侧内联编辑器（不再 position:fixed 全屏浮层）
+    fireEvent.click(await screen.findByText('导图A'))
+
+    // 右侧 main-content 进入内联编辑模式；编辑器工具栏标题出现在 main-content 内
+    await waitFor(() => {
+      const mainContent = document.querySelector('.main-content') as HTMLElement
+      expect(mainContent.classList.contains('editor-mode')).toBe(true)
+    })
+    const editorTitle = document.querySelector('.main-content .mm-title')
+    expect(editorTitle).not.toBeNull()
+    await waitFor(() => expect(editorTitle?.textContent).toBe('导图A'))
+    // 侧边栏仍可见（未被全屏编辑器遮挡）：工作区名仍在文档中且未隐藏
+    expect(screen.getByText('项目A')).toBeInTheDocument()
+    expect(document.querySelector('.sidebar')?.classList.contains('hidden')).toBe(false)
+
+    // ← 返回 → 退出内联编辑模式
+    fireEvent.click(screen.getByText('← 返回'))
+    await waitFor(() => {
+      const mainContent = document.querySelector('.main-content') as HTMLElement
+      expect(mainContent.classList.contains('editor-mode')).toBe(false)
+    })
+  })
+
+  it('侧边栏可拖拽调节宽度并钳制 220–560、持久化 localStorage（v1.2 P2 美化）', async () => {
+    workspacesMock.mockResolvedValue([ws])
+    render(<App />)
+    await screen.findByText('项目A')
+    const resizer = screen.getByRole('separator', { name: /拖动调节侧边栏宽度/ })
+    const sidebar = document.querySelector('.sidebar') as HTMLElement
+    expect(sidebar.style.width).toBe('300px') // 默认 300
+
+    // 起拖于 clientX=100，拖到 clientX=400 → 300 + 300 = 600，钳制上限 560
+    fireEvent.mouseDown(resizer, { clientX: 100 })
+    fireEvent.mouseMove(document, { clientX: 400 })
+    expect(sidebar.style.width).toBe('560px')
+    // 同一拖拽手势继续向左拖到 clientX=-1000 → 300 + (-1100) = -800，钳制下限 220
+    fireEvent.mouseMove(document, { clientX: -1000 })
+    expect(sidebar.style.width).toBe('220px')
+
+    // mouseup → 持久化最新宽度并移除监听
+    fireEvent.mouseUp(document)
+    expect(window.localStorage.getItem('trailmind.sidebarWidth')).toBe('220')
+  })
+
+  it('隐藏侧边栏后拖拽手柄消失（v1.2 P2 美化）', async () => {
+    workspacesMock.mockResolvedValue([ws])
+    render(<App />)
+    await screen.findByText('项目A')
+    expect(screen.getByRole('separator', { name: /拖动调节侧边栏宽度/ })).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('隐藏侧边栏'))
+    expect(screen.queryByRole('separator', { name: /拖动调节侧边栏宽度/ })).not.toBeInTheDocument()
   })
 })

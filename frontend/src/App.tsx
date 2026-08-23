@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from './store/useAppStore'
 import { useSettingsStore } from './store/useSettingsStore'
 import { useKeymap } from './utils/useKeymap'
@@ -42,6 +42,19 @@ export default function App() {
 
   // 悬浮岛式侧边栏可隐藏（v1.2 P2 美化前端样式）
   const [sidebarHidden, setSidebarHidden] = useState(false)
+  // 侧边栏可拖拽调节宽度（v1.2 P2 美化）：默认 300，拖拽区间 220–560，持久化 localStorage。
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    try {
+      const v = window.localStorage.getItem('trailmind.sidebarWidth')
+      const n = v ? parseInt(v, 10) : NaN
+      return Number.isFinite(n) && n >= 220 && n <= 560 ? n : 300
+    } catch {
+      return 300
+    }
+  })
+  const [sidebarResizing, setSidebarResizing] = useState(false)
+  // 拖拽过程用 ref 跟踪最新宽度（避免闭包读到旧 state，且用于 mouseup 持久化）。
+  const sidebarWidthRef = useRef(sidebarWidth)
   // 右侧标签云视图（点击侧边栏「标签」组 / 搜索无结果「按标签浏览」进入）
   const [tagsViewWs, setTagsViewWs] = useState<Workspace | null>(null)
   // 工作区 undo 删除：pending 过滤列表（乐观移除但未真删）
@@ -241,6 +254,36 @@ export default function App() {
     setSelectedStatus(null)
   }
 
+  /**
+   * 侧边栏宽度拖拽（v1.2 P2 美化）：mousedown 起拖 → mousemove 调宽（220–560，越界钳制）→
+   * mouseup 持久化 localStorage 并派发一次 resize 事件，触发导图自适应重排（React Flow 内部
+   * ResizeObserver 已重排画布渲染，此处仅补一次 fitView 检查，防内容被裁切）。
+   */
+  const onSidebarResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault()
+    setSidebarResizing(true)
+    const startX = e.clientX
+    const startW = sidebarWidthRef.current
+    const onMove = (ev: MouseEvent) => {
+      const w = Math.max(220, Math.min(560, startW + ev.clientX - startX))
+      sidebarWidthRef.current = w
+      setSidebarWidth(w)
+    }
+    const onUp = () => {
+      setSidebarResizing(false)
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      window.dispatchEvent(new Event('resize'))
+      try {
+        window.localStorage.setItem('trailmind.sidebarWidth', String(sidebarWidthRef.current))
+      } catch {
+        /* localStorage 不可用时静默忽略 */
+      }
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+
   const showSessionTabs = sessionTabs.length > 0 && !browseSessions
 
   return (
@@ -284,8 +327,11 @@ export default function App() {
         </div>
       )}
 
-      <div className="app-body">
-        <aside className={`sidebar island${sidebarHidden ? ' hidden' : ''}`}>
+      <div className={`app-body${sidebarResizing ? ' resizing' : ''}`}>
+        <aside
+          className={`sidebar island${sidebarHidden ? ' hidden' : ''}`}
+          style={{ width: sidebarHidden ? 0 : sidebarWidth }}
+        >
           <Sidebar
             workspaces={visibleWorkspaces}
             selectedWsId={open?.id ?? null}
@@ -305,8 +351,18 @@ export default function App() {
           />
         </aside>
 
+        {!sidebarHidden && (
+          <div
+            className="sidebar-resizer"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="拖动调节侧边栏宽度"
+            onMouseDown={onSidebarResizeStart}
+          />
+        )}
+
         <main className="main island">
-          <div className="main-content">
+          <div className={`main-content${openMindmapId != null ? ' editor-mode' : ''}`}>
             {settingsOpen ? (
               <SettingsPanel onBack={() => setSettingsOpen(false)} />
             ) : openMindmapId != null ? (

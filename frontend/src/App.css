@@ -121,6 +121,58 @@
   padding: 20px;
 }
 
+/* 导图内联模式（v1.2 P2 美化：导图不再全屏，直接铺满右侧 main island）：
+   去掉滚动与内边距，改为满高 flex 列，.mm-editor(flex:1) 自适应填满。 */
+.main-content.editor-mode {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 侧边栏宽度拖拽手柄（v1.2 P2 美化：可调节宽度）：浮于 sidebar/main 之间 12px 间隙，
+   负边距吃掉两侧间隙使手柄居中于分隔处；2px 竖线，hover/拖拽时品牌色高亮。 */
+.sidebar-resizer {
+  flex-shrink: 0;
+  width: 10px;
+  margin: 0 -11px;
+  cursor: col-resize;
+  position: relative;
+  z-index: 5;
+}
+
+.sidebar-resizer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 2px;
+  background: var(--border-faint);
+  border-radius: 1px;
+  transition: background 0.15s;
+}
+
+.sidebar-resizer:hover::before,
+.app-body.resizing .sidebar-resizer::before {
+  background: var(--brand);
+}
+
+/* 拖拽中：禁用侧边栏宽度过渡（避免跟手滞后）、锁定光标、禁用主区指针事件（防画布吞掉 mousemove）。 */
+.app-body.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.app-body.resizing .sidebar {
+  transition: none;
+}
+
+.app-body.resizing .main {
+  pointer-events: none;
+}
+
 .muted {
   color: var(--muted);
 }

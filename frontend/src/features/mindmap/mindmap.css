@@ -1,13 +1,16 @@
 /* 树状模式画布样式（03 §3.3/§6：节点 8px 圆角、选中外发光、冷静不花哨）。 */
 
 .mm-editor {
-  /* 铺满视口：脱离首页 .app 的 max-width 约束 */
-  position: fixed;
-  inset: 0;
-  z-index: 10;
+  /* 内联于右侧 .main-content（v1.2 P2 美化：导图直接出现在右侧，不再全屏跳转，侧边栏保持可见）。
+     由 .main-content.editor-mode 提供满高 flex 容器；内部 toolbar / canvas(flex:1) / statusbar 自适应。
+     画布→树三选一对话框与保存失败 toast 仍为 fixed 浮层（见 .mm-dialog-mask / .mm-toast），不受此影响。 */
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   background: var(--bg);
+  border-radius: 14px;
+  overflow: hidden;
 }
 
 .mm-toolbar {
