@@ -79,9 +79,11 @@
 
 - [x] v1.2 P2：自定义快捷键——已完成（07 §23 全清单，PRD §5 P2）：设置页「快捷键」节列 03 §5 落地 10 项，点击修改捕获键位 + 冲突检测 + 持久化 setting 表 `keymap` diff JSON（空白=重置默认）；3 处 handler（App/MindMapEditor/SessionView）改读 keymap（默认=03 §5 不变，Ctrl+Y 保留重做别名）；后端 SettingsService/Controller 增 keymap 字段（GET/PUT，PATCH 语义）；前端 utils/keymap.ts 纯函数（DEFAULT_KEYMAP/parse/serialize/format/comboFromEvent/matchesCombo/findConflict）+ useKeymap hook + useSettingsStore.setKeymap + SettingsPanel 快捷键节（capture 拦全局 handler/冲突拒绝/Esc 取消/单项与全部恢复默认）；Enter 提交与 Ctrl+W 关闭视图暂不纳入可定制集；后端 258 → 262（+SettingsServiceTest 4）、前端 253 → 265（+keymap 9 + SettingsPanel 3）、脚本 43、tsc 通过、SMOKE 17 段 ALL PASS（设置段增 keymap 往返子块）；过程记录见产品工作区「TrailMind 开发」，会话「v1.2 P2 自定义快捷键」
 
+- [x] 前端美化：悬浮岛式侧边栏——已完成（07 §24，用户即时美化需求，非 PRD §5 项）：悬浮岛式可隐藏双列壳层（顶栏 + 可隐藏 sidebar island + main island，`--shadow` 浮岛投影，原 640px 居中单列废弃）；`features/sidebar/Sidebar.tsx`（新）多级树（工作区作父节点→导图/会话[时间轴+状态点]/标签三组）；提取 `MindmapListSection`（镜像 SessionSection）；`utils/toast.ts`+`utils/undoDelete.ts`+`components/Toaster.tsx` 撤销 toast（乐观移除→撤销→到期真删，失败回退）；侧边栏单条删除接 undo-toast（工作区/导图/会话/标签），批量保留二次确认；App.tsx 右侧视图机 overview/导图(全屏)/会话卡片标签/标签云 + workspace undo pending 过滤，保留搜索/联动/标签聚焦/多会话/keymap 全部导航；前端 265 → 278（+toast 11 + App undo 2）、tsc 通过、后端 262 不变（零后端改动）；过程记录见产品工作区「TrailMind 开发」，会话「前端美化：悬浮岛式侧边栏」
+
 - _注：以下 P2 项**暂不实现**，列入待排期：AI 会话自动摘要（方案已定，[09 §3](docs/09-风险清单与开放问题.md)：自带 Key 外部 API 为主 + 规则模板兜底，本地大模型预留 provider 接口）、每周复盘报告、会话模板、工作区模板、主题定制（基础 light/dark/system 主题已随 M4 任务四落地，此项指进阶自定义）。_
 
-下一任务：**v1.2 P2 可落地项已全部完成**（导入恢复 §20、Markdown 大纲导出 §21、多标签批量合并 §22、自定义快捷键 §23）。**剩余仅为暂缓项**：AI 会话自动摘要（方案见 09 §3）、每周复盘报告、会话/工作区模板、主题定制（基础主题已随 M4 任务四落地，此项指进阶自定义）；条件项：节点表化改造（搜索/引用成瓶颈时，05 §6）。见 09 §3 与 07 §8 Backlog P2 行。
+下一任务：**v1.2 P2 可落地项已全部完成**（导入恢复 §20、Markdown 大纲导出 §21、多标签批量合并 §22、自定义快捷键 §23）+ **前端美化 §24 已完成**（悬浮岛式侧边栏 + 撤销 toast）。**剩余仅为暂缓项**：AI 会话自动摘要（方案见 09 §3）、每周复盘报告、会话/工作区模板、主题定制（基础主题已随 M4 任务四落地，此项指进阶自定义）；条件项：节点表化改造（搜索/引用成瓶颈时，05 §6）。见 09 §3 与 07 §8 Backlog P2 行。
 
 ## 文档索引
 
