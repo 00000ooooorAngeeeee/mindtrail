@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useKeymap } from '../../utils/useKeymap'
 import { addEntry, deleteEntry, updateEntry } from '../../api/entries'
 import { getSessionLinks } from '../../api/linkage'
 import { bindCommits, getCommitDetail, getCommits, getSessionCommits, unbindCommit } from '../../api/git'
@@ -355,17 +356,18 @@ export function SessionView({
     }
   }
 
-  // Ctrl+E 聚焦快速记录框（03 §5 快捷键全集）
+  // Ctrl+E 聚焦快速记录框（03 §5 快捷键全集，v1.2 P2 起读自定义 keymap）
+  const { matches } = useKeymap()
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e') {
+      if (matches('focusQuickRecord', e)) {
         e.preventDefault()
         quickRef.current?.focus()
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [matches])
 
   const hasMore = total > entries.length
   const loadMore = useCallback(() => {

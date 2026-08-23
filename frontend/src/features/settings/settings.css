@@ -172,3 +172,86 @@
   background: var(--brand-bg);
   color: var(--brand);
 }
+
+/* 快捷键（v1.2 P2，03 §5 自定义） */
+.settings-keymap {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.keymap-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  font-size: 13px;
+}
+
+.keymap-label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.keymap-combo {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  min-width: 96px;
+  text-align: center;
+}
+
+.keymap-row button {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.keymap-row button:hover {
+  border-color: var(--brand);
+  background: var(--brand-bg);
+}
+
+.keymap-row button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-keymap-actions {
+  margin-top: 8px;
+}
+
+.settings-keymap-actions button {
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-keymap-actions button:hover {
+  border-color: var(--brand);
+  background: var(--brand-bg);
+}
+
+.settings-keymap-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

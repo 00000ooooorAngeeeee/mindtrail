@@ -16,6 +16,8 @@ interface SettingsState {
   load: () => Promise<void>
   setTheme: (theme: ThemeMode) => Promise<void>
   setDefaultRepoPath: (path: string) => Promise<void>
+  /** 保存自定义快捷键 JSON（空白=重置默认，v1.2 P2，03 §5）。 */
+  setKeymap: (keymap: string) => Promise<void>
   /** system 模式下系统偏好变化时重解析应用（由组件订阅 matchMedia 触发）。 */
   applyForSystemPreference: (prefersDarkValue: boolean) => void
 }
@@ -62,6 +64,16 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       set({ settings, saving: false })
     } catch (e) {
       set({ saving: false, error: e instanceof Error ? e.message : '仓库路径保存失败' })
+    }
+  },
+
+  setKeymap: async (keymap) => {
+    set({ saving: true, error: null })
+    try {
+      const settings = await updateSettings({ keymap })
+      set({ settings, saving: false })
+    } catch (e) {
+      set({ saving: false, error: e instanceof Error ? e.message : '快捷键保存失败' })
     }
   },
 

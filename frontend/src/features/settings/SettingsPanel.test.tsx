@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { SettingsPanel } from './SettingsPanel'
 import { fetchSettings, updateSettings } from '../../api/settings'
 import { exportBackup, importBackup } from '../../api/backup'
@@ -22,6 +22,7 @@ const restoreMock = vi.mocked(importBackup)
 const baseSettings: AppSettings = {
   theme: 'system',
   defaultRepoPath: null,
+  keymap: null,
   database: {
     host: '127.0.0.1',
     port: 3306,
@@ -184,5 +185,45 @@ describe('SettingsPanel 设置页（M4 任务四）', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('备份文件损坏或非 zip')
     confirmSpy.mockRestore()
+  })
+
+  it('快捷键：修改捕获新键位并持久化 keymap（v1.2 P2，03 §5）', async () => {
+    render(<SettingsPanel onBack={() => {}} />)
+    await screen.findByText('127.0.0.1')
+
+    // 「手动保存」默认 Ctrl+S，点击修改后按下 Ctrl+D → 落库 diff JSON（仅 save 与默认不同）
+    const saveLi = screen.getByText('手动保存').closest('li') as HTMLElement
+    fireEvent.click(within(saveLi).getByRole('button', { name: '修改' }))
+
+    fireEvent.keyDown(window, { key: 'd', ctrlKey: true })
+
+    await waitFor(() =>
+      expect(updateMock).toHaveBeenCalledWith({
+        keymap: JSON.stringify({ save: { ctrl: true, shift: false, alt: false, key: 'd' } }),
+      }),
+    )
+  })
+
+  it('快捷键：与既有键位冲突时拒绝并提示（v1.2 P2）', async () => {
+    render(<SettingsPanel onBack={() => {}} />)
+    await screen.findByText('127.0.0.1')
+
+    // 「新建节点」默认 Ctrl+N，尝试设为 Ctrl+S → 与「手动保存」冲突
+    const newNodeLi = screen.getByText('新建节点').closest('li') as HTMLElement
+    fireEvent.click(within(newNodeLi).getByRole('button', { name: '修改' }))
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/冲突/)
+    expect(updateMock).not.toHaveBeenCalled()
+  })
+
+  it('快捷键：全部恢复默认传空白字符串重置（v1.2 P2）', async () => {
+    render(<SettingsPanel onBack={() => {}} />)
+    await screen.findByText('127.0.0.1')
+
+    fireEvent.click(screen.getByRole('button', { name: '全部恢复默认' }))
+
+    await waitFor(() => expect(updateMock).toHaveBeenCalledWith({ keymap: '' }))
   })
 })

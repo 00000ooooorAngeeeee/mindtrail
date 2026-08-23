@@ -4,6 +4,16 @@ import { useSettingsStore } from '../../store/useSettingsStore'
 import { exportBackup, importBackup } from '../../api/backup'
 import { downloadBase64File } from '../../utils/download'
 import { arrayBufferToBase64, BACKUP_ACCEPT, formatRestoreSummary, readFileAsArrayBuffer } from '../../utils/backupImport'
+import { useKeymap } from '../../utils/useKeymap'
+import {
+  comboFromEvent,
+  DEFAULT_KEYMAP,
+  findConflict,
+  formatCombo,
+  KEYMAP_ACTIONS,
+  sameCombo,
+  type ActionId,
+} from '../../utils/keymap'
 import './settings.css'
 
 /**
@@ -21,6 +31,36 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
   const [restoring, setRestoring] = useState(false)
   const [restoreResult, setRestoreResult] = useState<string | null>(null)
   const [restoreError, setRestoreError] = useState<string | null>(null)
+
+  const { keymap, setCombo, resetAll } = useKeymap()
+  const [capturing, setCapturing] = useState<ActionId | null>(null)
+  const [captureError, setCaptureError] = useState<string | null>(null)
+
+  // 快捷键捕获（capture 阶段 + stopImmediatePropagation 拦截全局 handler）：按下新键位 → 冲突检测 → 落库；Esc 取消。
+  useEffect(() => {
+    if (!capturing) return
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      if (e.key === 'Escape') {
+        setCapturing(null)
+        setCaptureError(null)
+        return
+      }
+      const combo = comboFromEvent(e)
+      if (!combo) return // 纯修饰键，等待下一个
+      const conflict = findConflict(keymap, combo, capturing)
+      if (conflict) {
+        setCaptureError(`与「${KEYMAP_ACTIONS.find((a) => a.id === conflict)?.label ?? conflict}」冲突，请换一个`)
+        return
+      }
+      setCaptureError(null)
+      void setCombo(capturing, combo)
+      setCapturing(null)
+    }
+    window.addEventListener('keydown', onKey, { capture: true })
+    return () => window.removeEventListener('keydown', onKey, { capture: true })
+  }, [capturing, keymap, setCombo])
 
   useEffect(() => {
     void load()
@@ -195,6 +235,48 @@ export function SettingsPanel({ onBack }: { onBack: () => void }) {
           {restoring ? '恢复中…' : '导入备份恢复'}
         </button>
         {restoreResult && <button onClick={() => window.location.reload()}>刷新页面</button>}
+      </div>
+
+      <h3>快捷键</h3>
+      <p className="muted">
+        自定义 03 §5 快捷键：点击「修改」后按下新键位（可含 Ctrl/Shift/Alt 组合），冲突时拒绝；Enter 与 Ctrl+W 暂不纳入。
+      </p>
+      {captureError && (
+        <p className="error" role="alert">
+          {captureError}
+        </p>
+      )}
+      <ul className="settings-keymap">
+        {KEYMAP_ACTIONS.map((a) => (
+          <li key={a.id} className="keymap-row">
+            <span className="keymap-label">
+              {a.label}
+              <small className="muted"> · {a.scope}</small>
+            </span>
+            <kbd className="keymap-combo">
+              {capturing === a.id ? '按下新键位…（Esc 取消）' : formatCombo(keymap[a.id])}
+            </kbd>
+            <button
+              onClick={() => {
+                setCapturing(a.id)
+                setCaptureError(null)
+              }}
+              disabled={saving}
+            >
+              修改
+            </button>
+            {!sameCombo(keymap[a.id], DEFAULT_KEYMAP[a.id]) && (
+              <button onClick={() => void setCombo(a.id, DEFAULT_KEYMAP[a.id])} disabled={saving}>
+                默认
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      <div className="settings-keymap-actions">
+        <button onClick={() => void resetAll()} disabled={saving}>
+          全部恢复默认
+        </button>
       </div>
     </section>
   )

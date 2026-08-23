@@ -286,6 +286,8 @@ export interface AppSettings {
   theme: ThemeMode
   defaultRepoPath: string | null
   database: DatabaseInfo
+  /** 自定义快捷键 JSON（null/空=回落默认 03 §5，v1.2 P2）。 */
+  keymap: string | null
 }
 
 /** 按标签筛出的条目（GET /entries?tagId=&sessionId=，含会话上下文供跳转）。 */

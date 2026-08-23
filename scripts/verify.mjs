@@ -1040,9 +1040,9 @@ export async function runChecks(deps = {}) {
     results.push({ ok: false, name: '导出往返（JSON/OPML/PNG）', error: e.message })
   }
 
-  // 6.8 设置往返（M4 任务四，07 §7「设置页：数据库连接信息展示、主题切换、仓库路径」）：
-  //     GET 数据库连接信息 → 主题非法值 400 / dark 往返（结束后还原）→ 默认仓库路径非法 400 / 真实仓库往返 →
-  //     会话回退链（无仓库工作区 + 无仓库会话 → 继承全局默认仓库路径）→ 清除路径并还原
+  // 6.8 设置往返（M4 任务四 + v1.2 P2，07 §7「设置页：数据库连接信息展示、主题切换、仓库路径、自定义快捷键」）：
+  //     GET 数据库连接信息 → 主题非法值 400 / dark 往返（结束后还原）→ 自定义快捷键 keymap JSON 往返 →
+  //     默认仓库路径非法 400 / 真实仓库往返 → 会话回退链（无仓库工作区 + 无仓库会话 → 继承全局默认仓库路径）→ 清除路径并还原
   let settingsWsId = null
   let settingsSessId = null
   let settingsRepoDir = null
@@ -1063,6 +1063,19 @@ export async function runChecks(deps = {}) {
     }
     const readDark = await request(`${BASE}/api/v1/settings`)
     if (readDark?.json?.data?.theme !== 'dark') throw new Error('主题读回不等于 dark')
+
+    // 自定义快捷键 keymap 往返（v1.2 P2，03 §5 + 04 §6.6）：PUT diff JSON → GET 读回 → 空白重置 → GET 回 null
+    const kmJson = JSON.stringify({ save: { ctrl: true, shift: false, alt: false, key: 'd' } })
+    const setKm = await request(`${BASE}/api/v1/settings`, { method: 'PUT', body: { keymap: kmJson } })
+    if (setKm?.json?.code !== 0 || setKm?.json?.data?.keymap !== kmJson) {
+      throw new Error(`keymap 保存失败：${JSON.stringify(setKm?.json)}`)
+    }
+    const readKm = await request(`${BASE}/api/v1/settings`)
+    if (readKm?.json?.data?.keymap !== kmJson) throw new Error('keymap 读回不等于所设 JSON')
+    const resetKm = await request(`${BASE}/api/v1/settings`, { method: 'PUT', body: { keymap: '' } })
+    if (resetKm?.json?.code !== 0 || resetKm?.json?.data?.keymap != null) {
+      throw new Error(`keymap 重置失败：${JSON.stringify(resetKm?.json)}`)
+    }
 
     const badRepo = await request(`${BASE}/api/v1/settings`, {
       method: 'PUT',
@@ -1102,7 +1115,7 @@ export async function runChecks(deps = {}) {
     settingsWsId = null
     const cleared = await request(`${BASE}/api/v1/settings`, {
       method: 'PUT',
-      body: { theme: initialTheme, defaultRepoPath: '' },
+      body: { theme: initialTheme, defaultRepoPath: '', keymap: '' },
     })
     if (cleared?.json?.code !== 0 || cleared?.json?.data?.defaultRepoPath != null) {
       throw new Error(`默认仓库路径清除失败：${JSON.stringify(cleared?.json)}`)
@@ -1112,7 +1125,7 @@ export async function runChecks(deps = {}) {
 
     results.push({
       ok: true,
-      name: '设置往返（数据库连接信息/主题 dark 往返 + 非法 400/默认仓库路径会话回退链/清除还原）',
+      name: '设置往返（数据库连接信息/主题 dark 往返 + 非法 400/自定义快捷键 keymap 往返/默认仓库路径会话回退链/清除还原）',
     })
   } catch (e) {
     results.push({ ok: false, name: '设置往返', error: e.message })

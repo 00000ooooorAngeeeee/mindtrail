@@ -29,13 +29,14 @@ public class SettingsController {
 
     @PutMapping
     public ApiResponse<SettingsService.SettingsView> update(@RequestBody UpdateRequest req) {
-        return ApiResponse.ok(service.update(req.getTheme(), req.getDefaultRepoPath()));
+        return ApiResponse.ok(service.update(req.getTheme(), req.getDefaultRepoPath(), req.getKeymap()));
     }
 
-    /** PUT 请求体：theme ∈ light|dark|system；defaultRepoPath 传空白字符串表示清除。 */
+    /** PUT 请求体：theme ∈ light|dark|system；defaultRepoPath 传空白字符串表示清除；keymap 为自定义快捷键 JSON（空白=重置默认）。 */
     public static class UpdateRequest {
         private String theme;
         private String defaultRepoPath;
+        private String keymap;
 
         public String getTheme() {
             return theme;
@@ -51,6 +52,14 @@ public class SettingsController {
 
         public void setDefaultRepoPath(String defaultRepoPath) {
             this.defaultRepoPath = defaultRepoPath;
+        }
+
+        public String getKeymap() {
+            return keymap;
+        }
+
+        public void setKeymap(String keymap) {
+            this.keymap = keymap;
         }
     }
 }

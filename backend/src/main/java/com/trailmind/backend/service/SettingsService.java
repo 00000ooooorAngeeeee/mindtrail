@@ -23,6 +23,7 @@ public class SettingsService {
 
     public static final String KEY_THEME = "theme";
     public static final String KEY_DEFAULT_REPO_PATH = "default_repo_path";
+    public static final String KEY_KEYMAP = "keymap";
     public static final String DEFAULT_THEME = "system";
     public static final List<String> THEMES = List.of("light", "dark", "system");
 
@@ -43,12 +44,12 @@ public class SettingsService {
 
     /** 完整设置视图：主题 + 默认仓库路径 + 数据库连接信息（密码只给「是否已配置」）。 */
     public SettingsView get() {
-        return new SettingsView(normalizedTheme(mapper.selectByKey(KEY_THEME)), getDefaultRepoPath(), databaseInfo());
+        return new SettingsView(normalizedTheme(mapper.selectByKey(KEY_THEME)), getDefaultRepoPath(), databaseInfo(), getKeymap());
     }
 
     /** 更新设置（PATCH 语义：null 字段不改动；defaultRepoPath 传空白字符串表示清除）。 */
     @Transactional
-    public SettingsView update(String theme, String defaultRepoPath) {
+    public SettingsView update(String theme, String defaultRepoPath, String keymap) {
         if (theme != null) {
             String t = theme.trim();
             if (!THEMES.contains(t)) {
@@ -67,6 +68,13 @@ public class SettingsService {
                 mapper.upsert(KEY_DEFAULT_REPO_PATH, p);
             }
         }
+        if (keymap != null) {
+            if (keymap.isBlank()) {
+                mapper.deleteByKey(KEY_KEYMAP);
+            } else {
+                mapper.upsert(KEY_KEYMAP, keymap);
+            }
+        }
         return get();
     }
 
@@ -77,6 +85,12 @@ public class SettingsService {
             return null;
         }
         return s.getV().trim();
+    }
+
+    /** 自定义快捷键映射 JSON（未设置返回 null，前端回落默认 03 §5）。 */
+    public String getKeymap() {
+        Setting s = mapper.selectByKey(KEY_KEYMAP);
+        return s == null || s.getV() == null ? null : s.getV();
     }
 
     /** 存量脏值（手工改库/历史版本）读到无效主题时回落默认值，保证前端总有合法主题。 */
@@ -90,7 +104,7 @@ public class SettingsService {
     }
 
     /** 设置视图（04 §5 GET /settings 响应体）。 */
-    public record SettingsView(String theme, String defaultRepoPath, DatabaseInfo database) {
+    public record SettingsView(String theme, String defaultRepoPath, DatabaseInfo database, String keymap) {
     }
 
     /**

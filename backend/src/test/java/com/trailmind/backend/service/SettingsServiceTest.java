@@ -70,7 +70,7 @@ class SettingsServiceTest {
         when(mapper.selectByKey(SettingsService.KEY_THEME)).thenReturn(setting("theme", "dark"));
         when(mapper.selectByKey(SettingsService.KEY_DEFAULT_REPO_PATH)).thenReturn(null);
 
-        SettingsService.SettingsView view = service.update("dark", null);
+        SettingsService.SettingsView view = service.update("dark", null, null);
 
         verify(mapper).upsert(SettingsService.KEY_THEME, "dark");
         assertEquals("dark", view.theme());
@@ -78,8 +78,8 @@ class SettingsServiceTest {
 
     @Test
     void update_invalid_theme_throws_400_and_does_not_persist() {
-        assertThrows(BadRequestException.class, () -> service.update("blue", null));
-        assertThrows(BadRequestException.class, () -> service.update("", null));
+        assertThrows(BadRequestException.class, () -> service.update("blue", null, null));
+        assertThrows(BadRequestException.class, () -> service.update("", null, null));
         verify(mapper, never()).upsert(anyString(), anyString());
     }
 
@@ -88,7 +88,7 @@ class SettingsServiceTest {
         when(mapper.selectByKey(SettingsService.KEY_THEME)).thenReturn(setting("theme", "light"));
         when(mapper.selectByKey(SettingsService.KEY_DEFAULT_REPO_PATH)).thenReturn(null);
 
-        SettingsService.SettingsView view = service.update(null, null);
+        SettingsService.SettingsView view = service.update(null, null, null);
 
         verify(mapper, never()).upsert(anyString(), anyString());
         assertEquals("light", view.theme());
@@ -99,7 +99,7 @@ class SettingsServiceTest {
     @Test
     void update_default_repo_path_without_git_dir_throws_400() {
         Path notARepo = Path.of("C:/__trailmind_missing_dir__");
-        assertThrows(BadRequestException.class, () -> service.update(null, notARepo.toString()));
+        assertThrows(BadRequestException.class, () -> service.update(null, notARepo.toString(), null));
         verify(mapper, never()).upsert(anyString(), anyString());
     }
 
@@ -108,7 +108,7 @@ class SettingsServiceTest {
         when(mapper.selectByKey(SettingsService.KEY_THEME)).thenReturn(null);
         when(mapper.selectByKey(SettingsService.KEY_DEFAULT_REPO_PATH)).thenReturn(null);
 
-        service.update(null, "   ");
+        service.update(null, "   ", null);
 
         verify(mapper).deleteByKey(SettingsService.KEY_DEFAULT_REPO_PATH);
     }
@@ -120,7 +120,7 @@ class SettingsServiceTest {
         when(mapper.selectByKey(SettingsService.KEY_DEFAULT_REPO_PATH))
                 .thenReturn(setting("default_repo_path", dir.toString()));
 
-        SettingsService.SettingsView view = service.update(null, dir.toString());
+        SettingsService.SettingsView view = service.update(null, dir.toString(), null);
 
         verify(mapper).upsert(SettingsService.KEY_DEFAULT_REPO_PATH, dir.toString());
         assertEquals(dir.toString(), view.defaultRepoPath());
@@ -187,5 +187,48 @@ class SettingsServiceTest {
         assertEquals("", none.host());
         assertEquals("", none.username());
         assertFalse(none.passwordConfigured());
+    }
+
+    // ---- 自定义快捷键（v1.2 P2，03 §5 + 04 §6.6 setting 表 keymap JSON） ----
+
+    @Test
+    void get_returns_null_keymap_when_unset() {
+        when(mapper.selectByKey(SettingsService.KEY_THEME)).thenReturn(null);
+        when(mapper.selectByKey(SettingsService.KEY_DEFAULT_REPO_PATH)).thenReturn(null);
+        when(mapper.selectByKey(SettingsService.KEY_KEYMAP)).thenReturn(null);
+
+        assertNull(service.get().keymap());
+    }
+
+    @Test
+    void update_keymap_persists_and_returns_view() {
+        String json = "{\"save\":{\"ctrl\":true,\"shift\":false,\"alt\":false,\"key\":\"d\"}}";
+        when(mapper.selectByKey(SettingsService.KEY_THEME)).thenReturn(null);
+        when(mapper.selectByKey(SettingsService.KEY_DEFAULT_REPO_PATH)).thenReturn(null);
+        when(mapper.selectByKey(SettingsService.KEY_KEYMAP)).thenReturn(setting("keymap", json));
+
+        SettingsService.SettingsView view = service.update(null, null, json);
+
+        verify(mapper).upsert(SettingsService.KEY_KEYMAP, json);
+        assertEquals(json, view.keymap());
+    }
+
+    @Test
+    void update_blank_keymap_resets_to_default() {
+        when(mapper.selectByKey(SettingsService.KEY_THEME)).thenReturn(null);
+        when(mapper.selectByKey(SettingsService.KEY_DEFAULT_REPO_PATH)).thenReturn(null);
+
+        service.update(null, null, "   ");
+
+        verify(mapper).deleteByKey(SettingsService.KEY_KEYMAP);
+        verify(mapper, never()).upsert(anyString(), anyString());
+    }
+
+    @Test
+    void update_null_keymap_keeps_unchanged() {
+        service.update(null, null, null);
+
+        verify(mapper, never()).upsert(anyString(), anyString());
+        verify(mapper, never()).deleteByKey(anyString());
     }
 }

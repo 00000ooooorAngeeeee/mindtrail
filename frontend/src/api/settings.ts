@@ -13,6 +13,8 @@ export function fetchSettings(): Promise<AppSettings> {
 export function updateSettings(patch: {
   theme?: ThemeMode
   defaultRepoPath?: string | null
+  /** 自定义快捷键 JSON（空白字符串=重置默认，v1.2 P2）。 */
+  keymap?: string | null
 }): Promise<AppSettings> {
   return put<AppSettings>('/settings', patch)
 }

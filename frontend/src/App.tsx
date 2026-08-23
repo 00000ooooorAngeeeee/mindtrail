@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppStore } from './store/useAppStore'
 import { useSettingsStore } from './store/useSettingsStore'
+import { useKeymap } from './utils/useKeymap'
 import { batchDeleteMindmaps, createMindmap, deleteMindmap, listMindmaps, renameMindmap } from './api/mindmaps'
 import { getSession } from './api/sessions'
 import type { Mindmap, Workspace } from './api/types'
@@ -62,20 +63,21 @@ export default function App() {
     return () => mq.removeEventListener('change', onChange)
   }, [])
 
-  // Ctrl+K 打开全局搜索；Ctrl+, 打开设置（03 §5）。
+  // Ctrl+K 打开全局搜索；Ctrl+, 打开设置（03 §5，v1.2 P2 起读自定义 keymap）。
+  const { matches } = useKeymap()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      if (matches('globalSearch', e)) {
         e.preventDefault()
         setSearchOpen(true)
-      } else if ((e.ctrlKey || e.metaKey) && e.key === ',') {
+      } else if (matches('openSettings', e)) {
         e.preventDefault()
         setSettingsOpen((v) => !v)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [matches])
 
   // 搜索结果跳转（PRD D2）：定位到对应工作区/导图/会话及具体条目，目标高亮闪烁。
   const handleSearchNavigate = (t: SearchNavigateTarget) => {

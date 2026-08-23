@@ -2,6 +2,7 @@
 // 树状：点选节点、双击编辑、拖拽改层级（悬停高亮）、折叠/展开、缩放/平移、双击空白加节点、快捷键。
 // 画布（M2 任务一）：自由拖拽（layout 持久化）、自由连线（type=free，可删除）、树→画布平铺、画布→树严格树判定 + 三选一。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useKeymap } from '../../utils/useKeymap'
 import {
   Background,
   BackgroundVariant,
@@ -630,34 +631,37 @@ export function MindMapEditor({
     }
   }
 
-  // 快捷键（08 §4.3 / 03 §5）：Ctrl+N 加节点、Delete 删除、Ctrl+S 保存、Ctrl+Z 撤销、Ctrl+Shift+Z/Ctrl+Y 重做、Ctrl+1/2 切换模式。
+  // 快捷键（08 §4.3 / 03 §5，v1.2 P2 起读自定义 keymap）：Ctrl+N 加节点、Delete 删除、Ctrl+S 保存、Ctrl+Z 撤销、Ctrl+Shift+Z 重做、Ctrl+1/2 切换模式；Ctrl+Y 为重做别名（非可定制项，保留习惯）。
+  const { matches } = useKeymap()
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT')) return
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      if (matches('save', e)) {
         e.preventDefault()
         void save()
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+      } else if (matches('undo', e)) {
         e.preventDefault()
-        if (e.shiftKey) redo()
-        else undo()
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        undo()
+      } else if (matches('redo', e)) {
         e.preventDefault()
         redo()
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        // Ctrl+Y 重做别名（非 §5 可定制项，保留习惯）
+        e.preventDefault()
+        redo()
+      } else if (matches('newNode', e)) {
         e.preventDefault()
         addNodeShortcut()
-      } else if ((e.ctrlKey || e.metaKey) && e.key === '1') {
+      } else if (matches('modeTree', e)) {
         e.preventDefault()
         trySwitch('tree')
-      } else if ((e.ctrlKey || e.metaKey) && e.key === '2') {
+      } else if (matches('modeCanvas', e)) {
         e.preventDefault()
         trySwitch('canvas')
-      } else if (e.key === 'Delete') {
-        // 人工验收反馈修复：原逻辑只要有选中节点就接管 Delete（带确认删节点），导致选中连线后
-        // 按 Delete 无法断开连线（节点仍处选中态时被劫持去删节点）。现仅在「有选中节点且未选中
-        // 自由边」时接管；选中边时放行给 React Flow 的删除链路（useKeyPress 监听 document）。
+      } else if (matches('deleteSelected', e)) {
+        // 人工验收反馈修复：原逻辑只要有选中节点就接管 Delete，导致选中连线后按 Delete 无法断开连线。
+        // 现仅在「有选中节点且未选中自由边」时接管；选中边时放行给 React Flow 删除链路。
         const hasEdgeSelected = edges.some((ed) => ed.selected)
         if (selectedIds.length > 0 && !hasEdgeSelected) {
           e.preventDefault()
@@ -667,7 +671,7 @@ export function MindMapEditor({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [save, undo, redo, addNodeShortcut, deleteSelected, selectedIds, trySwitch, edges])
+  }, [matches, save, undo, redo, addNodeShortcut, deleteSelected, selectedIds, trySwitch, edges])
 
   const nodeCount = content ? Object.keys(content.nodes).length : 0
   // 样式面板以「首个选中节点」样式为基准，操作批量应用到全部选中（PRD B2.6 批量设色）。

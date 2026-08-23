@@ -92,6 +92,7 @@ describe('App 首页', () => {
     settingsMock.mockResolvedValue({
       theme: 'system',
       defaultRepoPath: null,
+      keymap: null,
       database: { host: '127.0.0.1', port: 3306, database: 'trailmind', username: 'root', passwordConfigured: true },
     })
     healthMock.mockResolvedValue({ status: 'ok', app: 'trailmind', version: '0.0.1' })
