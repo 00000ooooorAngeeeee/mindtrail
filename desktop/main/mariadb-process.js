@@ -48,14 +48,14 @@ function buildStartArgs({ port = DEFAULT_PORT, bindAddress = DEFAULT_BIND_ADDRES
   return ['--port', String(port), '--bind-address', bindAddress, '--datadir', dataDir, '--skip-networking=off']
 }
 
-// mysqladmin shutdown 优雅关闭参数。
+// mysqladmin shutdown 优雅关闭参数（-u root：否则 mysqladmin 用当前 OS 用户名，root 无密码场景会 Access denied）。
 function buildShutdownArgs(port = DEFAULT_PORT) {
-  return ['--port', String(port), 'shutdown']
+  return ['-u', 'root', '--port', String(port), 'shutdown']
 }
 
-// mysqladmin ping 就绪探测参数（备选就绪判定，与 TCP 探测二选一）。
+// mysqladmin ping 就绪探测参数（同上 -u root，备选就绪判定，与 TCP 探测二选一）。
 function buildPingArgs(port = DEFAULT_PORT) {
-  return ['--port', String(port), 'ping']
+  return ['-u', 'root', '--port', String(port), 'ping']
 }
 
 // —— 决策纯函数 ——

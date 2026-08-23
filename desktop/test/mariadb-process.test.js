@@ -39,9 +39,9 @@ test('buildStartArgs：回环 + 固定端口 + datadir + 显式开启网络', ()
   ])
 })
 
-test('buildShutdownArgs / buildPingArgs：mysqladmin 命令构造', () => {
-  assert.deepStrictEqual(buildShutdownArgs(13306), ['--port', '13306', 'shutdown'])
-  assert.deepStrictEqual(buildPingArgs(), ['--port', '13306', 'ping'])
+test('buildShutdownArgs / buildPingArgs：mysqladmin 命令构造（带 -u root）', () => {
+  assert.deepStrictEqual(buildShutdownArgs(13306), ['-u', 'root', '--port', '13306', 'shutdown'])
+  assert.deepStrictEqual(buildPingArgs(), ['-u', 'root', '--port', '13306', 'ping'])
 })
 
 test('decideInit：目录不存在 → 首次初始化', () => {
