@@ -43,6 +43,10 @@ public interface NodeEntryMapper extends BaseMapper<NodeEntry> {
             """)
     int deleteByMindmapAndNodeIds(@Param("mindmapId") Long mindmapId, @Param("nodeIds") List<String> nodeIds);
 
+    /** 全量恢复前清空整表（DML DELETE，事务内可回滚；供 BackupRestoreService）。 */
+    @Delete("DELETE FROM node_entry")
+    int deleteAll();
+
     /** 节点挂接的条目 id（挂接时间正序，前端详情/对话框用）。 */
     @Select("SELECT entry_id FROM node_entry WHERE mindmap_id = #{mindmapId} AND node_id = #{nodeId} " +
             "ORDER BY created_at, entry_id")

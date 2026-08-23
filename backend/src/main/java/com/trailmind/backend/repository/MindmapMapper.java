@@ -2,6 +2,7 @@ package com.trailmind.backend.repository;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.trailmind.backend.entity.Mindmap;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -34,4 +35,8 @@ public interface MindmapMapper extends BaseMapper<Mindmap> {
     int updateName(@Param("id") Long id,
                    @Param("name") String name,
                    @Param("searchText") String searchText);
+
+    /** 全量恢复前清空整表（DML DELETE，事务内可回滚；与 schema.sql 9 张表对应，供 BackupRestoreService）。 */
+    @Delete("DELETE FROM mindmap")
+    int deleteAll();
 }

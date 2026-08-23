@@ -157,7 +157,7 @@ public class BackupExportService {
     }
 
     /** 供测试解压备份 zip 的辅助：返回内部 JSON 原文（无第三方依赖，ZipInputStream 读单条目）。 */
-    static String unzipJson(byte[] zip) throws IOException {
+    public static String unzipJson(byte[] zip) throws IOException {
         try (java.util.zip.ZipInputStream zis = new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(zip))) {
             ZipEntry e = zis.getNextEntry();
             if (e == null) {
@@ -174,5 +174,13 @@ public class BackupExportService {
     static Map<String, Object> parseBackup(String json) throws JsonProcessingException {
         Map<String, Object> root = MAPPER.readValue(json, Map.class);
         return root;
+    }
+
+    /**
+     * 将备份 JSON 反序列化为强类型 {@link BackupDocument}（供 BackupRestoreService 导入恢复；
+     * 复用同一 ObjectMapper，LocalDateTime 经 JavaTimeModule 默认反序列化器还原，table key 经 @JsonProperty 映射）。
+     */
+    public static BackupDocument parseDocument(String json) throws JsonProcessingException {
+        return MAPPER.readValue(json, BackupDocument.class);
     }
 }

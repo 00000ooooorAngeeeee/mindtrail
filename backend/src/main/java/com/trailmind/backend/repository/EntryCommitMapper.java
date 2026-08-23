@@ -30,6 +30,10 @@ public interface EntryCommitMapper extends BaseMapper<EntryCommit> {
     @Delete("DELETE FROM entry_commit WHERE entry_id = #{entryId} AND commit_hash = #{commitHash}")
     int deleteByEntryAndHash(@Param("entryId") Long entryId, @Param("commitHash") String commitHash);
 
+    /** 全量恢复前清空整表（DML DELETE，事务内可回滚；供 BackupRestoreService）。 */
+    @Delete("DELETE FROM entry_commit")
+    int deleteAll();
+
     /** 投影行（MyBatis 按下划线转驼峰自动映射）。 */
     class CommitRow {
         private Long entryId;

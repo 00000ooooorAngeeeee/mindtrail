@@ -2,6 +2,7 @@ package com.trailmind.backend.repository;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.trailmind.backend.entity.Tag;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -23,6 +24,10 @@ public interface TagMapper extends BaseMapper<Tag> {
             "(SELECT COUNT(*) FROM entry_tag et WHERE et.tag_id = t.id) AS entry_count " +
             "FROM tag t WHERE t.workspace_id = #{workspaceId} ORDER BY t.name, t.id")
     List<TagRow> listByWorkspaceWithCount(@Param("workspaceId") Long workspaceId);
+
+    /** 全量恢复前清空整表（DML DELETE，事务内可回滚；供 BackupRestoreService）。 */
+    @Delete("DELETE FROM tag")
+    int deleteAll();
 
     /** 列表行：标签字段 + 条目使用计数。 */
     class TagRow {

@@ -58,4 +58,8 @@ public interface WorkspaceMapper extends BaseMapper<Workspace> {
 
     @Delete("DELETE FROM tag WHERE workspace_id = #{workspaceId}")
     int deleteTagsByWorkspace(Long workspaceId);
+
+    /** 全量恢复前清空整表（DML DELETE，事务内可回滚；供 BackupRestoreService）。 */
+    @Delete("DELETE FROM workspace")
+    int deleteAll();
 }

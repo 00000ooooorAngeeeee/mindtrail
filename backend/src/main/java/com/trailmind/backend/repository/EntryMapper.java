@@ -53,6 +53,10 @@ public interface EntryMapper extends BaseMapper<Entry> {
     @Delete("DELETE FROM entry_commit WHERE entry_id = #{entryId}")
     int deleteEntryCommitsByEntry(@Param("entryId") Long entryId);
 
+    /** 全量恢复前清空整表（DML DELETE，事务内可回滚；供 BackupRestoreService）。 */
+    @Delete("DELETE FROM entry")
+    int deleteAll();
+
     /** 工作区最近条目（v1.1 联动选择器：节点挂条目对话框「最近条目」页，按创建时间倒序）。 */
     @Select("SELECT e.id, e.session_id, e.seq, e.type, e.content_md, e.created_at, s.title AS session_title " +
             "FROM entry e JOIN session s ON s.id = e.session_id " +

@@ -36,6 +36,10 @@ public interface EntryTagMapper extends BaseMapper<EntryTag> {
     @Delete("DELETE FROM entry_tag WHERE tag_id = #{tagId}")
     int deleteByTag(@Param("tagId") Long tagId);
 
+    /** 全量恢复前清空整表（DML DELETE，事务内可回滚；供 BackupRestoreService）。 */
+    @Delete("DELETE FROM entry_tag")
+    int deleteAll();
+
     /** 标签使用计数。 */
     @Select("SELECT COUNT(*) FROM entry_tag WHERE tag_id = #{tagId}")
     long countByTag(@Param("tagId") Long tagId);

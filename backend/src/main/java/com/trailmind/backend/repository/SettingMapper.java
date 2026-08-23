@@ -23,4 +23,8 @@ public interface SettingMapper extends BaseMapper<Setting> {
 
     @Delete("DELETE FROM setting WHERE k = #{k}")
     int deleteByKey(@Param("k") String k);
+
+    /** 全量恢复前清空整表（DML DELETE，事务内可回滚；供 BackupRestoreService）。 */
+    @Delete("DELETE FROM setting")
+    int deleteAll();
 }

@@ -2,6 +2,7 @@ package com.trailmind.backend.repository;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.trailmind.backend.entity.Session;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -19,4 +20,8 @@ public interface SessionMapper extends BaseMapper<Session> {
             "FROM session s WHERE s.workspace_id = #{workspaceId} " +
             "ORDER BY s.status ASC, s.started_at DESC, s.id DESC")
     List<Session> listByWorkspace(@Param("workspaceId") Long workspaceId);
+
+    /** 全量恢复前清空整表（DML DELETE，事务内可回滚；供 BackupRestoreService）。 */
+    @Delete("DELETE FROM session")
+    int deleteAll();
 }
