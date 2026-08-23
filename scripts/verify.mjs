@@ -1336,6 +1336,32 @@ export async function runChecks(deps = {}) {
     }
   }
 
+  // 批量删除往返（本次：批量删除工作区，事务级联 + 缺失 ID 整体回滚不删任何，04 §5）
+  try {
+    const bn = `batch-${process.pid}-${Date.now()}`
+    const c1 = await request(`${BASE}/api/v1/workspaces`, { method: 'POST', body: { name: `${bn}-1` } })
+    const c2 = await request(`${BASE}/api/v1/workspaces`, { method: 'POST', body: { name: `${bn}-2` } })
+    const b1 = c1?.json?.data?.id
+    const b2 = c2?.json?.data?.id
+    if (!b1 || !b2) throw new Error(`批量删除夹具创建失败：${JSON.stringify([c1?.json, c2?.json])}`)
+    const del = await request(`${BASE}/api/v1/workspaces/batch-delete`, { method: 'POST', body: { ids: [b1, b2] } })
+    if (del?.json?.code !== 0) throw new Error(`批量删除失败：${JSON.stringify(del?.json)}`)
+    const after = await request(`${BASE}/api/v1/workspaces`)
+    const gone = [b1, b2].every((id) => !(after?.json?.data || []).some((w) => w.id === id))
+    if (!gone) throw new Error('批量删除后工作区仍可见')
+    // 含缺失 ID → 整体回滚：code≠0 且已存在的项不被删除（真实事务回滚，单测无法覆盖）
+    const c3 = await request(`${BASE}/api/v1/workspaces`, { method: 'POST', body: { name: `${bn}-3` } })
+    const b3 = c3?.json?.data?.id
+    const bad = await request(`${BASE}/api/v1/workspaces/batch-delete`, { method: 'POST', body: { ids: [b3, 999999999] } })
+    const afterBad = await request(`${BASE}/api/v1/workspaces`)
+    const rolledBack = bad?.json?.code !== 0 && (afterBad?.json?.data || []).some((w) => w.id === b3)
+    if (!rolledBack) throw new Error(`缺失 ID 未整体回滚：${JSON.stringify(bad?.json)}`)
+    await request(`${BASE}/api/v1/workspaces/${b3}`, { method: 'DELETE' }) // 清理夹具
+    results.push({ ok: true, name: '批量删除工作区（事务级联 + 缺失 ID 整体回滚，04 §5）' })
+  } catch (e) {
+    results.push({ ok: false, name: '批量删除工作区', error: e.message })
+  }
+
   // 8. workspace 级联删除（连同第 4 步创建的导图 + 本步补建的会话与标签）
   try {
     // 补建一个会话，验证工作区删除时会话/标签级联（条目级联见第 5 步）
