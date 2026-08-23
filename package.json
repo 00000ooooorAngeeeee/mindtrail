@@ -9,6 +9,7 @@
     "launch": "node scripts/launch.mjs",
     "build": "node scripts/build.mjs",
     "package": "node scripts/package.mjs",
+    "package:backend": "node scripts/package-backend.mjs",
     "verify": "node scripts/verify.mjs"
   }
 }
