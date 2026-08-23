@@ -1,6 +1,6 @@
 # 设计文档：自包含非 Electron 打包（Wails + 捆绑 MariaDB）
 
-> 状态：设计已定，待实现。创建于 2026-08-23。
+> 状态：设计已定；Phase 0（后端同源服务前端）与 Phase 1（后端 app-image，bundled JRE）已实现，Phase 2–4 待实现。创建于 2026-08-23。
 > 来源：用户需求「非 Electron 打包方案、一键启动、约定式丢 ico 换图标、数据库自包含」；头脑风暴选定方案 A。
 > 关联：docs/04 §5（契约）、docs/05（schema）、docs/06 §4/§4A（导出/备份协议）、docs/10 §10/§12（M0 打包）、docs/11 §11（脚本索引）、AGENTS.md 快速命令。
 
@@ -142,8 +142,8 @@ WebView2 → `http://127.0.0.1:17860`（前端，同源）→ `GET /api/v1/...` 
 
 分 5 期，Phase 0 独立可交付（即使不做新壳也能改善现状）：
 
-- **Phase 0**：Spring Boot 同源服务前端（`classpath:/static/` + `RootController` 根路径 forward）+ `DB_HOST/DB_PORT` env + 单测。交付后打包态 /api 根因解决。（SPA fallback 经核查前端无路由 YAGNI 跳过）
-- **Phase 1**：jpackage 后端 app-image（bundled JRE，`--icon`），实机冷启验证（连外部 MySQL）。
+- **Phase 0**：Spring Boot 同源服务前端（`classpath:/static/` + `RootController` 根路径 forward）+ `DB_HOST/DB_PORT` env + 单测。交付后打包态 /api 根因解决。（SPA fallback 经核查前端无路由 YAGNI 跳过）—— **已完成**
+- **Phase 1**：jpackage 后端 app-image（bundled JRE，`--icon`），实机冷启验证（连外部 MySQL）—— **已完成（2026-08-23）**。产出 `backend/target/trailmind-backend/`（`npm run package:backend`），图标约定 `branding/icon.ico`。
 - **Phase 2**：bundled MariaDB 生命周期库（init/start/stop/health，端口 13306，datadir），`node:test` 单测。
 - **Phase 3**：Wails 壳编排（mariadb + backend + WebView2 + 退出清理），Go test。
 - **Phase 4**：打包脚本 `scripts/package-desktop.mjs` + `branding/icon.ico` 约定 + `npm run package:desktop` + release 组装。

@@ -28,6 +28,7 @@
 - `npm run dev`：一键前后端联调
 - `npm run launch`：一键拉起桌面端（Electron 自拉后端 jar，同源加载 17860；无需 vite/浏览器；项目根「启动 TrailMind」快捷方式即调用它）
 - `npm run package`：打包 exe
+- `npm run package:backend`：后端 app-image 打包（bundled JRE，无需预装 Java；自包含打包 Phase 1）
 - `scripts/verify`：里程碑验收冒烟
 
 ## 当前进度
