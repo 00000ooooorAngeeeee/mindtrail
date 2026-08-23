@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { contentExceedsViewport } from './fitCheck'
+import { computeFitViewport, contentExceedsViewport } from './fitCheck'
 
 describe('自适应缩放判定（v1.1 P1）', () => {
   // 视口 1000×600、zoom=1、viewport {x:0,y:0} → 可见区 left=0 top=0 w=1000 h=600；pad=80/48
@@ -75,5 +75,88 @@ describe('自适应缩放判定（v1.1 P1）', () => {
     expect(
       contentExceedsViewport({ minX: -70, minY: -40, maxX: 1070, maxY: 640 }, vp, 1000, 600, 0.05),
     ).toBe(true)
+  })
+})
+
+describe('computeFitViewport（首开适应兜底，确定性由坐标计算）', () => {
+  // 节点估宽 160 / 估高 44（与画布 NODE_W/NODE_H 一致），视口 1000×600，padding 0.2，zoom ∈ [0.2, 2.5]
+  const W = 160
+  const H = 44
+  const vp = { w: 1000, h: 600, pad: 0.2, min: 0.2, max: 2.5 }
+
+  it('空坐标或零视口返回 null', () => {
+    expect(computeFitViewport([], 1000, 600, W, H, 0.2, 0.2, 2.5)).toBeNull()
+    expect(computeFitViewport([{ x: 0, y: 0 }], 0, 600, W, H, 0.2, 0.2, 2.5)).toBeNull()
+    expect(computeFitViewport([{ x: 0, y: 0 }], 1000, 0, W, H, 0.2, 0.2, 2.5)).toBeNull()
+  })
+
+  it('单个小节点：zoom 上限 2.5，内容居中', () => {
+    const r = computeFitViewport([{ x: 0, y: 0 }], vp.w, vp.h, W, H, vp.pad, vp.min, vp.max)
+    expect(r).not.toBeNull()
+    // 内容中心 (80,22) 落在视口中心 (500,300)：x + 80*zoom = 500、y + 22*zoom = 300
+    expect(r!.zoom).toBe(2.5)
+    expect(r!.x + 80 * r!.zoom).toBeCloseTo(500, 5)
+    expect(r!.y + 22 * r!.zoom).toBeCloseTo(300, 5)
+  })
+
+  it('宽内容：zoom < 1 且居中', () => {
+    // 两节点 0..1840 → 包围盒宽 2000（含节点宽）
+    const r = computeFitViewport(
+      [
+        { x: 0, y: 0 },
+        { x: 1840, y: 0 },
+      ],
+      vp.w,
+      vp.h,
+      W,
+      H,
+      vp.pad,
+      vp.min,
+      vp.max,
+    )
+    expect(r).not.toBeNull()
+    expect(r!.zoom).toBeGreaterThan(vp.min)
+    expect(r!.zoom).toBeLessThan(1)
+    // 内容中心 cx=1000 落在视口中心 500：x + 1000*zoom = 500
+    expect(r!.x + 1000 * r!.zoom).toBeCloseTo(500, 5)
+  })
+
+  it('超大内容：zoom 钳到下限 0.2', () => {
+    const r = computeFitViewport(
+      [
+        { x: 0, y: 0 },
+        { x: 100000, y: 0 },
+      ],
+      vp.w,
+      vp.h,
+      W,
+      H,
+      vp.pad,
+      vp.min,
+      vp.max,
+    )
+    expect(r).not.toBeNull()
+    expect(r!.zoom).toBe(vp.min)
+  })
+
+  it('padding 越大 zoom 越小（边距越多）', () => {
+    // 包围盒宽 800（640 + 节点宽 160）
+    const pos = [
+      { x: 0, y: 0 },
+      { x: 640, y: 0 },
+    ]
+    const a = computeFitViewport(pos, vp.w, vp.h, W, H, 0.2, vp.min, vp.max)
+    const b = computeFitViewport(pos, vp.w, vp.h, W, H, 0.4, vp.min, vp.max)
+    expect(a!.zoom).toBeCloseTo(0.75, 5) // availW=600 / 800
+    expect(b!.zoom).toBeCloseTo(0.25, 5) // availW=200 / 800
+    expect(b!.zoom).toBeLessThan(a!.zoom)
+  })
+
+  it('负坐标内容仍正确居中（导图常以负坐标分布）', () => {
+    // 单节点 x=-800、宽 160 → 包围盒 -800..-640，中心 cx=-720；zoom 钳到上限 2.5
+    const r = computeFitViewport([{ x: -800, y: 0 }], vp.w, vp.h, W, H, vp.pad, vp.min, vp.max)
+    expect(r).not.toBeNull()
+    expect(r!.zoom).toBe(2.5)
+    expect(r!.x + -720 * r!.zoom).toBeCloseTo(500, 5)
   })
 })
