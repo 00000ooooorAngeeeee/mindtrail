@@ -44,7 +44,7 @@
 ### 4.1 后端同源服务前端（共享前置，Phase 0）
 
 - Spring Boot 服务 `classpath:/static/`（构建时把 `frontend/dist` 内容复制进 `backend/src/main/resources/static/`）。
-- **SPA fallback**：新增 controller/`WebMvcConfigurer`，把非 `/api/**`、非静态资源的 GET 请求 forward 到 `/index.html`（避免前端路由刷新 404）。
+- **根路径转发**（非 SPA fallback）：经核查前端无路径路由（Zustand 状态机单视图），深路径刷新场景不存在 → SPA fallback controller YAGNI 跳过；仅 `RootController` `@GetMapping("/") forward:/index.html` 显式根路径转发到 SPA 入口（确定且可 MockMvc 断言 `forwardedUrl`）。
 - 效果：打包态前端与 API 同源（`http://127.0.0.1:17860`），相对 `/api/v1` 直达后端，**修好当前打包态 /api 失效根因**。dev 仍走 vite（`:5173` + proxy），不变。
 - DB 端口/凭据走环境变量（`DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASS`，已有 `.env` 机制扩展 `DB_PORT`）；壳注入 bundled mariadb 值。
 
@@ -142,7 +142,7 @@ WebView2 → `http://127.0.0.1:17860`（前端，同源）→ `GET /api/v1/...` 
 
 分 5 期，Phase 0 独立可交付（即使不做新壳也能改善现状）：
 
-- **Phase 0**：Spring Boot 同源服务前端 + SPA fallback + `DB_PORT` env + 单测。交付后打包态 /api 根因解决。
+- **Phase 0**：Spring Boot 同源服务前端（`classpath:/static/` + `RootController` 根路径 forward）+ `DB_HOST/DB_PORT` env + 单测。交付后打包态 /api 根因解决。（SPA fallback 经核查前端无路由 YAGNI 跳过）
 - **Phase 1**：jpackage 后端 app-image（bundled JRE，`--icon`），实机冷启验证（连外部 MySQL）。
 - **Phase 2**：bundled MariaDB 生命周期库（init/start/stop/health，端口 13306，datadir），`node:test` 单测。
 - **Phase 3**：Wails 壳编排（mariadb + backend + WebView2 + 退出清理），Go test。
