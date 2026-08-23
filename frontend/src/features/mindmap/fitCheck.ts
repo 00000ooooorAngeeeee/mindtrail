@@ -53,6 +53,53 @@ export interface NodePoint {
 }
 
 /**
+ * 可携带 measured 的节点（结构兼容 React Flow Node，但不依赖其类型，保持纯函数可独立单测）。
+ */
+export interface MeasuredNode {
+  id: string
+  measured?: { width?: number; height?: number }
+}
+
+/**
+ * 将上一帧已测量的节点尺寸（measured）携带到本次重建的节点对象上。
+ *
+ * 根因（07 §17 修复四根因② + 本轮「第三次进入导图适应视图失效」）：
+ * 本应用内容 effect 每次（content/links/selectedIds/… 变化）都 setNodes(buildNodes(...)) 重建
+ * 全部节点对象。React Flow 的 adoptUserNodes（checkEquality）见对象引用变了即重新采纳，并把 measured
+ * 重置为 { width: userNode.measured?.width, height: userNode.measured?.height }——buildNodes 不带 measured，
+ * 故重置为 undefined → useNodesInitialized 翻 false。
+ * 进入导图首开：节点测量完成 nodesInitialized→true，InitialFitController 排程双 rAF 调 fitView；
+ * 紧随其后的 links 异步加载触发 setNodes 重建 → measured 重置 → nodesInitialized 翻 false →
+ * effect 清理取消 rAF，且 doneKey 已置位 → computeFitViewport 兜底被阻断 → 导图停在左上角
+ * （连接预热、getMindmapLinks 在 2 帧内返回时复现，约第三次进入起）。
+ *
+ * 修复：重建后把上一帧同 id 节点的 measured 携带回来，adoptUserNodes 即保留 measured →
+ * nodesInitialized 保持 true → rAF 不被取消 → fitView 正常执行（首开/二次/多次进入一致）。
+ * 新增节点无 prev measured（undefined，待 ResizeObserver 测量）；删除节点自然消失；尺寸真实变化
+ * 仍由 ResizeObserver 更新 measured（与本携带互不影响）。
+ *
+ * 幂等：next 已有 measured 的节点不覆盖；无任何节点需携带时返回原 next 引用（避免无谓重渲染）。
+ */
+export function carryMeasured<T extends MeasuredNode>(next: T[], prev: T[] | undefined): T[] {
+  if (!prev || prev.length === 0) return next
+  const prevMeasured = new Map<string, NonNullable<MeasuredNode['measured']>>()
+  for (const n of prev) {
+    if (n.measured) prevMeasured.set(n.id, n.measured)
+  }
+  if (prevMeasured.size === 0) return next
+  let changed = false
+  const out = next.map((n) => {
+    // 已有完整 measured 的节点保留（不覆盖真实测量结果）。
+    if (n.measured?.width != null && n.measured?.height != null) return n
+    const m = prevMeasured.get(n.id)
+    if (!m) return n
+    changed = true
+    return { ...n, measured: m }
+  })
+  return changed ? out : next
+}
+
+/**
  * 由节点坐标 + 节点尺寸确定性计算「适应视口」（首开导图自动适应的兜底）。
  *
  * 不依赖 React Flow 测量时序：包围盒 = 各节点 [x,y]~[x+nodeW,y+nodeH] 的并集，按 padding 在两侧

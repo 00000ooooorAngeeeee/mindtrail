@@ -29,7 +29,7 @@ import { downloadBase64File, downloadTextFile } from '../../utils/download'
 import { descendants } from './content'
 import type { MindmapContent } from './content'
 import { computeTreeLayout, type LayoutPoint } from './treeLayout'
-import { computeFitViewport, contentExceedsViewport } from './fitCheck'
+import { carryMeasured, computeFitViewport, contentExceedsViewport } from './fitCheck'
 import { MindmapNode, type MindmapRFNode } from './MindmapNode'
 import { FreeEdge, type FreeEdgeData } from './FreeEdge'
 import { NODE_COLORS, NODE_SHAPES } from './nodeStyle'
@@ -468,13 +468,18 @@ export function MindMapEditor({
   // 布局/内容变化时同步节点与边（拖拽中跳过，避免打断拖拽）。
   useEffect(() => {
     if (!content || dragging.current) return
-    setNodes(
-      buildNodes(content, positions, childCount, selectedIds, mode, flashId, {
-        mindmapId,
-        links,
-        onShowNodeLinks: openNodeLinks,
-        onManageLinks: openLinkDialog,
-      }),
+    setNodes((prev) =>
+      // 携带上一帧 measured：links 等异步加载会重建节点对象，React Flow adoptUserNodes 会因此重置
+      // measured → nodesInitialized 翻 false → 取消首开 fitView 的 rAF（第三次进入导图失效根因，见 fitCheck.carryMeasured）。
+      carryMeasured(
+        buildNodes(content, positions, childCount, selectedIds, mode, flashId, {
+          mindmapId,
+          links,
+          onShowNodeLinks: openNodeLinks,
+          onManageLinks: openLinkDialog,
+        }),
+        prev,
+      ),
     )
     // 函数式更新保留当前边选中态：点击选中边会联动取消节点选中（selectedIds 变化触发本 effect），
     // 直接重建会把刚选中的边洗掉，导致「选中边按 Delete 断开」失效（人工验收反馈修复）。
