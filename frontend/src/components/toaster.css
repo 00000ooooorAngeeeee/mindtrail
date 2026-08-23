@@ -1,0 +1,57 @@
+/* 轻提示 toast（v1.2 P2「删除带撤销」）：右下角悬浮岛式堆叠，复用主题变量。 */
+.toaster {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 1000;
+  pointer-events: none; /* 容器不拦截，单个 toast 重新启用 */
+}
+
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 220px;
+  max-width: 360px;
+  padding: 10px 14px;
+  background: var(--card);
+  border: 1px solid var(--border-faint);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(15, 18, 26, 0.16);
+  color: var(--text);
+  font-size: 13px;
+  animation: toast-in 150ms ease-out;
+}
+
+.toast-message {
+  flex: 1;
+}
+
+.toast-action {
+  border: none;
+  background: transparent;
+  color: var(--brand);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.toast-action:hover {
+  text-decoration: underline;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
