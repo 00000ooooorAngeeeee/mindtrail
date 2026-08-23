@@ -8,6 +8,9 @@ out/
 # 前端构建产物复制到后端静态资源（specs 自包含打包 Phase 0；build.mjs 构建期复制，不入库）
 backend/src/main/resources/static/
 
+# 打包态 DB 凭据回退文件（build.mjs 从仓库根 .env 生成，含敏感信息，不入库）
+backend/src/main/resources/db-credentials.properties
+
 # Electron 运行期临时用户数据目录（沙箱下 --user-data-dir 指到工作区的产物）
 .electron-dev/
 
