@@ -4,7 +4,7 @@
 
 ## 这是什么
 
-**思迹 TrailMind**：Windows 桌面端工具 = 双模式思维导图 + Git 绑定的 vibecoding 过程记录。当前仓库已完成 **M0 里程碑**（后端 /health、MySQL 幂等建表、workspace CRUD、前端工程、Electron 壳、一键脚本均已落地，验收见 docs/10 §12）、**M1 里程碑**（工作区 + 树状思维导图）、**M2 里程碑**（自由画布模式，已总验收）、**M3 里程碑**（过程记录 + Git 绑定，已总验收）、**M4 全部任务**（搜索/标签/导出/设置/空态/备份/性能回归/缺陷清理/收尾验收，已完成）与 **v1.1 P1 全部任务**（导图↔记录联动、B2 完善之连线标签、C2.4 补记时间 / C2.5 插入条目、C3.6 diff 预览、标签云、自适应缩放、多会话并行视图，均已完成，07 §8 Backlog P1 行全部勾选），下一任务 **v1.2 / P2「导入恢复」**（07 §8 Backlog；备份导出已就绪，补齐恢复闭环）。
+**思迹 TrailMind**：Windows 桌面端工具 = 双模式思维导图 + Git 绑定的 vibecoding 过程记录。当前仓库已完成 **M0–M4 全部里程碑**、**v1.1 P1 全部任务**（07 §8 Backlog P1 行全部勾选）与 **v1.2 P2「导入恢复」**（07 §20：`POST /backup/import` 全量恢复，备份导出→恢复闭环已闭合），下一任务 **v1.2 P2 剩余项**（PRD §5 P2：AI 会话自动摘要、每周复盘报告、会话/工作区模板、Markdown 大纲导出、多标签批量操作、自定义快捷键、主题定制）。
 
 ## 技术栈（一句话）
 
@@ -71,7 +71,9 @@
 - [x] 缺陷修复一：重命名工作区后列表计数归零（用户反馈，07 §19）——已完成：`useAppStore.rename` 用 `PUT /workspaces/{id}` 响应整对象替换列表项，而 `WorkspaceService.update` 经 `selectById` 不填充 `mindmapCount/sessionCount`（`@TableField(exist=false)`）→ 列表 `?? 0` 归零（07 §17 修复二遗漏的重命名路径）；后端 `WorkspaceMapper.selectWithCounts` + `update` 改回带计数单行查询（根因）+ 前端 `useAppStore.rename` 合并 `updated.mindmapCount ?? w.mindmapCount`（防御）；后端 243、前端 242 单测全绿、tsc 通过
 - [x] 缺陷修复二：第三次进入导图适应视图失效停在左上角（用户反馈，07 §19）——**已完成**：先重建当前 HEAD（3c41383，InitialFitController 基线）的 frontend/dist 复现原 bug，加临时打点（InitialFitController 生命周期 + 内容 effect setNodes measured 分布 + RF store nodesInitialized/measured 转换）采集真实时序，**GUI 实机证实根因**：主路径 effect 依赖 `useNodesInitialized`，内容 effect 每次 `setNodes(buildNodes)` 重建节点对象使 React Flow `adoptUserNodes` 重置 `measured` → `useNodesInitialized` 翻 false → effect 清理 `cancelAnimationFrame` 掉已排程的双 rAF `fitView`，且 `doneKey` 已置位阻断重排与 800ms 兜底；是否失效取决于 outer rAF 与 cleanup 的子帧竞态（约第三次起，连接预热后 links 2 帧内返回时复现）。打点亦证 `measured` 确经 ResizeObserver 回填（0/11→11/11 约4ms），故上一会话 `carryMeasured`（保留旧 measured）前提错误、反致首开失效。修复：主路径 effect 不再依赖 `useNodesInitialized`，改 rAF 轮询 `rf.getNodes()` 的 measured，全部测量完成即一次性 `fitView` 并置 `doneKey`（提交 69f1954）。验收：GUI 实机同图 ×8 + 跨图交替 ×6 全部已适应、前端 242/242 + tsc、verify-m2-gui 33/33（S0d/S6a1）；过程记录见产品工作区「TrailMind 开发」
 
-下一任务：**v1.2 / P2「导入恢复」**（07 §8 Backlog；备份导出已就绪，补齐恢复闭环）。
+- [x] v1.2 P2：导入恢复——已完成（07 §20 全清单，PRD E5「导入恢复」）：`POST /backup/import` 全量恢复——`BackupRestoreService.restore(base64)` 解 zip→校验 format/version→单 `@Transactional` 清空 9 表+按原 id 回填（保留主键保证 workspace_id/session_id/entry_id/mindmap_id 引用、content_json 节点 id、entry_commit/node_entry 关联一致；InnoDB 显式 id 回填后自动推进自增计数）→RestoreSummary；校验失败（空/非 zip/格式/版本/JSON）→ 400 不写库，写入失败事务回滚；前端 `SettingsPanel`「数据恢复」节（选 zip→二次确认→摘要+刷新，`utils/backupImport` 纯函数 arrayBufferToBase64/readFileAsArrayBuffer FileReader 兼容 jsdom/formatRestoreSummary）；备份协议 trailmind-backup v1 未改动（导入据此重建）；后端 243 → 252（+BackupRestoreServiceTest 8 + BackupControllerTest 1）、前端 242 → 251（+backupImport 6 + SettingsPanel 3）、脚本 41 单测、tsc 通过、SMOKE 16 → 17 段 ALL PASS（新增导入恢复段，恢复 543 行）；过程记录见产品工作区「TrailMind 开发」，会话「v1.2 P2 备份导入恢复」
+
+下一任务：**v1.2 P2 剩余项**（PRD §5 P2：AI 会话自动摘要、每周复盘报告、会话/工作区模板、Markdown 大纲导出、多标签批量操作、自定义快捷键、主题定制；07 §8 Backlog P2 行）。
 
 ## 文档索引
 
