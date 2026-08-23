@@ -1,6 +1,6 @@
 # 设计文档：自包含非 Electron 打包（Wails + 捆绑 MariaDB）
 
-> 状态：设计已定；Phase 0（后端同源服务前端）、Phase 1（后端 app-image，bundled JRE）、Phase 2（bundled MariaDB 生命周期库）已实现；Phase 4 打包脚本已实现（实机打包待 Phase 3 壳 + 网络）；Phase 3（Wails 壳）待实现。创建于 2026-08-23。
+> 状态：设计已定；Phase 0（后端同源）、Phase 1（后端 app-image）、Phase 2（MariaDB 生命周期库）、Phase 3（Wails 壳）、Phase 4（打包脚本）均已实现；**自包含端到端完整可用受「MariaDB 缺 MySQL ngram」风险阻塞**（见 §10，需决策）。创建于 2026-08-23。
 > 来源：用户需求「非 Electron 打包方案、一键启动、约定式丢 ico 换图标、数据库自包含」；头脑风暴选定方案 A。
 > 关联：docs/04 §5（契约）、docs/05（schema）、docs/06 §4/§4A（导出/备份协议）、docs/10 §10/§12（M0 打包）、docs/11 §11（脚本索引）、AGENTS.md 快速命令。
 
@@ -131,6 +131,7 @@ WebView2 → `http://127.0.0.1:17860`（前端，同源）→ `GET /api/v1/...` 
 
 | 风险 | 缓解 |
 |---|---|
+| **MariaDB 不支持 MySQL `ngram` 全文解析器** | schema.sql/搜索用 `WITH PARSER ngram`，MariaDB 报 `Function 'ngram' is not defined`（Phase 3 实机证实）。需决策：① 改捆绑 MySQL（有 ngram）② 重写搜索（LIKE 兜底/自有分词）③ 其它 |
 | Wails 外部 URL 加载不顺 | 首日 spike；回落 Tauri（同 WebView2，壳薄） |
 | MariaDB portable 许可/分发（GPL） | 官方 zip 可自由分发；`desktop/vendor/` gitignore，打包时下载 |
 | jpackage/jlink 模块遗漏（反射加载） | `jdeps --list-deps` + 实机冷启 jpackage 产物验证反射类 |
@@ -145,7 +146,7 @@ WebView2 → `http://127.0.0.1:17860`（前端，同源）→ `GET /api/v1/...` 
 - **Phase 0**：Spring Boot 同源服务前端（`classpath:/static/` + `RootController` 根路径 forward）+ `DB_HOST/DB_PORT` env + 单测。交付后打包态 /api 根因解决。（SPA fallback 经核查前端无路由 YAGNI 跳过）—— **已完成**
 - **Phase 1**：jpackage 后端 app-image（bundled JRE，`--icon`），实机冷启验证（连外部 MySQL）—— **已完成（2026-08-23）**。产出 `backend/target/trailmind-backend/`（`npm run package:backend`），图标约定 `branding/icon.ico`。
 - **Phase 2**：bundled MariaDB 生命周期库（init/start/stop/health，端口 13306，datadir），`node:test` 单测—— **已完成（2026-08-23）**。产出 `desktop/main/mariadb-process.js`（22 单测），MariaDB zip 下载/解压属 Phase 4 打包脚本（§4.6）。
-- **Phase 3**：Wails 壳编排（mariadb + backend + WebView2 + 退出清理），Go test—— **待实现（阻塞：本机缺 Go + Wails + 64 位 mingw-w64，且出站 HTTPS 被沙箱阻断无法装工具链）**。端口/命令/状态机以 Phase 2 `desktop/main/mariadb-process.js` 为可执行规格移植。
+- **Phase 3**：Wails 壳编排（mariadb + backend + WebView2 + 退出清理），Go test—— **已完成（2026-08-23）**。`desktop/wails/`（trailmind-shell）+ `internal/orchestrator`（16 Go 单测）；实机验证：mariadb 起、backend 起、关窗反序清理无残留。**遗留：后端 schema 在 MariaDB 上因 `ngram` 不兼容失败（见 §10 新风险），自包含端到端完整可用待该风险决策。**
 - **Phase 4**：打包脚本 `scripts/package-desktop.mjs` + `branding/icon.ico` 约定 + `npm run package:desktop` + release 组装—— **脚本已实现（2026-08-23，8 条单测）**。实机打包待 Phase 3 壳 + 网络（MariaDB zip 下载）。
 
 每期小步提交（Conventional Commits 中文主题），docs 同步。
