@@ -47,7 +47,7 @@
 
 - 后端 `mvn test`：**266 通过 / 0 失败**（BUILD SUCCESS；含搜索、导出、备份恢复等全量回归）。
 - 前端 `npm test`（vitest）：**287 通过 / 34 文件**。
-- 脚本 + 桌面 `node:test`（单文件直跑）：**100 → 112 通过**（`mysql-process` 22、`package-desktop` 12、`backend-process` 9、其余 69）。
+- 脚本 + 桌面 `node:test`（单文件直跑）：**100 通过**（`mysql-process` 22、`package-desktop` 12、`backend-process` 9、其余 57）。
 - Go 壳 `go test ./...`：**23 通过**（新增运行态解析/孤儿清理/正常收尾删 pidfile 等 4 条）。
 - `scripts/e2e-packaged.mjs`：**S2 E2E: ALL PASS（10 项）**。
 - `scripts/e2e-shell.mjs`：**S2b SHELL: ALL PASS（5 项）**。
