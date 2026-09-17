@@ -171,9 +171,11 @@ WebView2 → `http://127.0.0.1:17860`（前端，同源）→ `GET /api/v1/...` 
 5. 后端 + 前端 + 脚本 测试全绿；Phase 0 新增同源服务单测；Phase 2/4 新增脚本单测；Phase 3 新增 Go 单测（含强杀孤儿清理）。
 6. 既有数据经备份导出→导入恢复完整（M4 任务六往返既有测试覆盖）。
 
-## 13. 端到端验证脚本（本次新增）
+## 13. 端到端验证脚本与安装包（本次新增）
 
-两段脚本用于**打包产物**的实机验收（需先 `npm run package:desktop` 或手工备好 `release/` 布局；MySQL 便携目录可放 `release/mysql/`）：
+### 13.1 打包产物验收脚本
+
+两段脚本用于**打包产物**的实机验收（需先 `npm run package` 或手工备好 `release/` 布局；MySQL 便携目录可放 `release/mysql/`）：
 
 | 脚本 | 作用 | 输出 |
 |---|---|---|
@@ -182,6 +184,24 @@ WebView2 → `http://127.0.0.1:17860`（前端，同源）→ `GET /api/v1/...` 
 
 环境变量：`E2E_APPDATA_ROOT`（隔离数据目录，避免污染真实 `%APPDATA%`）、`E2E_LOG_DIR`、`E2E_DB_PORT`；
 夹具数据库目录通过 `MYSQL_FIXTURE_DIR` 指定（缺省为本机安装的 MySQL 便携副本；正式发布仍用打包脚本下载的官方 zip）。
+
+### 13.2 NSIS 安装包（S3）
+
+`scripts/package-installer.mjs`（`npm run package:installer`）：
+1. 校验 `release/` 布局（壳 exe + `mysql/bin/mysqld.exe` + `trailmind-backend/trailmind-backend.exe`），缺失即报出缺项；
+2. 生成 `release/trailmind-installer.nsi`（UTF-8 无 BOM）：`File /r` 递归打包整份 release 布局、开始菜单与桌面快捷方式指向壳 exe、写卸载注册项、**卸载只删程序目录并提示用户数据保留在 `%APPDATA%\TrailMind`**；图标走 `/DICON_FILE=branding/icon.ico`（约定式换图，安装包图标随之替换）；
+3. 定位 `makensis`（`NSIS_HOME` → `Program Files(x86)/NSIS` → `Program Files/NSIS` → `LOCALAPPDATA/NSIS` → PATH），未安装则报错并给出下载指引；
+4. 产物 `release/TrailMind-Setup-<version>.exe`（版本号取 package.json，与 docs/11 §5 版本管理一致）。
+
+> 不用 `wails build -nsis` 的原因：Wails 内置 NSIS 模板只打包壳 exe，不含 `mysql/` 与 `trailmind-backend/`（壳按 `%APPDIR%` 定位它们）。
+
+### 13.3 桌面端启动器（S5：Electron 退役后）
+
+`scripts/lib/shell-launcher.mjs`：GUI 验收脚本与 `npm run launch` 共用——
+`resolveShellExe`（release 优先、回退 `desktop/wails/build/bin`）、WebView2 用户数据目录与 `DevToolsActivePort` 解析、
+`buildShellEnv`（注入 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=…`，断网模拟可叠加死代理开关）、
+`pickPageTarget`、`waitForPageTarget`（已知端口轮询 + DevToolsActivePort 兜底）。
+`scripts/lib/proc.mjs` 承接原 Electron 侧的 `killProcessTree` 等进程工具。
 
 ## 14. 受限环境注意事项（agent 沙箱）
 

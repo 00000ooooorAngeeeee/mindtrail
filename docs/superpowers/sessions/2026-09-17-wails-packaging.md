@@ -56,9 +56,20 @@
 ## [artifact] 产出
 
 - `d2da027`：refactor(shell): 壳与打包脚本改绑便携 MySQL——解除 ngram 阻塞（含 Go/脚本单测与 docs 同步）
-- （本次收尾提交）：fix(shell): 强杀残留孤儿进程清理（运行态文件）+ 打包产物端到端验证脚本
+- `e0de9e0`：fix(shell): 强杀残留孤儿进程清理（运行态文件）+ 打包产物端到端验证脚本
+- `05ce46c`：docs(build): 校正脚本单测计数为 100
+- `e04826e`：refactor(desktop): Electron 壳退役 + GUI 脚本迁 WebView2 CDP + 新增 NSIS 安装包脚本
 - 新增 `scripts/e2e-packaged.mjs`、`scripts/e2e-shell.mjs`（打包产物验收脚本，详见设计文档 §13）
+- 新增 `scripts/lib/shell-launcher.mjs`、`scripts/lib/proc.mjs`、`scripts/package-installer.mjs`、`scripts/dev-shell.mjs`
 - 设计文档新增 §13 端到端验证脚本、§14 受限环境注意事项
+
+## [action] S5：Electron 壳退役（提交 `e04826e`）
+
+- **删除**：`desktop/main`（index.js / backend-process.js / mysql-process.js）、`desktop/preload`、`desktop/test`、`desktop/package.json`、`package-lock.json`、`electron-builder.yml`、`node_modules`（629MB）。
+- **能力接续**：`killProcessTree` 等进程工具迁到 `scripts/lib/proc.mjs`；`mysql-process.js` 的可执行规格由 `desktop/wails/internal/orchestrator/mysql.go` 承接（23 条 Go 单测）。
+- **npm 脚本重整**：`launch` 改起壳；新增 `dev:shell`（build 前端 → 同步后端 static → 起壳，专治 stale 产物）；`package` 改自包含打包；新增 `package:installer`；移除 `dev:desktop`/`package:desktop`。
+- **GUI 脚本迁移**（新增 `scripts/lib/shell-launcher.mjs`，15 条单测）：`verify-m2-gui`/`perf-regression`/`verify-m4-acceptance` 删掉内建静态服务器与 `TRAILMIND_DEV_URL`（前端改由后端同源服务），改由壳启动器拉起，CDP 经 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=…` 开启；S5「重启应用」段落改为「终止壳进程树 → 重启壳」，顺带验证收尾清理。`perf-search.mjs` 不依赖桌面端，未改动。
+- **S3 可离线部分**：新增 `scripts/package-installer.mjs`（自生成 `.nsi`，解决 wails 内置 NSIS 模板只带壳 exe 的问题；14 条单测）。
 
 ## [review] 复盘
 
@@ -70,9 +81,9 @@
 
 ## [next] 下一步
 
-- [ ] S3 **NSIS 安装包**：`wails build -nsis`（需先装 NSIS 并确认 `makensis` 在 PATH）；核对安装后程序目录含 `mysql/` 与 `trailmind-backend/`（Wails NSIS 模板默认只带壳 exe，需在 `project.nsi` 补 `File /r`）；数据仍落 `%APPDATA%` 以便升级不丢。
-- [ ] S4 **图标约定 + N4 验收**：换 `branding/icon.ico` 重打包 → 壳/后端/安装包三处图标同步；补 07 §3 M0 唯一未勾项（双击安装后启动到可交互 ≤3s）。
-- [ ] S5 **移除 Electron 壳**：`desktop/main|preload`、`npm run launch/dev:desktop`、`electron-builder.yml` 退役；4 个 GUI/性能脚本从 Electron+CDP 迁到 WebView2 远程调试口（`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=…`）；同步 04/11/AGENTS.md 多处描述。
-- [ ] S6 **人工提供前置文件**：MySQL 8.4 便携 zip（放 `desktop/vendor/`）与 NSIS 安装包（agent 会话无外网，脚本已支持复用 zip 与缓存）。
+- [ ] S3 **实机出安装包**：装 NSIS 3.x 后 `npm run package:installer` → `release/TrailMind-Setup-0.0.1.exe`；安装后核对程序目录含 `mysql/` 与 `trailmind-backend/`（脚本已用 `File /r` 递归整份 release 布局）；数据仍落 `%APPDATA%` 以便升级不丢。
+- [ ] S4 **图标约定 + N4 验收**：换 `branding/icon.ico` 重打包 → 壳 exe / 后端 exe / 安装包三处图标同步；补 07 §3 M0 唯一未勾项（双击安装后启动到可交互 ≤3s）。
+- [ ] **GUI 脚本实机复跑（唯一未实机验证的环节）**：`verify-m2-gui.mjs`（33 项）/`perf-regression.mjs`（N1–N4）/`verify-m4-acceptance.mjs` 已迁到壳 + CDP，但受限沙箱拒绝 WebView2 命名管道，须在全权限会话执行；若 CDP 显现有差异（如目标筛选），按 §13 的壳启动器单测覆盖分支排查。
+- [ ] **人工提供前置文件**（agent 会话无外网）：MySQL 8.4 便携 zip（放 `desktop/vendor/`）与 NSIS 安装包。
 - [ ] **dogfooding**：把本记录按 06 格式写入产品工作区「TrailMind 开发」（本次 agent 无法写产品库，需人工或后续会话补录）。
 - [ ] 查看并关闭诊断期遗留的 `mysqld.exe` 残留进程（沙箱内无法终止，见 [error] 5）。
