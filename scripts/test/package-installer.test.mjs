@@ -92,11 +92,13 @@ test('buildNsiScript：卸载保留用户数据并给出提示', () => {
   assert.match(nsi, /DeleteRegKey HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall/)
 })
 
-test('buildNsiScript：有/无图标两种情况', () => {
+test('buildNsiScript：有/无图标两种情况（安装包 + 卸载程序图标同源）', () => {
   const withIcon = buildNsiScript({ version: '1.2.3', releaseDir: RELEASE, outFile: 'D:\\o.exe', iconFile: 'D:\\t\\branding\\icon.ico' })
   assert.match(withIcon, /MUI_ICON "D:\\t\\branding\\icon\.ico"/)
+  assert.match(withIcon, /MUI_UNICON "D:\\t\\branding\\icon\.ico"/)
   const noIcon = buildNsiScript({ version: '1.2.3', releaseDir: RELEASE, outFile: 'D:\\o.exe', iconFile: '' })
   assert.ok(!/MUI_ICON/.test(noIcon))
+  assert.ok(!/MUI_UNICON/.test(noIcon))
 })
 
 test('buildNsiScript：版本号进入产物与注册表', () => {

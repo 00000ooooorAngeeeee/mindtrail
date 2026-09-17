@@ -73,7 +73,13 @@ export function toNsisPath(p) {
 export function buildNsiScript({ appName = APP_DISPLAY_NAME, appDirName = APP_DIR_NAME, version, releaseDir, outFile, iconFile, shellExeName = SHELL_EXE_NAME }) {
   const src = toNsisPath(releaseDir)
   const out = toNsisPath(outFile)
-  const iconLine = iconFile ? `  !insertmacro MUI_ICON "${toNsisPath(iconFile)}"\n` : ''
+  // 约定式换图标（S4）：安装包与卸载程序图标同源 branding/icon.ico；
+  // 壳 exe 与后端 exe 的图标由 wails build / jpackage 各自内嵌（同一源文件）。
+  const iconLine = iconFile
+    ? `  !insertmacro MUI_ICON "${toNsisPath(iconFile)}"
+  !insertmacro MUI_UNICON "${toNsisPath(iconFile)}"
+`
+    : ''
   return `; 由 scripts/package-installer.mjs 生成——请勿手改（改动请改生成器）
 Unicode true
 !include "MUI2.nsh"
