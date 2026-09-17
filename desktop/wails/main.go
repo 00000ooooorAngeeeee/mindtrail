@@ -15,7 +15,7 @@ import (
 //go:embed all:frontend
 var assets embed.FS
 
-// appDir 返回壳 exe 所在目录（%APPDIR%）。release 组装后 mariadb/ 与 trailmind-backend/ 与之同级（设计 §4.6 步骤 7）。
+// appDir 返回壳 exe 所在目录（%APPDIR%）。release 组装后 mysql/ 与 trailmind-backend/ 与之同级（设计 §4.6 步骤 7）。
 func appDir() string {
 	exe, err := os.Executable()
 	if err != nil {
@@ -50,8 +50,8 @@ func main() {
 	}
 
 	shell := orchestrator.New(orchestrator.DefaultDeps())
-	// 完整编排（设计 §3、§6）：起 mariadb（13306）→ 起 backend（注入 DB env）→ 开窗加载 17860 →
-	// 关窗后反序停 backend（优雅 shutdown + kill 兜底）→ 停 mariadb（mysqladmin shutdown + kill 兜底）。
+	// 完整编排（设计 §3、§6）：初始化并起便携 MySQL（13306）→ 起 backend（注入 DB env）→ 开窗加载 17860 →
+	// 关窗后反序停 backend（优雅 shutdown + kill 兜底）→ 停 MySQL（mysqladmin shutdown + kill 兜底）。
 	err := shell.Run(os.Getenv("APPDATA"), appDir(), func() error {
 		return runWindow(app)
 	})

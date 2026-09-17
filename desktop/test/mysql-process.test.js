@@ -1,9 +1,11 @@
-// MariaDB 生命周期关键逻辑单测（node:test，无 Electron 依赖，镜像 backend-process.test.js 思路）。
+// 便携 MySQL 生命周期关键逻辑单测（node:test，无 Electron 依赖，镜像 backend-process.test.js 思路）。
 // 覆盖设计文档 §9 要求的：端口决策、datadir 路径计算、初始化决策（含半初始化清理）、就绪判定、shutdown 命令构造。
+// 2026-08-24 由 mariadb-process 改绑 MySQL（MariaDB 不支持 MySQL `WITH PARSER ngram`，见设计文档 §10）。
 const { test } = require('node:test')
 const assert = require('node:assert')
 const path = require('node:path')
 const {
+  PORTABLE_DIR,
   resolveDataDir,
   resolveBinDir,
   resolveExe,
@@ -18,24 +20,27 @@ const {
   init,
   start,
   stop,
-} = require('../main/mariadb-process')
+} = require('../main/mysql-process')
 
 test('resolveDataDir：%APPDATA%\\TrailMind\\db', () => {
   assert.strictEqual(resolveDataDir('C:\\Users\\x\\AppData\\Roaming'), path.join('C:\\Users\\x\\AppData\\Roaming', 'TrailMind', 'db'))
 })
 
-test('resolveBinDir / resolveExe：vendor\\mariadb\\bin + exe 名', () => {
-  assert.strictEqual(resolveBinDir('D:\\t\\desktop\\vendor'), path.join('D:\\t\\desktop\\vendor', 'mariadb', 'bin'))
-  assert.strictEqual(resolveExe('D:\\v\\bin', 'mariadbd.exe'), path.join('D:\\v\\bin', 'mariadbd.exe'))
+test('resolveBinDir / resolveExe：vendor\\mysql\\bin + exe 名（与 Go 壳 %APPDIR%\\mysql 同名）', () => {
+  assert.strictEqual(PORTABLE_DIR, 'mysql')
+  assert.strictEqual(resolveBinDir('D:\\t\\desktop\\vendor'), path.join('D:\\t\\desktop\\vendor', 'mysql', 'bin'))
+  assert.strictEqual(resolveExe('D:\\v\\bin', 'mysqld.exe'), path.join('D:\\v\\bin', 'mysqld.exe'))
 })
 
-test('buildInitArgs：仅 --datadir', () => {
-  assert.deepStrictEqual(buildInitArgs('C:\\d\\db'), ['--datadir', 'C:\\d\\db'])
+test('buildInitArgs：--initialize-insecure + basedir/datadir + 关 X Protocol', () => {
+  assert.deepStrictEqual(buildInitArgs('C:\\d\\db', 'D:\\app\\mysql'), [
+    '--initialize-insecure', '--basedir=D:\\app\\mysql', '--datadir=C:\\d\\db', '--mysqlx=OFF', '--skip-networking=off',
+  ])
 })
 
 test('buildStartArgs：回环 + 固定端口 + datadir + 显式开启网络', () => {
   assert.deepStrictEqual(buildStartArgs({ dataDir: 'C:\\d\\db' }), [
-    '--port', '13306', '--bind-address', '127.0.0.1', '--datadir', 'C:\\d\\db', '--skip-networking=off',
+    '--port', '13306', '--bind-address', '127.0.0.1', '--datadir', 'C:\\d\\db', '--skip-networking=off', '--mysqlx=OFF',
   ])
 })
 
@@ -65,8 +70,9 @@ test('decidePort：空闲 → 启动；占用 → 报错（不静默换端口）
   assert.match(r.reason, /13306/)
 })
 
-test('parseMysqladminPing：识别 is alive', () => {
+test('parseMysqladminPing：识别 is alive（大小写不敏感）', () => {
   assert.strictEqual(parseMysqladminPing('mysqld is alive'), true)
+  assert.strictEqual(parseMysqladminPing('MYSQLD IS ALIVE\n'), true)
   assert.strictEqual(parseMysqladminPing('mysqladmin: connect failed'), false)
   assert.strictEqual(parseMysqladminPing(''), false)
 })
@@ -84,18 +90,18 @@ test('waitForReady：超时返回 false', async () => {
   assert.strictEqual(ok, false)
 })
 
-test('init：已初始化 → 跳过且不跑 install-db', async () => {
+test('init：已初始化 → 跳过且不跑 initialize', async () => {
   let ran = false
-  const r = await init({ dataDir: 'C:\\d\\db', exists: () => true, runInstallDb: async () => { ran = true; return true }, installDbExe: 'C:\\v\\bin\\mariadb-install-db.exe' })
+  const r = await init({ dataDir: 'C:\\d\\db', exists: () => true, runInit: async () => { ran = true; return true }, initExe: 'C:\\v\\bin\\mysqld.exe' })
   assert.strictEqual(r.action, 'skip')
   assert.strictEqual(ran, false)
 })
 
-test('init：全新目录 → 跑 install-db 且传 --datadir', async () => {
+test('init：全新目录 → 跑 initialize 且传 basedir/datadir', async () => {
   let args = null
-  const r = await init({ dataDir: 'C:\\d\\db', exists: () => false, runInstallDb: async (exe, a) => { args = a; return true }, installDbExe: 'C:\\v\\bin\\mariadb-install-db.exe' })
+  const r = await init({ dataDir: 'C:\\d\\db', portableDir: 'C:\\v\\mysql', exists: () => false, runInit: async (exe, a) => { args = a; return true }, initExe: 'C:\\v\\mysql\\bin\\mysqld.exe' })
   assert.strictEqual(r.action, 'init')
-  assert.deepStrictEqual(args, ['--datadir', 'C:\\d\\db'])
+  assert.deepStrictEqual(args, ['--initialize-insecure', '--basedir=C:\\v\\mysql', '--datadir=C:\\d\\db', '--mysqlx=OFF', '--skip-networking=off'])
 })
 
 test('init：半初始化 → 先清理目录再重建', async () => {
@@ -103,19 +109,20 @@ test('init：半初始化 → 先清理目录再重建', async () => {
   let ran = false
   const r = await init({
     dataDir: 'C:\\d\\db',
+    portableDir: 'C:\\v\\mysql',
     exists: (p) => p !== path.join('C:\\d\\db', 'mysql'), // 数据目录在，mysql 系统库缺失
     remove: (dir) => { removed = dir },
-    runInstallDb: async () => { ran = true; return true },
-    installDbExe: 'C:\\v\\bin\\mariadb-install-db.exe',
+    runInit: async () => { ran = true; return true },
+    initExe: 'C:\\v\\mysql\\bin\\mysqld.exe',
   })
   assert.strictEqual(r.action, 'cleanup-and-init')
   assert.strictEqual(removed, 'C:\\d\\db')
   assert.strictEqual(ran, true)
 })
 
-test('init：install-db 失败抛错', async () => {
+test('init：initialize 失败抛错', async () => {
   await assert.rejects(
-    () => init({ dataDir: 'C:\\d\\db', exists: () => false, runInstallDb: async () => false, installDbExe: 'x' }),
+    () => init({ dataDir: 'C:\\d\\db', portableDir: 'C:\\v\\mysql', exists: () => false, runInit: async () => false, initExe: 'x' }),
     /初始化失败/,
   )
 })
@@ -136,15 +143,15 @@ test('start：正常 → 依次 init → spawn（含启动参数）→ 就绪', 
   let captured = null
   const r = await start({
     dataDir: 'C:\\d\\db',
-    serverExe: 'C:\\v\\bin\\mariadbd.exe',
+    serverExe: 'C:\\v\\bin\\mysqld.exe',
     probe: async () => false,
     doInit: async () => { order.push('init'); return { ok: true } },
     spawnServerFn: (exe, args) => { order.push('spawn'); captured = { exe, args }; return { pid: 1, exitCode: null } },
     wait: async () => { order.push('wait'); return true },
   })
   assert.deepStrictEqual(order, ['init', 'spawn', 'wait'])
-  assert.strictEqual(captured.exe, 'C:\\v\\bin\\mariadbd.exe')
-  assert.deepStrictEqual(captured.args, ['--port', '13306', '--bind-address', '127.0.0.1', '--datadir', 'C:\\d\\db', '--skip-networking=off'])
+  assert.strictEqual(captured.exe, 'C:\\v\\bin\\mysqld.exe')
+  assert.deepStrictEqual(captured.args, ['--port', '13306', '--bind-address', '127.0.0.1', '--datadir', 'C:\\d\\db', '--skip-networking=off', '--mysqlx=OFF'])
   assert.strictEqual(r.ready, true)
 })
 

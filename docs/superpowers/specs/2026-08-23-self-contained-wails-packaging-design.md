@@ -1,6 +1,6 @@
-# 设计文档：自包含非 Electron 打包（Wails + 捆绑 MariaDB）
+# 设计文档：自包含非 Electron 打包（Wails + 捆绑便携 MySQL）
 
-> 状态：设计已定；Phase 0（后端同源）、Phase 1（后端 app-image）、Phase 2（MariaDB 生命周期库）、Phase 3（Wails 壳）、Phase 4（打包脚本）均已实现；**自包含端到端完整可用受「MariaDB 缺 MySQL ngram」风险阻塞**（见 §10，需决策）。创建于 2026-08-23。
+> 状态：Phase 0–4 均已实现；**2026-08-24 决策落地：捆绑数据库由 MariaDB 改为便携 MySQL 8.4 LTS**，ngram 阻塞解除（见 §10 决策记录）；安装包（NSIS）与 Electron 壳退役属后续会话。
 > 来源：用户需求「非 Electron 打包方案、一键启动、约定式丢 ico 换图标、数据库自包含」；头脑风暴选定方案 A。
 > 关联：docs/04 §5（契约）、docs/05（schema）、docs/06 §4/§4A（导出/备份协议）、docs/10 §10/§12（M0 打包）、docs/11 §11（脚本索引）、AGENTS.md 快速命令。
 
@@ -13,7 +13,7 @@
 1. **非 Electron** 壳（现代 WebView2 渲染，与 Edge 一致，ReactFlow 无兼容风险）。
 2. **一键启动**：双击 exe 即用，无需预装 Java、无需预装 MySQL。
 3. **约定式换图标**：放一个固定名 ico 到 `branding/icon.ico`，重打包后壳与后端两个 exe 图标同时替换。
-4. **零后端/搜索改动**：保留 MySQL FULLTEXT ngram 与全部 262 后端测试（不重写搜索）。
+4. **零后端/搜索改动**：保留 MySQL FULLTEXT ngram 与全部后端测试（不重写搜索）——**这一约束决定了捆绑库必须是 MySQL**（§10 决策记录）。
 
 ## 2. 非目标（YAGNI）
 
@@ -27,17 +27,17 @@
 
 ```
 启动 TrailMind.exe（Wails/Go 壳，图标 = branding/icon.ico）
-  ├─ 首运行：bundled mariadb-install-db.exe 初始化数据目录 %APPDATA%\TrailMind\db
-  ├─ 启动 bundled mariadbd.exe（--port=13306 --bind-address=127.0.0.1 --datadir=…/db）→ 轮询就绪
+  ├─ 首运行：bundled mysqld.exe --initialize-insecure --basedir=…\mysql --datadir=%APPDATA%\TrailMind\db
+  ├─ 启动 bundled mysqld.exe（--port=13306 --bind-address=127.0.0.1 --datadir=…/db）→ mysqladmin ping 就绪
   ├─ 启动 trailmind-backend.exe（jpackage，bundled JRE）
   │     env: DB_HOST=127.0.0.1 DB_PORT=13306 DB_NAME=trailmind DB_USER=root DB_PASS=（空）
-  │     → 连 mariadb，幂等建库建表，服务前端于 http://127.0.0.1:17860
+  │     → 连 MySQL，幂等建库建表（schema.sql 含 FULLTEXT ngram），服务前端于 http://127.0.0.1:17860
   └─ WebView2 开窗加载 http://127.0.0.1:17860
         Spring Boot 同源：/ → frontend/dist/index.html，/api/v1 → 接口
-关闭窗口 → 壳依次停 backend exe、停 mariadbd
+关闭窗口 → 壳依次停 backend exe、停 mysqld
 ```
 
-单进程族：壳（Go）+ 后端 exe（JVM）+ mariadbd（mysqld）。三者均由壳拉起/停止。
+单进程族：壳（Go）+ 后端 exe（JVM）+ mysqld（MySQL 服务进程）。三者均由壳拉起/停止。
 
 ## 4. 组件设计
 
@@ -54,13 +54,13 @@
 - `jpackage --type app-image --name trailmind-backend --input backend/target --main-jar trailmind-backend-0.0.1.jar --main-class org.springframework.boot.loader.launch.JarLauncher --runtime-image backend/target/jre --icon branding/icon.ico --java-options "-Dserver.port=17860"` → `trailmind-backend/` app-image（含 bundled JRE，**用户无需装 Java**）。
 - 后端 exe 由壳以 env 注入 DB 配置后启动；仍可用现有 `mvn -f backend/pom.xml package` 出 jar。
 
-### 4.3 捆绑便携 MariaDB（Phase 2）
+### 4.3 捆绑便携 MySQL（Phase 2，2026-08-24 由 MariaDB 改绑）
 
-- MariaDB 11.x 官方 zip（mariadb.org），打包脚本下载到 `desktop/vendor/mariadb/`（**gitignore `desktop/vendor/`**，体积大）。
-- 首运行：`mariadb-install-db.exe --datadir=%APPDATA%\TrailMind\db` 初始化数据目录。
-- 启动：`mariadbd.exe --port=13306 --bind-address=127.0.0.1 --datadir=…/db --skip-networking=off`，仅本机监听。
-- 健康等待：轮询 `127.0.0.1:13306`（`mysqladmin ping` 或 TCP）。
-- 停止：`mysqladmin.exe --port=13306 shutdown`（优雅）+ 兜底 kill。
+- MySQL 8.4 LTS 官方 Windows 免安装 zip（dev.mysql.com `Downloads/MySQL-8.4/mysql-<ver>-winx64.zip`），打包脚本下载解压到 `desktop/vendor/`（**gitignore `desktop/vendor/`**，体积大）；三级回退：`vendor/mysql/bin` 已就位 → `vendor/mysql-cache/<version>` 缓存 → 下载解压。也可手工把 zip 放到 `desktop/vendor/` 供脚本复用。
+- 首运行：`mysqld.exe --initialize-insecure --basedir=…\mysql --datadir=%APPDATA%\TrailMind\db`（建系统表 + root 空密码；`--basedir` 强制用便携目录的 share，避免误读机器上已装的 MySQL）。
+- 启动：`mysqld.exe --port=13306 --bind-address=127.0.0.1 --datadir=…\db --skip-networking=off --mysqlx=OFF`，仅本机监听，且不额外占 X Protocol 端口（33060）。
+- 健康等待：`mysqladmin.exe -u root --port=13306 ping` 输出含 `mysqld is alive`（**TCP 端口通不等于可服务**——初始化期端口已监听但拒绝查询）。
+- 停止：`mysqladmin.exe -u root --port=13306 shutdown`（优雅）+ 兜底 kill。
 - 安全：root 无密码仅绑 127.0.0.1（单用户桌面工具可接受，威胁模型：本机隔离）。
 
 ### 4.4 Wails 壳（Phase 3）
@@ -97,23 +97,23 @@ WebView2 → `http://127.0.0.1:17860`（前端，同源）→ `GET /api/v1/...` 
 ## 6. 启动与关闭流程
 
 启动（壳）：
-1. 若 `%APPDATA%\TrailMind\db` 不存在 → `mariadb-install-db` 初始化（仅首运行）。
-2. 起 `mariadbd`（13306）→ 轮询就绪（≤30s，超时报错页）。
+1. 若 `%APPDATA%\TrailMind\db` 不存在（或缺 `db\mysql` 系统库）→ `mysqld --initialize-insecure` 初始化（仅首运行；半初始化目录先清理重建）。
+2. 起 `mysqld`（13306）→ `mysqladmin ping` 就绪等待（≤60s，超时报错页）。
 3. 起 `trailmind-backend.exe`（注入 DB env）→ 轮询 `GET /api/v1/health`（≤60s，Spring Boot 启动）。
 4. WebView2 加载 `http://127.0.0.1:17860`。
 
-关闭：窗口关闭 → kill backend exe（进程组）→ `mysqladmin shutdown` mariadb（兜底 kill）。崩溃兜底：壳 `defer`/退出钩子确保不残留 mariadbd。
+关闭：窗口关闭 → kill backend exe（进程组）→ `mysqladmin shutdown` MySQL（兜底 kill）。崩溃兜底：壳失败路径按已启动逆序清理，确保不残留 `mysqld`。
 
-## 7. 数据迁移（既有 MySQL → bundled MariaDB）
+## 7. 数据迁移（既有 MySQL → bundled MySQL）
 
 - 用 M4 任务六**全量备份导出**（`POST /backup/export` → trailmind-backup v1 zip）从旧 MySQL 导出。
-- 新 bundled MariaDB 首次启动后，用**导入恢复**（`POST /backup/import`）恢复。
+- 新 bundled MySQL 首次启动后，用**导入恢复**（`POST /backup/import`）恢复。
 - 两功能均已实现并有测试；迁移一次性、用户驱动。spec 不做自动迁移（YAGNI）。
 
 ## 8. 错误处理
 
 - 端口 13306/17860 被占 → 壳探测后报错页（提示关掉冲突进程）；不静默换端口（避免多实例）。
-- mariadb 初始化失败（权限/磁盘）→ 报错页 + 日志路径 `%APPDATA%\TrailMind/logs/`。
+- MySQL 初始化失败（权限/磁盘）→ 报错页 + 日志路径 `%APPDATA%\TrailMind/logs/`。
 - backend 起不来（JRE/jar/DB 连接）→ 壳显示后端错误页 + 日志。
 - WebView2 运行时缺失（旧 Win10）→ 提示安装 WebView2 Evergreen（不做自动安装，YAGNI）。
 - 首运行初始化中断 → 下次启动检测 `db` 半初始化则清理重建。
@@ -122,22 +122,30 @@ WebView2 → `http://127.0.0.1:17860`（前端，同源）→ `GET /api/v1/...` 
 
 - **后端 262 测试不动**（仍 MySQL，测试连既有 MySQL）。
 - Phase 0 新增：Spring Boot 同源服务 + SPA fallback 的单测（MockMvc：`/` 返回 index.html、`/api/v1/health` 正常、未知路径 forward）。
-- Phase 2 新增：MariaDB 生命周期纯函数/脚本单测（端口选择、datadir 路径计算、就绪判定、shutdown 命令构造）——`node:test`，镜像 `desktop/test/backend-process.test.js` 思路。
-- Phase 4 新增：打包脚本单测（icon 复制路径解析、jpackage 参数构造）。
+- Phase 2 新增：便携 MySQL 生命周期纯函数/脚本单测（端口选择、datadir 路径计算、初始化参数、就绪判定、shutdown 命令构造）——`node:test`，镜像 `desktop/test/backend-process.test.js` 思路。
+- Phase 4 新增：打包脚本单测（icon 复制路径解析、MySQL zip URL/缓存定位、jpackage 参数构造）。
 - Phase 3 壳：Go test 覆盖启停顺序 + 超时分支（用 stub 进程）。
-- 现有 `scripts/verify.mjs` 冒烟：打包态额外加一段「打包产物启动 → /api/v1/health → 关闭无残留 mariadbd」实机验收（可选，需 packaged 产物）。
+- 现有 `scripts/verify.mjs` 冒烟：打包态额外加一段「打包产物启动 → /api/v1/health → 关闭无残留 mysqld」实机验收（可选，需 packaged 产物）。
 
 ## 10. 风险与缓解
 
 | 风险 | 缓解 |
 |---|---|
-| **MariaDB 不支持 MySQL `ngram` 全文解析器** | schema.sql/搜索用 `WITH PARSER ngram`，MariaDB 报 `Function 'ngram' is not defined`（Phase 3 实机证实）。需决策：① 改捆绑 MySQL（有 ngram）② 重写搜索（LIKE 兜底/自有分词）③ 其它 |
-| Wails 外部 URL 加载不顺 | 首日 spike；回落 Tauri（同 WebView2，壳薄） |
-| MariaDB portable 许可/分发（GPL） | 官方 zip 可自由分发；`desktop/vendor/` gitignore，打包时下载 |
+| ~~MariaDB 不支持 MySQL `ngram` 全文解析器~~ | **已解除（2026-08-24 决策）：改捆绑便携 MySQL 8.4 LTS**，schema.sql/搜索零改动，保留 `WITH PARSER ngram` 与后端 262 测试、N3 搜索性能契约（详见下方决策记录） |
+| Wails 外部 URL 加载不顺 | 首日 spike 已过：采用内嵌重定向页跳转 `http://127.0.0.1:17860`（`desktop/wails/frontend/index.html`） |
+| MySQL 便携版许可/分发（GPLv2 + FOSS 例外） | 官方 zip 可自由分发（社区版）；`desktop/vendor/` gitignore，打包时下载 |
 | jpackage/jlink 模块遗漏（反射加载） | `jdeps --list-deps` + 实机冷启 jpackage 产物验证反射类 |
-| 体积 ~240MB（JRE~80 + MariaDB~150 + 壳~10） | 接受（用户已选自包含优先）；后续可换 jlink strip + MariaDB 精简 |
-| mariadbd Windows 生命周期/首运行 | Phase 2 先做成可独立测试的库再接壳 |
+| 体积 ~700MB 未压缩（JRE + MySQL 全目录 + 壳）；安装包 LZMA 压缩后显著减小 | 接受（用户已选自包含优先）；后续可裁剪 MySQL 目录（只需 bin/lib/share）或 jlink strip |
+| mysqld Windows 生命周期/首运行 | Phase 2 先做成可独立测试的库 + Phase 3 Go 编排，均以 stub 进程单测覆盖 |
 | 既有数据不自动迁移 | 用既有备份导出/导入恢复，一次性用户驱动 |
+
+### 10.1 决策记录：捆绑数据库由 MariaDB 改为便携 MySQL（2026-08-24）
+
+- **背景**：Phase 3 实机证实 MariaDB 不支持 MySQL 的 `WITH PARSER ngram`（`Function 'ngram' is not defined`），schema.sql 建表即失败——而 ngram 是 M4 任务一全局搜索的基础，`docs/05 §4`、`09 R4` 均已按 ngram 落地。
+- **选项**：① 改捆绑便携 MySQL（保 ngram，零搜索改动）② 继续 MariaDB + 重写搜索（LIKE 兜底/自建分词）③ 双库并存可切换。
+- **决定**：**①**。理由：设计目标 §1 第 4 条本就要求「零后端/搜索改动」，②会破坏 N3 性能预算（1 万条目 ≤1s）与既有 262 后端测试语义、并需重写 05 §6/09 R4；③与项目「不做无用分支」取向冲突。
+- **代价**：便携 MySQL 目录明显大于 MariaDB（本机 MySQL 8.0 安装目录 bin+lib+share ≈ 489MB，官方 8.4 zip ≈ 250MB 压缩），首次解压与首次 `--initialize-insecure` 各需数秒。
+- **影响面**：壳 `internal/orchestrator`（`mysql.go`）、`desktop/main/mysql-process.js`、`scripts/package-desktop.mjs` 及其单测；后端与前端**零改动**。
 
 ## 11. 里程碑与范围
 
@@ -145,9 +153,9 @@ WebView2 → `http://127.0.0.1:17860`（前端，同源）→ `GET /api/v1/...` 
 
 - **Phase 0**：Spring Boot 同源服务前端（`classpath:/static/` + `RootController` 根路径 forward）+ `DB_HOST/DB_PORT` env + 单测。交付后打包态 /api 根因解决。（SPA fallback 经核查前端无路由 YAGNI 跳过）—— **已完成**
 - **Phase 1**：jpackage 后端 app-image（bundled JRE，`--icon`），实机冷启验证（连外部 MySQL）—— **已完成（2026-08-23）**。产出 `backend/target/trailmind-backend/`（`npm run package:backend`），图标约定 `branding/icon.ico`。
-- **Phase 2**：bundled MariaDB 生命周期库（init/start/stop/health，端口 13306，datadir），`node:test` 单测—— **已完成（2026-08-23）**。产出 `desktop/main/mariadb-process.js`（22 单测），MariaDB zip 下载/解压属 Phase 4 打包脚本（§4.6）。
-- **Phase 3**：Wails 壳编排（mariadb + backend + WebView2 + 退出清理），Go test—— **已完成（2026-08-23）**。`desktop/wails/`（trailmind-shell）+ `internal/orchestrator`（16 Go 单测）；实机验证：mariadb 起、backend 起、关窗反序清理无残留。**遗留：后端 schema 在 MariaDB 上因 `ngram` 不兼容失败（见 §10 新风险），自包含端到端完整可用待该风险决策。**
-- **Phase 4**：打包脚本 `scripts/package-desktop.mjs` + `branding/icon.ico` 约定 + `npm run package:desktop` + release 组装—— **脚本已实现（2026-08-23，8 条单测）**。实机打包待 Phase 3 壳 + 网络（MariaDB zip 下载）。
+- **Phase 2**：便携数据库生命周期库（init/start/stop/health，端口 13306，datadir），`node:test` 单测—— **已完成**。产出 `desktop/main/mysql-process.js`（22 单测，2026-08-24 由 mariadb-process 改绑 MySQL），zip 下载/解压属 Phase 4 打包脚本（§4.6）。
+- **Phase 3**：Wails 壳编排（数据库 + backend + WebView2 + 退出清理），Go test—— **已完成**。`desktop/wails/`（trailmind-shell）+ `internal/orchestrator`（20 Go 单测，2026-08-24 改绑 MySQL）。**ngram 阻塞已由 MySQL 决策解除**；端到端实机复验与安装包属后续会话。
+- **Phase 4**：打包脚本 `scripts/package-desktop.mjs` + `branding/icon.ico` 约定 + `npm run package:desktop` + release 组装—— **脚本已实现（2026-08-24 改绑 MySQL，12 条单测）**。实机打包与 NSIS 安装包属后续会话（需网络下载 MySQL zip + 安装 NSIS）。
 
 每期小步提交（Conventional Commits 中文主题），docs 同步。
 

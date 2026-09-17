@@ -7,10 +7,10 @@ import (
 	"time"
 )
 
-// stubEnv 有状态 stub：mariadbd / backend 启动后对应端口探测才返回 true（模拟进程就绪）。
+// stubEnv 有状态 stub：mysqld / backend 启动后对应就绪探测才返回 true（模拟进程就绪）。
 type stubEnv struct {
 	calls     []string
-	mariadbUp bool
+	dbUp      bool
 	backendUp bool
 }
 
@@ -32,8 +32,8 @@ func (s *stubEnv) deps() Deps {
 		Start: func(name string, env []string, args ...string) (int, error) {
 			s.calls = append(s.calls, "start:"+filepath.Base(name)+":"+strings.Join(args, " "))
 			switch filepath.Base(name) {
-			case "mariadbd.exe":
-				s.mariadbUp = true
+			case "mysqld.exe":
+				s.dbUp = true
 			case "trailmind-backend.exe":
 				s.backendUp = true
 			}
@@ -42,13 +42,14 @@ func (s *stubEnv) deps() Deps {
 		Kill: func(pid int) { s.calls = append(s.calls, "kill") },
 		TcpProbe: func(port int) bool {
 			switch port {
-			case DefaultMariadbPort:
-				return s.mariadbUp
+			case DefaultDbPort:
+				return s.dbUp
 			case DefaultBackendPort:
 				return s.backendUp
 			}
 			return false
 		},
+		DbReady:      func(binDir string, port int) bool { return s.dbUp },
 		HttpHealth:   func(url string) bool { return true },
 		PostShutdown: func(url string) { s.calls = append(s.calls, "shutdown:"+url) },
 		Sleep:        func(time.Duration) {},
@@ -57,7 +58,7 @@ func (s *stubEnv) deps() Deps {
 
 func fastShell(d Deps) *Shell {
 	s := New(d)
-	s.MariadbReadyTimeout = 20 * time.Millisecond
+	s.DbReadyTimeout = 20 * time.Millisecond
 	s.BackendReadyTimeout = 20 * time.Millisecond
 	s.PollInterval = time.Millisecond
 	return s
@@ -69,8 +70,11 @@ func TestResolvePaths(t *testing.T) {
 	if got := ResolveDataDir("C:\\Users\\x\\AppData\\Roaming"); got != filepath.Join("C:\\Users\\x\\AppData\\Roaming", "TrailMind", "db") {
 		t.Fatalf("ResolveDataDir = %q", got)
 	}
-	if got := ResolveMariadbBinDir("D:\\app"); got != filepath.Join("D:\\app", "mariadb", "bin") {
-		t.Fatalf("ResolveMariadbBinDir = %q", got)
+	if got := ResolvePortableDbDir("D:\\app"); got != filepath.Join("D:\\app", "mysql") {
+		t.Fatalf("ResolvePortableDbDir = %q", got)
+	}
+	if got := ResolveDbBinDir("D:\\app"); got != filepath.Join("D:\\app", "mysql", "bin") {
+		t.Fatalf("ResolveDbBinDir = %q", got)
 	}
 	if got := ResolveBackendExe("D:\\app"); got != filepath.Join("D:\\app", "trailmind-backend", "trailmind-backend.exe") {
 		t.Fatalf("ResolveBackendExe = %q", got)
@@ -79,14 +83,23 @@ func TestResolvePaths(t *testing.T) {
 
 // —— 纯函数：命令构造 ——
 
-func TestBuildMariadbArgs(t *testing.T) {
-	if got := strings.Join(BuildInitArgs("C:\\d\\db"), "|"); got != "--datadir|C:\\d\\db" {
-		t.Fatalf("BuildInitArgs = %q", got)
+func TestBuildInitArgs(t *testing.T) {
+	got := strings.Join(BuildInitArgs("C:\\d\\db", "D:\\app\\mysql"), "|")
+	want := "--initialize-insecure|--basedir=D:\\app\\mysql|--datadir=C:\\d\\db|--mysqlx=OFF|--skip-networking=off"
+	if got != want {
+		t.Fatalf("BuildInitArgs = %q, want %q", got, want)
 	}
-	want := "--port|13306|--bind-address|127.0.0.1|--datadir|C:\\d\\db|--skip-networking=off"
-	if got := strings.Join(BuildStartArgs("C:\\d\\db", 13306), "|"); got != want {
-		t.Fatalf("BuildStartArgs = %q", got)
+}
+
+func TestBuildStartArgs(t *testing.T) {
+	got := strings.Join(BuildStartArgs("C:\\d\\db", 13306), "|")
+	want := "--port|13306|--bind-address|127.0.0.1|--datadir|C:\\d\\db|--skip-networking=off|--mysqlx=OFF"
+	if got != want {
+		t.Fatalf("BuildStartArgs = %q, want %q", got, want)
 	}
+}
+
+func TestBuildAdminArgs(t *testing.T) {
 	if got := strings.Join(BuildShutdownArgs(13306), "|"); got != "-u|root|--port|13306|shutdown" {
 		t.Fatalf("BuildShutdownArgs = %q", got)
 	}
@@ -135,63 +148,66 @@ func TestParseMysqladminPing(t *testing.T) {
 	if !ParseMysqladminPing("mysqld is alive") {
 		t.Fatal("应识别 is alive")
 	}
+	if !ParseMysqladminPing("MYSQLD IS ALIVE\n") {
+		t.Fatal("应大小写不敏感")
+	}
 	if ParseMysqladminPing("connect failed") || ParseMysqladminPing("") {
 		t.Fatal("不应误判")
 	}
 }
 
-// —— 编排：StartMariadb ——
+// —— 编排：StartDatabase ——
 
-func TestStartMariadbFreshInit(t *testing.T) {
+func TestStartDatabaseFreshInit(t *testing.T) {
 	st := &stubEnv{}
-	if _, err := fastShell(st.deps()).StartMariadb("C:\\Users\\x\\AppData\\Roaming", "D:\\app"); err != nil {
-		t.Fatalf("StartMariadb = %v", err)
+	if _, err := fastShell(st.deps()).StartDatabase("C:\\Users\\x\\AppData\\Roaming", "D:\\app"); err != nil {
+		t.Fatalf("StartDatabase = %v", err)
 	}
 	got := strings.Join(st.calls, " ")
-	if !strings.Contains(got, "run:mariadb-install-db.exe:--datadir") {
-		t.Fatalf("缺 install-db：%q", got)
+	if !strings.Contains(got, "run:mysqld.exe:--initialize-insecure") {
+		t.Fatalf("缺 initialize-insecure：%q", got)
 	}
-	if !strings.Contains(got, "start:mariadbd.exe:--port 13306") {
-		t.Fatalf("缺 mariadbd 启动：%q", got)
+	if !strings.Contains(got, "start:mysqld.exe:--port 13306") {
+		t.Fatalf("缺 mysqld 启动：%q", got)
 	}
-	// 首次初始化应先确保父目录存在（mariadb-install-db 不自建中间目录）
+	// 首次初始化应先确保父目录存在（mysqld 不自建中间目录）
 	mkdirIdx := strings.Index(got, "mkdir:")
-	installIdx := strings.Index(got, "run:mariadb-install-db.exe")
-	if mkdirIdx < 0 || mkdirIdx > installIdx {
-		t.Fatalf("install-db 前应先 mkdir 父目录：%q", got)
+	initIdx := strings.Index(got, "run:mysqld.exe:--initialize-insecure")
+	if mkdirIdx < 0 || mkdirIdx > initIdx {
+		t.Fatalf("初始化前应先 mkdir 父目录：%q", got)
 	}
 }
 
-func TestStartMariadbSkipInit(t *testing.T) {
+func TestStartDatabaseSkipInit(t *testing.T) {
 	st := &stubEnv{}
 	d := st.deps()
 	d.Exists = func(p string) bool { return true } // 数据目录与 mysql 库均已存在
-	if _, err := fastShell(d).StartMariadb("r", "a"); err != nil {
-		t.Fatalf("StartMariadb = %v", err)
+	if _, err := fastShell(d).StartDatabase("r", "a"); err != nil {
+		t.Fatalf("StartDatabase = %v", err)
 	}
-	if strings.Contains(strings.Join(st.calls, " "), "install-db") {
-		t.Fatalf("已初始化不应跑 install-db：%q", st.calls)
+	if strings.Contains(strings.Join(st.calls, " "), "initialize-insecure") {
+		t.Fatalf("已初始化不应再跑 initialize：%q", st.calls)
 	}
 }
 
-func TestStartMariadbCleanupAndInit(t *testing.T) {
+func TestStartDatabaseCleanupAndInit(t *testing.T) {
 	st := &stubEnv{}
 	d := st.deps()
 	d.Exists = func(p string) bool { return filepath.Base(p) == "db" } // 数据目录在，mysql 库缺失
-	if _, err := fastShell(d).StartMariadb("r", "a"); err != nil {
-		t.Fatalf("StartMariadb = %v", err)
+	if _, err := fastShell(d).StartDatabase("r", "a"); err != nil {
+		t.Fatalf("StartDatabase = %v", err)
 	}
 	got := strings.Join(st.calls, " ")
-	if !strings.Contains(got, "remove:db") || !strings.Contains(got, "install-db") {
+	if !strings.Contains(got, "remove:db") || !strings.Contains(got, "initialize-insecure") {
 		t.Fatalf("半初始化应先清理后重建：%q", got)
 	}
 }
 
-func TestStartMariadbPortOccupied(t *testing.T) {
+func TestStartDatabasePortOccupied(t *testing.T) {
 	st := &stubEnv{}
 	d := st.deps()
-	d.TcpProbe = func(port int) bool { return port == DefaultMariadbPort }
-	if _, err := fastShell(d).StartMariadb("r", "a"); err == nil || !strings.Contains(err.Error(), "13306") {
+	d.TcpProbe = func(port int) bool { return port == DefaultDbPort }
+	if _, err := fastShell(d).StartDatabase("r", "a"); err == nil || !strings.Contains(err.Error(), "13306") {
 		t.Fatalf("端口占用应报错：%v", err)
 	}
 	if len(st.calls) != 0 {
@@ -199,12 +215,33 @@ func TestStartMariadbPortOccupied(t *testing.T) {
 	}
 }
 
-func TestStartMariadbTimeout(t *testing.T) {
+func TestStartDatabaseTimeout(t *testing.T) {
 	st := &stubEnv{}
 	d := st.deps()
-	d.TcpProbe = func(port int) bool { return false } // 永不就绪
-	if _, err := fastShell(d).StartMariadb("r", "a"); err == nil || !strings.Contains(err.Error(), "超时") {
+	d.DbReady = func(string, int) bool { return false } // 永不就绪
+	if _, err := fastShell(d).StartDatabase("r", "a"); err == nil || !strings.Contains(err.Error(), "超时") {
 		t.Fatalf("应超时报错：%v", err)
+	}
+}
+
+// 端口已监听但未就绪（TCP 通、ping 不通）也必须等到 ping 就绪——避免初始化期误判可用。
+func TestStartDatabaseWaitsForPingNotTcp(t *testing.T) {
+	st := &stubEnv{}
+	d := st.deps()
+	d.TcpProbe = func(port int) bool { return false } // 端口决策通过
+	ready := false
+	d.DbReady = func(binDir string, port int) bool {
+		if binDir != filepath.Join("a", "mysql", "bin") {
+			t.Fatalf("DbReady binDir = %q", binDir)
+		}
+		ready = true
+		return ready
+	}
+	if _, err := fastShell(d).StartDatabase("r", "a"); err != nil {
+		t.Fatalf("StartDatabase = %v", err)
+	}
+	if !ready {
+		t.Fatal("应以 mysqladmin ping 判定就绪")
 	}
 }
 
@@ -249,24 +286,24 @@ func TestRunOrdering(t *testing.T) {
 		t.Fatalf("Run = %v", err)
 	}
 	seq := strings.Join(st.calls, " ")
-	mariadbStart := strings.Index(seq, "start:mariadbd.exe")
+	dbStart := strings.Index(seq, "start:mysqld.exe")
 	backendStart := strings.Index(seq, "start:trailmind-backend.exe")
 	backendShutdown := strings.Index(seq, "shutdown:http://127.0.0.1:17860/api/v1/shutdown")
-	mariadbShutdown := strings.Index(seq, "run:mysqladmin.exe:-u root --port 13306 shutdown")
-	if !(0 <= mariadbStart && mariadbStart < backendStart && backendStart < backendShutdown && backendShutdown < mariadbShutdown) {
+	dbShutdown := strings.Index(seq, "run:mysqladmin.exe:-u root --port 13306 shutdown")
+	if !(0 <= dbStart && dbStart < backendStart && backendStart < backendShutdown && backendShutdown < dbShutdown) {
 		t.Fatalf("启停顺序错误：%q", seq)
 	}
 }
 
-func TestRunBackendFailStopsMariadb(t *testing.T) {
+func TestRunBackendFailStopsDatabase(t *testing.T) {
 	st := &stubEnv{}
-	st.backendUp = true // 17860 已被占（模拟残留/冲突），mariadb 端口正常
+	st.backendUp = true // 17860 已被占（模拟残留/冲突），数据库端口正常
 	if err := fastShell(st.deps()).Run("r", "a", func() error { return nil }); err == nil {
 		t.Fatal("Run 应返回错误")
 	}
 	seq := strings.Join(st.calls, " ")
-	if !strings.Contains(seq, "start:mariadbd.exe") || !strings.Contains(seq, "run:mysqladmin.exe:-u root --port 13306 shutdown") {
-		t.Fatalf("backend 失败应清理 mariadb：%q", seq)
+	if !strings.Contains(seq, "start:mysqld.exe") || !strings.Contains(seq, "run:mysqladmin.exe:-u root --port 13306 shutdown") {
+		t.Fatalf("backend 失败应清理数据库：%q", seq)
 	}
 	if strings.Contains(seq, "start:trailmind-backend.exe") {
 		t.Fatalf("端口被占不应拉起 backend：%q", seq)
