@@ -14,18 +14,25 @@ import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { spawn, execFile } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { gridContent } from './verify-m2-gui.mjs'
+import {
+  buildShellEnv,
+  ensureWebViewDataDir,
+  resolveShellExe,
+  resolveWebViewDataDir,
+  spawnShell,
+  waitForPageTarget as waitForShellPageTarget,
+} from './lib/shell-launcher.mjs'
 
 // 本地 DB 凭据不提交；Electron 主进程会自行从仓库根 .env 加载，本脚本也读一份供 mysql CLI 灌数据。
 try { process.loadEnvFile(new URL('../.env', import.meta.url)) } catch { /* 无 .env 时回落 shell 环境变量 */ }
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const STATIC_PORT = 5178
 const CDP_PORT = 9223
 const BACKEND_PORT = 17860
 const BACKEND_BASE = `http://127.0.0.1:${BACKEND_PORT}`
-const FRONTEND_URL = `http://127.0.0.1:${STATIC_PORT}`
+const APP_URL = BACKEND_BASE
 const OUT_DIR = path.join(ROOT, 'scripts', 'out', 'perf-regression')
 
 // 预算（04 §8 / 02 §NFR）
@@ -49,28 +56,6 @@ export function summarizePerf(results) {
 }
 
 // ---------- 内建静态服务器（frontend/dist + /api 代理到后端，与 verify-m2-gui.mjs 同构） ----------
-function startStaticServer() {
-  const dist = path.join(ROOT, 'frontend', 'dist')
-  const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff2': 'font/woff2' }
-  const server = http.createServer((req, res) => {
-    const url = new URL(req.url, FRONTEND_URL)
-    if (url.pathname.startsWith('/api/')) {
-      const proxied = http.request({ host: '127.0.0.1', port: BACKEND_PORT, path: url.pathname + url.search, method: req.method, headers: { ...req.headers, host: `127.0.0.1:${BACKEND_PORT}` } }, (pr) => {
-        res.writeHead(pr.statusCode, pr.headers)
-        pr.pipe(res)
-      })
-      proxied.on('error', () => { res.writeHead(502); res.end('backend unavailable') })
-      req.pipe(proxied)
-      return
-    }
-    let filePath = path.join(dist, url.pathname === '/' ? 'index.html' : url.pathname)
-    if (!filePath.startsWith(dist)) { res.writeHead(403); res.end(); return }
-    if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) filePath = path.join(dist, 'index.html')
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream' })
-    fs.createReadStream(filePath).pipe(res)
-  })
-  return new Promise((resolve) => server.listen(STATIC_PORT, '127.0.0.1', () => resolve(server)))
-}
 
 // ---------- CDP 客户端（Node 内建 WebSocket，零第三方依赖） ----------
 class Cdp {
@@ -113,22 +98,22 @@ class Cdp {
   close() { try { this.ws.close() } catch { /* 忽略 */ } }
 }
 
-async function findPageTarget() {
-  const res = await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`)
-  const targets = await res.json()
-  return targets.find((t) => t.type === 'page' && t.url.startsWith(FRONTEND_URL))
+/** 等壳的页面目标出现（壳完成 初始化库 → 起后端 → 开窗 之后）。 */
+async function waitForPageTarget(timeoutMs = 180000) {
+  const { target } = await waitForShellPageTarget({ port: CDP_PORT, backendPort: BACKEND_PORT, timeoutMs })
+  return target
 }
 
-async function waitForPageTarget(timeoutMs = 60000) {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    try {
-      const target = await findPageTarget()
-      if (target) return target
-    } catch { /* CDP 尚未就绪 */ }
-    await sleep(500)
-  }
-  throw new Error('等待 Electron 页面目标超时（CDP 未就绪）')
+/** 拉起 Wails 壳（自拉便携 MySQL + 后端 app-image + WebView2 窗口）。 */
+function launchShell() {
+  const exe = resolveShellExe(ROOT)
+  if (!exe) throw new Error('未找到壳产物：请先 npm run package（完整自包含打包）或 cd desktop/wails && wails build')
+  ensureWebViewDataDir(resolveWebViewDataDir(path.join(OUT_DIR, 'webview-data')))
+  const env = buildShellEnv(process.env, { cdpPort: CDP_PORT })
+  delete env.ELECTRON_RUN_AS_NODE
+  const child = spawnShell(exe, env, { cwd: path.dirname(exe) })
+  child.on('exit', () => {})
+  return child
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -268,8 +253,7 @@ function makeDriver(cdp) {
 
 async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true })
-  let electron = null
-  let staticServer = null
+  let shell = null
   let cdp = null
   const ts = Date.now()
   const wsName = `性能回归-${ts}`
@@ -278,31 +262,12 @@ async function main() {
   let sid = null
 
   try {
-    console.log('[perf-regression] 启动静态服务器（frontend/dist + /api 代理）…')
-    staticServer = await startStaticServer()
-
-    console.log('[perf-regression] 拉起 Electron（自动拉起后端 jar，CDP 端口 9223）…')
-    const electronBin = path.join(ROOT, 'desktop', 'node_modules', 'electron', 'dist', 'electron.exe')
-    const env = { ...process.env, TRAILMIND_DEV_URL: FRONTEND_URL }
-    delete env.ELECTRON_RUN_AS_NODE
-    // userData 指到工作区内：agent 沙箱环境对 %APPDATA% 只读，Electron 写单实例锁/DevToolsActivePort
-    // 会失败崩溃（实测 FATAL: platform_channel）。独立 user-data-dir 同时避免与真实用户实例互斥。
-    const userDataDir = path.join(OUT_DIR, 'userdata')
+    console.log('[perf-regression] 拉起 Wails 壳（自拉便携 MySQL + 后端 app-image + WebView2 窗口，CDP 端口 9223）…')
     const tLaunch = Date.now()
-    electron = spawn(electronBin, [
-      `--remote-debugging-port=${CDP_PORT}`,
-      `--user-data-dir=${userDataDir}`,
-      '--disable-renderer-backgrounding',
-      '--disable-background-timer-throttling',
-      '--disable-features=CalculateNativeWinOcclusion',
-      '.',
-    ], {
-      cwd: path.join(ROOT, 'desktop'), env, stdio: 'ignore', windowsHide: true,
-    })
-    electron.on('exit', () => {})
+    shell = launchShell()
 
     const target = await waitForPageTarget()
-    // 页面目标出现 = Electron 已完成后端健康等待并加载前端 → 后端已就绪。
+    // 页面目标出现 = 壳已完成（初始化库 → 起后端 → 开窗加载 17860）→ 后端已就绪。
     // N4 参考数据（正式 N4 验收仍为打包安装环境待办，见 docs/10 §10）
     const backendUpMs = Date.now() - tLaunch
 
@@ -478,7 +443,7 @@ async function main() {
     check(page20?.code === 0 && page20?.data?.entries?.length > 0, `N2 第 20 页分页 ${pageMs}ms（翻页流畅参考）`)
 
     // N4 参考：后端 jar 拉起 → 页面可交互（正式验收为打包安装环境待办，07 §3）
-    check(true, `N4 参考：Electron 拉起后端 jar → 页面可交互 ${backendUpMs}ms（含健康等待；正式 N4 验收仍为打包安装环境待办）`)
+    check(true, `N4 参考：壳拉起便携库与后端 → 页面可交互 ${backendUpMs}ms（含健康等待；正式 N4 验收见 docs/07 §3）`)
 
     // 清理
     await rest('DELETE', `/workspaces/${wid}`)
@@ -489,9 +454,9 @@ async function main() {
     results.push({ name: '流程异常', ok: false, error: e.message })
   } finally {
     if (wid != null) await rest('DELETE', `/workspaces/${wid}`).catch(() => {})
-    if (electron && electron.exitCode === null) await killTree(electron.pid).catch(() => {})
+    if (shell && shell.exitCode === null) await killTree(shell.pid).catch(() => {})
     try { cdp?.close() } catch { /* 忽略 */ }
-    try { staticServer?.close() } catch { /* 忽略 */ }
+    // 静态服务器已随 Electron 退役（壳加载后端同源前端）
   }
 }
 

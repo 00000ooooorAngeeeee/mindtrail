@@ -1,24 +1,33 @@
 // M2 总验收 GUI 实机验证（docs/07 §5 验收清单）：
-// 拉起真实 Electron 应用（dev 态经 TRAILMIND_DEV_URL 加载本脚本内建静态服务器上的前端产物，
-// Electron 主进程自动拉起后端 jar），经 Chrome DevTools Protocol（CDP，Node 24 内建 WebSocket）
+// 拉起真实桌面端 Wails 壳（release/ 自包含产物：壳自行启动便携 MySQL + 后端 app-image，
+// 开 WebView2 窗口加载后端同源前端 http://127.0.0.1:17860），经 Chrome DevTools Protocol（CDP，Node 24 内建 WebSocket）
 // 在真实页面内注入合成事件驱动交互（节点拖拽/连线/框选/双击编辑/快捷键），
 // 逐项验证 M2 验收清单，截图存档 scripts/out/m2-gui/（.gitignore 已忽略 out/）。
 //
 // 事件注入要点（本会话实机调试得出，勿改回 CDP Input）：
-// - CDP Input.dispatchKeyEvent/MouseEvent 在 Electron 窗口失焦时不达页面；故全部走页面内合成事件
+// - CDP Input.dispatchKeyEvent/MouseEvent 在窗口失焦时不达页面；故全部走页面内合成事件
 // - d3-drag（XYFlow 节点拖拽）监听 mousedown 且依赖 event.view 注册 move 监听：合成 MouseEvent 必须带 view: window
 // - 连线手柄是 React onPointerDown（PointerEvent）+ document 级 mousemove/mouseup；move/up 从 body 冒泡同时覆盖 document 与 window 两层
 // - 键盘走 window 上的合成 KeyboardEvent（应用监听 window keydown）
 //
-// 前置：MySQL 已启动；frontend/dist 与 backend/target/trailmind-backend-0.0.1.jar 已构建（node scripts/build.mjs）。
+// S5 变更：CDP 经 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=… 开启（见 scripts/lib/shell-launcher.mjs）。
+// 前置：已完成 npm run package（或 build + package:backend + wails build 并组装 release/）；便携库随壳自带，无需外部 MySQL。
 // 用法：node scripts/verify-m2-gui.mjs
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { spawn, execFile } from 'node:child_process'
+import { execFile } from 'node:child_process'
+import {
+  buildShellEnv,
+  ensureWebViewDataDir,
+  resolveShellExe,
+  resolveWebViewDataDir,
+  spawnShell,
+  waitForPageTarget as waitForShellPageTarget,
+} from './lib/shell-launcher.mjs'
 
-// 本地 DB 凭据不提交；Electron 主进程会自行从仓库根 .env 加载，本脚本也读一份供 API 冒烟兜底。
+// 本地 DB 凭据不提交；壳以 env 注入 bundled 库，本脚本也读一份 .env 供 API 冒烟兜底（连的是壳起的实例）。
 try { process.loadEnvFile(new URL('../.env', import.meta.url)) } catch { /* 无 .env 时回落 shell 环境变量 */ }
 
 // 进入导图自动适应断言（S0/S6 复用，缺陷回归：进入导图应自动适配居中，无需手动点「适应视图」）：
@@ -39,12 +48,15 @@ const FIT_EXPR = `(() => {
 })()`
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const STATIC_PORT = 5177
 const CDP_PORT = 9222
 const BACKEND_PORT = 17860
 const BACKEND_BASE = `http://127.0.0.1:${BACKEND_PORT}`
-const FRONTEND_URL = `http://127.0.0.1:${STATIC_PORT}`
+// S5：桌面端由 Electron 换为 Wails 壳，壳加载「后端同源服务的前端」http://127.0.0.1:17860，
+// 故不再需要内建静态服务器与 TRAILMIND_DEV_URL（前端产物由后端从 classpath:/static 提供）。
+const APP_URL = BACKEND_BASE
 const OUT_DIR = path.join(ROOT, 'scripts', 'out', 'm2-gui')
+// WebView2 用户数据目录（含 DevToolsActivePort，就绪兜底探测用）：放工作区内，不污染真实 %LOCALAPPDATA%
+const WEBVIEW_DATA_ROOT = path.join(OUT_DIR, 'webview-data')
 
 // 纯函数：生成 N 个业务节点 + 1 根的画布网格内容（10 列网格布局，全部挂在根下，严格树）。单测覆盖。
 export function gridContent(count = 100) {
@@ -67,93 +79,31 @@ export function gridContent(count = 100) {
   return { version: 1, rootNodeId: 'n1', nodes, edges: [] }
 }
 
-// ---------- 内建静态服务器：serve frontend/dist + /api 代理到后端（开发期 Vite 的同构替代，避免依赖 esbuild 子进程） ----------
-function startStaticServer() {
-  const dist = path.join(ROOT, 'frontend', 'dist')
-  const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff2': 'font/woff2' }
-  const server = http.createServer((req, res) => {
-    const url = new URL(req.url, FRONTEND_URL)
-    if (url.pathname.startsWith('/api/')) {
-      const proxied = http.request({ host: '127.0.0.1', port: BACKEND_PORT, path: url.pathname + url.search, method: req.method, headers: { ...req.headers, host: `127.0.0.1:${BACKEND_PORT}` } }, (pr) => {
-        res.writeHead(pr.statusCode, pr.headers)
-        pr.pipe(res)
-      })
-      proxied.on('error', () => { res.writeHead(502); res.end('backend unavailable') })
-      req.pipe(proxied)
-      return
-    }
-    let filePath = path.join(dist, url.pathname === '/' ? 'index.html' : url.pathname)
-    if (!filePath.startsWith(dist)) { res.writeHead(403); res.end(); return }
-    if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) filePath = path.join(dist, 'index.html')
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream' })
-    fs.createReadStream(filePath).pipe(res)
-  })
-  return new Promise((resolve) => server.listen(STATIC_PORT, '127.0.0.1', () => resolve(server)))
+// ---------- 壳启动器：拉起 release/ 自包含产物（壳自拉便携 MySQL + 后端 app-image + WebView2 窗口） ----------
+// S5 起取代 Electron：不再有内建静态服务器与 TRAILMIND_DEV_URL，前端由后端同源服务。
+function launchShell() {
+  const exe = resolveShellExe(ROOT)
+  if (!exe) {
+    throw new Error('未找到壳产物：请先 npm run package（完整自包含打包）或 cd desktop/wails && wails build')
+  }
+  const userDataDir = resolveWebViewDataDir(WEBVIEW_DATA_ROOT)
+  ensureWebViewDataDir(userDataDir)
+  // 断网模拟经 WebView2 浏览器开关透传（offlineProxyArgs 只读 OFFLINE_MODE，非断网模式返回空数组）
+  const env = buildShellEnv(process.env, { cdpPort: CDP_PORT, extraBrowserArgs: offlineProxyArgs() })
+  delete env.ELECTRON_RUN_AS_NODE
+  const child = spawnShell(exe, env, { cwd: path.dirname(exe) })
+  child.on('exit', () => {})
+  return child
 }
 
-// ---------- CDP 客户端（Node 24 内建 WebSocket，零第三方依赖） ----------
-class Cdp {
-  constructor(wsUrl) {
-    this.ws = new WebSocket(wsUrl)
-    this.nextId = 1
-    this.pending = new Map()
-  }
-  async open() {
-    await new Promise((resolve, reject) => {
-      this.ws.onopen = resolve
-      this.ws.onerror = () => reject(new Error('CDP WebSocket 连接失败'))
-    })
-    this.ws.onmessage = (ev) => {
-      const msg = JSON.parse(ev.data)
-      if (msg.id && this.pending.has(msg.id)) {
-        const { resolve, reject } = this.pending.get(msg.id)
-        this.pending.delete(msg.id)
-        msg.error ? reject(new Error(msg.error.message)) : resolve(msg.result)
-      }
-      // 页面运行时异常/控制台错误原样打印，便于定位白屏类缺陷
-      if (msg.method === 'Runtime.exceptionThrown') {
-        const d = msg.params.exceptionDetails
-        console.log(`[page-error] ${d.text} ${d.exception?.description ?? ''}`)
-      }
-      if (msg.method === 'Log.entryAdded' && ['error', 'warning'].includes(msg.params.entry.level)) {
-        console.log(`[page-log] ${msg.params.entry.text}`)
-      }
-    }
-  }
-  send(method, params = {}) {
-    const id = this.nextId++
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject })
-      this.ws.send(JSON.stringify({ id, method, params }))
-      setTimeout(() => {
-        if (this.pending.has(id)) {
-          this.pending.delete(id)
-          reject(new Error(`CDP 超时：${method}`))
-        }
-      }, 15000)
-    })
-  }
-  close() { try { this.ws.close() } catch { /* 忽略 */ } }
+/** 等壳的页面目标出现（壳完成 初始化库 → 起后端 → 开窗 之后）。 */
+async function waitForPageTarget(timeoutMs = 180000) {
+  const { target } = await waitForShellPageTarget({ port: CDP_PORT, backendPort: BACKEND_PORT, timeoutMs })
+  return target
 }
 
-async function findPageTarget() {
-  const res = await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`)
-  const targets = await res.json()
-  return targets.find((t) => t.type === 'page' && t.url.startsWith(FRONTEND_URL))
-}
-
-async function waitForPageTarget(timeoutMs = 45000) {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    try {
-      const target = await findPageTarget()
-      if (target) return target
-    } catch { /* CDP 尚未就绪 */ }
-    await sleep(500)
-  }
-  throw new Error('等待 Electron 页面目标超时（CDP 未就绪）')
-}
-
+// 迁移留痕（无代码）：旧实现曾用 http.createServer 起静态服务器 serve frontend/dist + 代理 /api 到后端，
+// 现由「后端同源服务前端」取代，故连同旧 findPageTarget/waitForPageTarget 一并删除。
 // ---------- 工具函数 ----------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -212,7 +162,7 @@ export function auditConnections(rows, pids) {
   return rows.filter((r) => r && pidSet.has(r.pid) && r.state !== 'LISTENING' && !isLoopback(r.remote))
 }
 
-// 目标进程树（Electron 主进程 → 渲染/GPU/后端 java 等子进程）：PowerShell 一次取全量父子关系后 BFS
+// 目标进程树（壳进程 → WebView2 渲染/GPU/后端 java 等子进程）：PowerShell 一次取全量父子关系后 BFS
 function processTreePids(rootPid) {
   return new Promise((resolve) => {
     const cmd =
@@ -394,8 +344,7 @@ const nodeInnerSel = (id) => `.react-flow__node[data-id="${id}"] .mm-node`
 
 async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true })
-  let electron = null
-  let staticServer = null
+  let shell = null
   let cdp = null
   let cdp2 = null
   const ts = Date.now()
@@ -403,13 +352,13 @@ async function main() {
   let wid = null
   let mid1 = null
 
-  // 断网模拟（M4 收尾验收）：OFFLINE_MODE=1 时 Electron 以死代理拉起，运行期做连接审计采样
+  // 断网模拟（M4 收尾验收）：OFFLINE_MODE=1 时壳以死代理拉起（WebView2 透传浏览器开关），运行期做连接审计采样
   const offline = process.env.OFFLINE_MODE === '1'
   const auditSamples = []
   const auditNow = async (label) => {
     if (!offline) return
     const rows = await netstatRows()
-    const pids = await processTreePids(electron.pid)
+    const pids = await processTreePids(shell.pid)
     const violations = auditConnections(rows, pids)
     auditSamples.push({
       label,
@@ -420,39 +369,12 @@ async function main() {
   }
 
   try {
-    console.log('[m2-gui] 启动静态服务器（frontend/dist + /api 代理）…')
-    staticServer = await startStaticServer()
-
-    console.log('[m2-gui] 拉起 Electron（自动拉起后端 jar，CDP 端口 9222）…')
+    console.log('[m2-gui] 拉起 Wails 壳（自拉便携 MySQL + 后端 app-image + WebView2 窗口，CDP 端口 9222）…')
     if (offline) {
       console.log(`[m2-gui] 断网模拟模式：死代理 ${offlineProxyArgs()[0]}（外网请求必然失败，回环显式 bypass）`)
     }
-    const electronBin = path.join(ROOT, 'desktop', 'node_modules', 'electron', 'dist', 'electron.exe')
-    const env = { ...process.env, TRAILMIND_DEV_URL: FRONTEND_URL }
-    delete env.ELECTRON_RUN_AS_NODE
-    const launchElectron = () => {
-      // 反后台化开关：agent 环境的 Electron 窗口常处于遮挡/后台状态，Chromium 会暂停 rAF 与节流定时器，
-      // 导致依赖 rAF 的测量链路（XYFlow ResizeObserver 回调、fitView、useUpdateNodeInternals）冻结。
-      // 这些开关让窗口无论可见性如何都保持渲染循环（真实用户前台使用不受影响）。
-      const child = spawn(electronBin, [
-        `--remote-debugging-port=${CDP_PORT}`,
-        // userData 指到工作区内：agent 沙箱环境对 %APPDATA% 只读，Electron 写单实例锁/DevActivePort
-        // 会崩溃（实测 FATAL: platform_channel）；独立 user-data-dir 同时避免与真实用户实例互斥（同 perf-regression.mjs）
-        `--user-data-dir=${path.join(OUT_DIR, 'userdata')}`,
-        '--disable-renderer-backgrounding',
-        '--disable-background-timer-throttling',
-        '--disable-features=CalculateNativeWinOcclusion',
-        ...(offline ? offlineProxyArgs() : []),
-        '.',
-      ], {
-        cwd: path.join(ROOT, 'desktop'), env, stdio: 'ignore', windowsHide: true,
-      })
-      child.on('exit', () => {})
-      return child
-    }
-    electron = launchElectron()
-
-    // 页面目标出现意味着 Electron 已完成后端健康等待并加载前端 → 后端此时可用
+    shell = launchShell()
+    // 页面目标出现意味着壳已完成（初始化库 → 起后端 → 开窗加载 17860）→ 后端此时可用
     const target = await waitForPageTarget()
 
     cdp = new Cdp(target.webSocketDebuggerUrl)
@@ -755,19 +677,20 @@ async function main() {
     check('S4f 批量删除（Delete + 确认，级联移除选中节点及子树）', true)
     await d.waitSaved()
 
-    // ---------- S5：重启应用（Electron + 后端），坐标/形状/颜色/便签完整恢复 ----------
+    // ---------- S5：重启壳（壳 + 便携库 + 后端），坐标/形状/颜色/便签完整恢复 ----------
     const snapshot = JSON.parse((await rest('GET', `/mindmaps/${mid1}`)).data.contentJson)
     const snapshotRootLayout = snapshot.nodes[rootId].layout
     await d.screenshot('04-before-restart')
-    await d.evaluate(`window.close()`).catch(() => {})
-    await sleep(1500)
+    // 用「终止壳进程树」模拟关闭应用（比 window.close() 更接近强杀路径，顺带验证壳的收尾清理）
+    await killTree(shell.pid).catch(() => {})
+    await sleep(2500)
     const deadline = Date.now() + 15000
     while (await portListening(BACKEND_PORT) && Date.now() < deadline) await sleep(500)
     check('S5a 关闭应用后端优雅退出（端口释放）', !(await portListening(BACKEND_PORT)))
-    if (electron && electron.exitCode === null) await killTree(electron.pid).catch(() => {})
+    if (shell && shell.exitCode === null) await killTree(shell.pid).catch(() => {})
 
-    console.log('[m2-gui] 重启 Electron（模拟应用重启，数据应完整恢复）…')
-    electron = launchElectron()
+    console.log('[m2-gui] 重启壳（模拟应用重启，数据应完整恢复）…')
+    shell = launchShell()
     const target2 = await waitForPageTarget()
     cdp2 = new Cdp(target2.webSocketDebuggerUrl)
     await cdp2.open()
@@ -866,13 +789,13 @@ async function main() {
     await rest('DELETE', `/workspaces/${wid}`)
     const formWs = (await rest('GET', '/workspaces')).data.find((w) => w.name === `验收表单-${ts}`)
     if (formWs) await rest('DELETE', `/workspaces/${formWs.id}`)
-    await d2.evaluate(`window.close()`).catch(() => {})
-    await sleep(1200)
+    // 终止壳进程树：壳会停后端与便携 MySQL（关窗路径之外再验一次无残留）
+    await killTree(shell.pid).catch(() => {})
+    await sleep(2500)
   } finally {
-    if (electron && electron.exitCode === null) await killTree(electron.pid).catch(() => {})
+    if (shell && shell.exitCode === null) await killTree(shell.pid).catch(() => {})
     try { cdp?.close() } catch { /* 忽略 */ }
     try { cdp2?.close() } catch { /* 忽略 */ }
-    try { staticServer?.close() } catch { /* 忽略 */ }
   }
 }
 

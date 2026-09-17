@@ -8,7 +8,7 @@
 
 ## 技术栈（一句话）
 
-- 壳：Electron（负责拉起 Java 后端子进程）
+- 壳：**Wails（Go + WebView2）**——自包含打包态桌面端 `desktop/wails/`（自行初始化/拉起便携 MySQL 与后端 app-image，开 WebView2 窗口）；2026-08-24 起 Electron 壳已退役
 - 前端：React 18 + TypeScript + Vite + Zustand + React Flow（画布）+ CodeMirror 6（Markdown）
 - 后端：Java 21 + Spring Boot 3 + MyBatis-Plus + JGit，REST API 监听 127.0.0.1:17860
 - 数据库：MySQL 8.x（库名 `trailmind`），schema 见 docs/05，幂等建表
@@ -23,14 +23,17 @@
 6. **过程记录是本产品的灵魂**：每次会话结束按 docs/06 写 review；M3 之后用产品本身记录（dogfooding）
 7. **导出格式是协议**：docs/06 §4，改动必须升 version
 
-## 快速命令（M0 落地后）
+## 快速命令
 
-- `npm run dev`：一键前后端联调
-- `npm run launch`：一键拉起桌面端（Electron 自拉后端 jar，同源加载 17860；无需 vite/浏览器；项目根「启动 TrailMind」快捷方式即调用它）
-- `npm run package`：打包 exe
-- `npm run package:backend`：后端 app-image 打包（bundled JRE，无需预装 Java；自包含打包 Phase 1）
-- `npm run package:desktop`：**打包 Wails 自包含桌面端**（便携 MySQL + bundled JRE + 壳 → `release/`，双击 `trailmind-shell.exe` 即用，无需预装 Java/MySQL；04 §26）
+- `npm run dev`：开发态联调（后端 `mvn spring-boot:run` + vite dev server → http://localhost:5173）
+- `npm run dev:shell`：改完前端想在**壳里**看效果（build 前端 → 同步后端 static → 起壳，避免跑 stale 产物）
+- `npm run launch`：一键拉起桌面端（Wails 壳自拉便携 MySQL + 后端 app-image，同源加载 17860；项目根「启动 TrailMind」快捷方式即调用它）
+- `npm run package`：**完整自包含打包**（前端 → 后端 app-image → 便携 MySQL → 壳 → `release/`；无需预装 Java/MySQL）
+- `npm run package:installer`：**出 NSIS 安装包**（`release/TrailMind-Setup-<版本>.exe`，双击安装即用；需先装 NSIS 3.x）
+- `npm run package:backend`：只打后端 app-image（bundled JRE）
 - `node scripts/e2e-packaged.mjs` / `node scripts/e2e-shell.mjs`：**打包产物验收**（前者验初始化→建表→ngram→搜索→无残留，后者验壳编排与强杀孤儿清理）
+- `cd desktop/wails && go test ./...`：壳编排单测（含强杀孤儿清理）
+- `npm run test:scripts`：脚本纯函数单测（受限沙箱下改用逐文件 `node <file>` 直跑）
 - `scripts/verify`：里程碑验收冒烟
 
 ## 当前进度
@@ -87,16 +90,16 @@
 
 - [x] 缺陷修复三：切图往返随机「进入导图无法自动适应」（用户反馈，07 §25）——已完成：根因为 §19 修复二门控只校验「store 全部节点已测量」不校验节点归属，切图时 MindMapEditor 不重挂载（RF store 持久）、store 的 content 在 fetch 返回前不清空，fitView 用上一图边界算缩放且 doneKey 记到新图 key（Electron 实机 CDP + [fitdbg] 埋点反解证实：切回 26 节点图时 fit 用 4 节点旧边界、zoom 1.325、包围盒 y1=2426 溢出）；修复双保险——`fitCheck.ts` 纯函数 `nodesReadyForFit`（数量相等 + id 属本图 + 宽高已测量）门控 fitView + `useMindmapStore.load` 开头清空旧 content 消除陈旧窗口；前端 281 → 287 单测、tsc 通过、Electron CDP 往返压测 19 轮 0 失败、npm run build BUILD SUCCESS；过程记录见产品工作区「TrailMind 开发」
 
-- [x] 自包含打包：壳与打包脚本改绑便携 MySQL（07 §26）——已完成（S1+S2：阻塞点解除 + 端到端实证）：原 Phase 0–4 已实现但端到端被「**MariaDB 不支持 MySQL `WITH PARSER ngram`**」阻塞（schema.sql/搜索建表即失败）。本次决策改捆绑**便携 MySQL 8.4 LTS**（用户三问确认：MySQL / NSIS 安装包 / 本期删 Electron），零搜索改动保留 ngram 与 N3 性能契约；`orchestrator.go` → `mysql.go`（`mysqld --initialize-insecure --basedir` + `--mysqlx=OFF` + `mysqladmin ping` 就绪判定，20 → **23 条 Go 单测**）、`mariadb-process.js` → `mysql-process.js`（22 条）、`package-desktop.mjs` 三级就位回退（12 条）；**新增强杀孤儿清理**（运行态文件 `%APPDATA%\TrailMind\run.json`，下次启动按「先后端后库」清理，修 M0/M2「强杀重启无残留」）；新增打包产物验收脚本 `scripts/e2e-packaged.mjs`（**S2 E2E ALL PASS 10/10**：初始化→建 9 表→**ngram 建索引**→search_text 维护→中文全文搜索命中→退出无残留）与 `scripts/e2e-shell.mjs`（**S2b SHELL ALL PASS 5/5**：壳自初始化+拉库+拉后端，强杀后重启清理孤儿并自行就绪）；后端 **266** + 前端 **287** + 脚本/桌面 **100** 单测全绿；过程记录 `docs/superpowers/sessions/2026-09-17-wails-packaging.md`。**剩余：NSIS 安装包产物（需人工提供 NSIS）、图标约定与 N4 启动验收、移除 Electron 壳（含 GUI 脚本迁移 WebView2 CDP）**
+- [x] 自包含打包：壳与打包脚本改绑便携 MySQL（07 §26）——S1+S2+S5 已完成：原 Phase 0–4 已实现但端到端被「**MariaDB 不支持 MySQL `WITH PARSER ngram`**」阻塞（schema.sql/搜索建表即失败）。决策改捆绑**便携 MySQL 8.4 LTS**（用户三问确认：MySQL / NSIS 安装包 / 本期删 Electron），零搜索改动保留 ngram 与 N3 性能契约；`orchestrator.go` → `mysql.go`（`mysqld --initialize-insecure --basedir` + `--mysqlx=OFF` + `mysqladmin ping` 就绪判定，20 → **23 条 Go 单测**）、`mariadb-process.js` → `mysql-process.js`（22 条）、`package-desktop.mjs` 三级就位回退（12 条）；**新增强杀孤儿清理**（运行态文件 `%APPDATA%\TrailMind\run.json`，下次启动按「先后端后库」清理，修 M0/M2「强杀重启无残留」）；新增打包产物验收脚本 `scripts/e2e-packaged.mjs`（**S2 E2E ALL PASS 10/10**：初始化→建 9 表→**ngram 建索引**→search_text 维护→中文全文搜索命中→退出无残留）与 `scripts/e2e-shell.mjs`（**S2b SHELL ALL PASS 5/5**：壳自初始化+拉库+拉后端，强杀后重启清理孤儿并自行就绪，Electron 删除后复跑仍 ALL PASS）。**S5 已落地**：Electron 壳（`desktop/main|preload|test|package.json|electron-builder.yml` + `node_modules` 629MB）删除；`npm run launch` 改起壳、新增 `npm run dev:shell`、`npm run package` 改自包含打包、新增 `npm run package:installer`（NSIS）；`scripts/lib/shell-launcher.mjs`（壳启动器 + WebView2 `--remote-debugging-port` 开 CDP，15 条单测）与 `scripts/lib/proc.mjs`（killProcessTree 等，5 条单测）；`verify-m2-gui`/`perf-regression`/`verify-m4-acceptance` 三脚本已迁到壳 + CDP 并保持纯函数单测全绿。新增 `scripts/package-installer.mjs`（自生成 .nsi 解决「Wails 内置 NSIS 模板只带壳 exe」问题，14 条单测；实跑已生成脚本并正确报「缺 NSIS + 下载指引」）。回归：后端 **266** + 前端 **287** + 脚本 **103** 单测全绿；过程记录 `docs/superpowers/sessions/2026-09-17-wails-packaging.md`。**剩余：S3 实机出安装包（需人工装 NSIS）、S4 图标换图与 N4 启动验收、GUI 脚本实机复跑（需全权限会话）**
 
 - _注：以下 P2 项**暂不实现**，列入待排期：AI 会话自动摘要（方案已定，[09 §3](docs/09-风险清单与开放问题.md)：自带 Key 外部 API 为主 + 规则模板兜底，本地大模型预留 provider 接口）、每周复盘报告、会话模板、工作区模板、主题定制（基础 light/dark/system 主题已随 M4 任务四落地，此项指进阶自定义）。_
 
-下一任务：**自包含 Wails 打包收尾（07 §26）** —— 已完成 S1（改绑便携 MySQL 8.4，解除 ngram 阻塞）与 S2（端到端实证：打包产物 10/10、壳编排 5/5）。**紧接着做**：
-1. **S3 NSIS 安装包**：`wails build -nsis`（需人工装 NSIS + 确认 `makensis` 在 PATH；安装目录需含 `mysql/` 与 `trailmind-backend/`，Wails NSIS 模板默认只带壳 exe）；
-2. **S4 图标约定与 N4 验收**：换 `branding/icon.ico` 重打包（壳/后端/安装包三处同步）+ 补 07 §3 M0 唯一未勾项「双击安装后 ≤3s 可交互」；
-3. **S5 移除 Electron 壳**：`desktop/main|preload`、`npm run launch/dev:desktop`、`electron-builder.yml` 退役 + 4 个 GUI/性能脚本（verify-m2-gui / perf-regression / perf-search / verify-m4-acceptance）从 Electron+CDP 迁到 WebView2 远程调试口；
+下一任务：**自包含 Wails 打包收尾（07 §26）** —— S1（改绑便携 MySQL 8.4，解除 ngram 阻塞）、S2（端到端实证：打包产物 10/10、壳编排 5/5）、S5（Electron 壳退役 + GUI 脚本迁 WebView2 CDP + NSIS 安装包脚本）均已完成。**剩余三步（都卡在环境/人工前置）**：
+1. **S3 实机出安装包**：先装 NSIS 3.x，再 `npm run package:installer` → `release/TrailMind-Setup-0.0.1.exe`（脚本已就绪：自动校验 release 布局、生成 .nsi、递归打包壳+便携库+后端、快捷方式、卸载保留用户数据）；
+2. **S4 图标换图与 N4 验收**：换 `branding/icon.ico` → 重打包（壳 exe / 后端 exe / 安装包三处同步）+ 补 07 §3 M0 唯一未勾项「双击安装后 ≤3s 可交互」；
+3. **GUI 脚本实机复跑**：`verify-m2-gui.mjs`（33 项）/`perf-regression.mjs`（N1–N4）/`verify-m4-acceptance.mjs` 已迁到壳 + CDP，但需**全权限会话**才能拉起 WebView2（agent 受限沙箱拒绝命名管道）——这是本目标里唯一尚未实机验证的环节。
 4. **前置文件需人工提供**（agent 会话无外网）：MySQL 8.4 便携 zip 放 `desktop/vendor/`、NSIS 安装包；
-5. **dogfooding 待补录**：本次过程记录暂存 `docs/superpowers/sessions/2026-09-17-wails-packaging.md`，需按 06 格式写入产品工作区「TrailMind 开发」。
+5. **dogfooding 待补录**：过程记录暂存 `docs/superpowers/sessions/2026-09-17-wails-packaging.md`，需按 06 格式写入产品工作区「TrailMind 开发」。
 
 **其余仍为暂缓项**：AI 会话自动摘要（方案见 09 §3）、每周复盘报告、会话/工作区模板、主题定制（基础 light/dark/system 已随 M4 任务四落地，此项指进阶自定义）；条件项：节点表化改造（搜索/引用成瓶颈时，05 §6）。见 09 §3 与 07 §8 Backlog P2 行。
 

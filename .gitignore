@@ -11,7 +11,7 @@ backend/src/main/resources/static/
 # 打包态 DB 凭据回退文件（build.mjs 从仓库根 .env 生成，含敏感信息，不入库）
 backend/src/main/resources/db-credentials.properties
 
-# Electron 运行期临时用户数据目录（沙箱下 --user-data-dir 指到工作区的产物）
+# Electron 运行期临时用户数据目录（2026-08-24 S5 起 Electron 壳已退役；保留规则以防旧产物残留）
 .electron-dev/
 
 # 便携 MySQL 下载/解压产物（specs 自包含打包 Phase 2/4：体积大，打包脚本运行时下载到 vendor/）

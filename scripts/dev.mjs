@@ -1,12 +1,16 @@
-// 一键开发（docs/10 §10）：并行启动后端（mvn spring-boot:run）与前端（npm run dev），Ctrl+C 整棵树终止。
-// 前置：MySQL 已启动（见 docs/10 任务 0.0/0.3）；DB 凭据从根目录 .env（gitignore 已忽略）加载。
+// 一键开发（S5 起 Electron 壳退役）：并行启动后端（mvn spring-boot:run）与前端（vite dev server），
+// Ctrl+C 整棵树终止。浏览 http://localhost:5173 开发前端（vite proxy 转发 /api 到 17860）。
+//
+// 与打包态的关系：打包态由 Wails 壳加载「后端同源服务的前端产物」（http://127.0.0.1:17860）。
+// 想让壳加载你刚改的前端，跑 `npm run dev:shell`（build 前端 → 进后端 static → 起壳）。
+//
+// 前置：MySQL 已启动（默认 127.0.0.1:3306，库 trailmind）；DB 凭据从根 .env 加载（gitignore 已忽略）。
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
-import { killProcessTree } from '../desktop/main/backend-process.js'
+import { killProcessTree, loadEnvFile } from './lib/proc.mjs'
 
-// 本地敏感配置（DB_USER/DB_PASS）不提交，从 .env 读入；shell 已设的环境变量不覆盖。
-try { process.loadEnvFile(new URL('../.env', import.meta.url)) } catch { /* 无 .env 时回落到 shell 环境变量 */ }
+loadEnvFile()
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const children = []
@@ -38,7 +42,7 @@ async function shutdown(code = 0) {
 process.on('SIGINT', () => shutdown(0))
 process.on('SIGTERM', () => shutdown(0))
 
-console.log('[dev] 启动后端（mvn spring-boot:run）…')
+console.log('[dev] 启动后端（mvn spring-boot:run → http://127.0.0.1:17860）…')
 spawnCmd('mvn spring-boot:run', { cwd: path.join(ROOT, 'backend') })
-console.log('[dev] 启动前端（vite dev server → http://localhost:5173）…')
+console.log('[dev] 启动前端（vite dev server → http://localhost:5173，/api 代理到 17860）…')
 spawnCmd('npm run dev', { cwd: path.join(ROOT, 'frontend') })

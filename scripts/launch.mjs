@@ -1,52 +1,56 @@
-// 一键拉起桌面端（「启动 TrailMind」快捷方式调用）：
-// Electron 壳自拉后端 jar（backend/target/trailmind-backend-0.0.1.jar），
-// 并加载 http://127.0.0.1:17860（Phase 0 起后端同源服务前端：/ → index.html、/api/v1 → 接口）——无需 vite/浏览器。
-// 前置：jar 已构建（npm run build，含嵌入前端）、MySQL 已启动（3306）、.env 含 DB 凭据（electron 主进程 loadEnv 注入后端子进程）。
-// 关闭窗口 → electron before-quit 停后端 jar；本脚本 killProcessTree 兜底。
-// 注：若已有 TrailMind 实例在跑，单实例锁会使新实例退出（聚焦旧窗或无窗）——先结束残留 electron 再启动。
+// 一键拉起 Wails 桌面端（「启动 TrailMind」快捷方式调用；S5 起 Electron 壳已退役）。
+//
+// 与旧版差异：不再由 Electron 拉起后端 jar，而是直接运行自包含产物 release/trailmind-shell.exe——
+// 壳自行：初始化并启动便携 MySQL（13306）→ 启动后端 app-image（bundled JRE）→ 开 WebView2 窗口加载
+// http://127.0.0.1:17860（后端同源服务前端）→ 关窗反序清理（含强杀兜底的运行态文件）。
+//
+// 前置：`npm run package:desktop`（或至少完成 build + package:backend + wails build 并组装 release/）。
+// 关闭窗口即退出；本脚本 Ctrl+C 时整树终止（taskkill /T /F）兜底。
+import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { spawn } from 'node:child_process'
-import { killProcessTree } from '../desktop/main/backend-process.js'
+import { killProcessTree, loadEnvFile } from './lib/proc.mjs'
+import { resolveReleaseShellPath, resolveShellExe } from './lib/shell-launcher.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+loadEnvFile(ROOT)
+
 const children = []
 let shuttingDown = false
-
-function spawnCmd(command, opts, onExit) {
-  const child = spawn(command, { shell: true, windowsHide: true, stdio: 'inherit', ...opts })
-  child.on('exit', (code) => {
-    if (shuttingDown) return
-    if (onExit) { onExit(code); return }
-    if (code !== null && code !== 0) {
-      console.error(`[launch] 子进程异常退出（code=${code}）：${command}`)
-      void shutdown(code)
-    }
-  })
-  children.push(child)
-  return child
-}
 
 async function shutdown(code = 0) {
   if (shuttingDown) return
   shuttingDown = true
-  console.log('\n[launch] 正在终止进程树…')
-  await Promise.all(
-    children.map((c) => (c.pid && c.exitCode === null ? killProcessTree(c.pid) : Promise.resolve())),
-  )
+  console.log('\n[launch] 正在终止进程树（壳会一并停掉后端与便携 MySQL）…')
+  await Promise.all(children.map((c) => (c.pid && c.exitCode === null ? killProcessTree(c.pid) : Promise.resolve())))
   process.exit(code)
 }
 
 process.on('SIGINT', () => shutdown(0))
 process.on('SIGTERM', () => shutdown(0))
 
-console.log('[launch] 拉起 Electron 桌面端（自拉后端 jar，同源加载 http://127.0.0.1:17860；无需 vite）…')
-// TRAILMIND_DEV_URL（desktop/main/index.js 第 7 行读取的变量名）让 electron 加载后端同源地址（Phase 0 起后端服务前端），而非默认 5173 vite dev server
-spawnCmd(
-  'npm --prefix desktop start',
-  { cwd: ROOT, env: { ...process.env, TRAILMIND_DEV_URL: 'http://127.0.0.1:17860' } },
-  (code) => {
-    console.log(`[launch] Electron 已退出（code=${code}）。`)
-    void shutdown(code ?? 0)
-  },
-)
+const exe = resolveShellExe(ROOT)
+if (!exe) {
+  console.error('[launch] 未找到壳产物，请先执行：')
+  console.error('         npm run package:desktop   # 完整自包含打包（前端+后端 app-image+便携 MySQL+壳）')
+  console.error(`         期望位置：${resolveReleaseShellPath(ROOT)} 或 desktop/wails/build/bin/trailmind-shell.exe`)
+  process.exit(1)
+}
+
+// 前置体检：release 布局需与壳的 %APPDIR% 约定一致（mysql/ 与 trailmind-backend/ 与壳 exe 同级）
+const appDir = path.dirname(exe)
+for (const [label, rel] of [['便携 MySQL', 'mysql/bin/mysqld.exe'], ['后端 app-image', 'trailmind-backend/trailmind-backend.exe']]) {
+  if (!existsSync(path.join(appDir, rel))) {
+    console.warn(`[launch] 警告：${label} 未就位（${rel}）——壳启动会失败，请先 npm run package:desktop`)
+  }
+}
+
+console.log(`[launch] 拉起 Wails 桌面端：${exe}`)
+console.log('[launch] 壳将自行启动便携 MySQL(13306) 与后端(17860)，窗口加载 http://127.0.0.1:17860；无需 vite/浏览器')
+const child = spawn(exe, [], { cwd: appDir, stdio: 'inherit', windowsHide: false })
+children.push(child)
+child.on('exit', (code) => {
+  console.log(`[launch] 桌面端已退出（code=${code}）。`)
+  void shutdown(code ?? 0)
+})
