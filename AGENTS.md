@@ -29,6 +29,8 @@
 - `npm run launch`：一键拉起桌面端（Electron 自拉后端 jar，同源加载 17860；无需 vite/浏览器；项目根「启动 TrailMind」快捷方式即调用它）
 - `npm run package`：打包 exe
 - `npm run package:backend`：后端 app-image 打包（bundled JRE，无需预装 Java；自包含打包 Phase 1）
+- `npm run package:desktop`：**打包 Wails 自包含桌面端**（便携 MySQL + bundled JRE + 壳 → `release/`，双击 `trailmind-shell.exe` 即用，无需预装 Java/MySQL；04 §26）
+- `node scripts/e2e-packaged.mjs` / `node scripts/e2e-shell.mjs`：**打包产物验收**（前者验初始化→建表→ngram→搜索→无残留，后者验壳编排与强杀孤儿清理）
 - `scripts/verify`：里程碑验收冒烟
 
 ## 当前进度
@@ -85,9 +87,18 @@
 
 - [x] 缺陷修复三：切图往返随机「进入导图无法自动适应」（用户反馈，07 §25）——已完成：根因为 §19 修复二门控只校验「store 全部节点已测量」不校验节点归属，切图时 MindMapEditor 不重挂载（RF store 持久）、store 的 content 在 fetch 返回前不清空，fitView 用上一图边界算缩放且 doneKey 记到新图 key（Electron 实机 CDP + [fitdbg] 埋点反解证实：切回 26 节点图时 fit 用 4 节点旧边界、zoom 1.325、包围盒 y1=2426 溢出）；修复双保险——`fitCheck.ts` 纯函数 `nodesReadyForFit`（数量相等 + id 属本图 + 宽高已测量）门控 fitView + `useMindmapStore.load` 开头清空旧 content 消除陈旧窗口；前端 281 → 287 单测、tsc 通过、Electron CDP 往返压测 19 轮 0 失败、npm run build BUILD SUCCESS；过程记录见产品工作区「TrailMind 开发」
 
+- [x] 自包含打包：壳与打包脚本改绑便携 MySQL（07 §26）——已完成（S1+S2：阻塞点解除 + 端到端实证）：原 Phase 0–4 已实现但端到端被「**MariaDB 不支持 MySQL `WITH PARSER ngram`**」阻塞（schema.sql/搜索建表即失败）。本次决策改捆绑**便携 MySQL 8.4 LTS**（用户三问确认：MySQL / NSIS 安装包 / 本期删 Electron），零搜索改动保留 ngram 与 N3 性能契约；`orchestrator.go` → `mysql.go`（`mysqld --initialize-insecure --basedir` + `--mysqlx=OFF` + `mysqladmin ping` 就绪判定，20 → **23 条 Go 单测**）、`mariadb-process.js` → `mysql-process.js`（22 条）、`package-desktop.mjs` 三级就位回退（12 条）；**新增强杀孤儿清理**（运行态文件 `%APPDATA%\TrailMind\run.json`，下次启动按「先后端后库」清理，修 M0/M2「强杀重启无残留」）；新增打包产物验收脚本 `scripts/e2e-packaged.mjs`（**S2 E2E ALL PASS 10/10**：初始化→建 9 表→**ngram 建索引**→search_text 维护→中文全文搜索命中→退出无残留）与 `scripts/e2e-shell.mjs`（**S2b SHELL ALL PASS 5/5**：壳自初始化+拉库+拉后端，强杀后重启清理孤儿并自行就绪）；后端 **266** + 前端 **287** + 脚本/桌面 **112** 单测全绿；过程记录 `docs/superpowers/sessions/2026-09-17-wails-packaging.md`。**剩余：NSIS 安装包产物（需人工提供 NSIS）、图标约定与 N4 启动验收、移除 Electron 壳（含 GUI 脚本迁移 WebView2 CDP）**
+
 - _注：以下 P2 项**暂不实现**，列入待排期：AI 会话自动摘要（方案已定，[09 §3](docs/09-风险清单与开放问题.md)：自带 Key 外部 API 为主 + 规则模板兜底，本地大模型预留 provider 接口）、每周复盘报告、会话模板、工作区模板、主题定制（基础 light/dark/system 主题已随 M4 任务四落地，此项指进阶自定义）。_
 
-下一任务：**v1.2 P2 可落地项已全部完成**（导入恢复 §20、Markdown 大纲导出 §21、多标签批量合并 §22、自定义快捷键 §23）+ **前端美化 §24 已完成**（悬浮岛式侧边栏 + 导图内联右侧 + 侧边栏可拖拽宽度 + 撤销 toast）。**剩余仅为暂缓项**：AI 会话自动摘要（方案见 09 §3）、每周复盘报告、会话/工作区模板、主题定制（基础主题已随 M4 任务四落地，此项指进阶自定义）；条件项：节点表化改造（搜索/引用成瓶颈时，05 §6）。见 09 §3 与 07 §8 Backlog P2 行。
+下一任务：**自包含 Wails 打包收尾（07 §26）** —— 已完成 S1（改绑便携 MySQL 8.4，解除 ngram 阻塞）与 S2（端到端实证：打包产物 10/10、壳编排 5/5）。**紧接着做**：
+1. **S3 NSIS 安装包**：`wails build -nsis`（需人工装 NSIS + 确认 `makensis` 在 PATH；安装目录需含 `mysql/` 与 `trailmind-backend/`，Wails NSIS 模板默认只带壳 exe）；
+2. **S4 图标约定与 N4 验收**：换 `branding/icon.ico` 重打包（壳/后端/安装包三处同步）+ 补 07 §3 M0 唯一未勾项「双击安装后 ≤3s 可交互」；
+3. **S5 移除 Electron 壳**：`desktop/main|preload`、`npm run launch/dev:desktop`、`electron-builder.yml` 退役 + 4 个 GUI/性能脚本（verify-m2-gui / perf-regression / perf-search / verify-m4-acceptance）从 Electron+CDP 迁到 WebView2 远程调试口；
+4. **前置文件需人工提供**（agent 会话无外网）：MySQL 8.4 便携 zip 放 `desktop/vendor/`、NSIS 安装包；
+5. **dogfooding 待补录**：本次过程记录暂存 `docs/superpowers/sessions/2026-09-17-wails-packaging.md`，需按 06 格式写入产品工作区「TrailMind 开发」。
+
+**其余仍为暂缓项**：AI 会话自动摘要（方案见 09 §3）、每周复盘报告、会话/工作区模板、主题定制（基础 light/dark/system 已随 M4 任务四落地，此项指进阶自定义）；条件项：节点表化改造（搜索/引用成瓶颈时，05 §6）。见 09 §3 与 07 §8 Backlog P2 行。
 
 ## 文档索引
 

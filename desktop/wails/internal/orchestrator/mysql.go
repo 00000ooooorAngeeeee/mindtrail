@@ -11,6 +11,7 @@ package orchestrator
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -52,6 +53,10 @@ const exeDbServer = "mysqld.exe"
 // exeDbAdmin 管理命令（ping / shutdown）。
 const exeDbAdmin = "mysqladmin.exe"
 
+// RunStateName 运行态文件名（%APPDATA%\TrailMind\run.json）：记录本次拉起的子进程 pid，
+// 供下次启动清理孤儿进程（壳被强杀/崩溃时 Run() 的清理路径不会执行，见 CleanupStale）。
+const RunStateName = "run.json"
+
 // —— 纯函数：路径 ——
 
 // ResolveDataDir 数据目录 %APPDATA%\TrailMind\db。
@@ -72,6 +77,82 @@ func ResolveDbBinDir(appDir string) string {
 // ResolveBackendExe 后端 app-image 可执行文件 %APPDIR%\trailmind-backend\trailmind-backend.exe。
 func ResolveBackendExe(appDir string) string {
 	return filepath.Join(appDir, BackendDirName, BackendExeName)
+}
+
+// ResolveRunStatePath 运行态文件路径 %APPDATA%\TrailMind\run.json。
+func ResolveRunStatePath(appDataRoot string) string {
+	return filepath.Join(appDataRoot, AppDirName, RunStateName)
+}
+
+// —— 运行态（孤儿进程清理）——
+
+// RunState 上次运行记录的子进程 pid（0 = 未启动）。
+type RunState struct {
+	DbPid      int `json:"dbPid"`
+	BackendPid int `json:"backendPid"`
+}
+
+// ParseRunState 解析运行态 JSON；空内容或非法 JSON 返回零值 + false（视为无记录，不阻断启动）。
+func ParseRunState(data string) (RunState, bool) {
+	if strings.TrimSpace(data) == "" {
+		return RunState{}, false
+	}
+	var st RunState
+	if err := json.Unmarshal([]byte(data), &st); err != nil {
+		return RunState{}, false
+	}
+	if st.DbPid == 0 && st.BackendPid == 0 {
+		return RunState{}, false
+	}
+	return st, true
+}
+
+// MarshalRunState 序列化运行态（写入 pidfile 用）。
+func MarshalRunState(st RunState) string {
+	b, err := json.Marshal(st)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+// CleanupStale 清理上次运行遗留的子进程（壳被强杀/崩溃时 Run() 的正常清理路径不会执行）。
+// 顺序与 Run 的收尾一致：先停后端（优雅 shutdown + kill 兜底），再停数据库。
+func (s *Shell) CleanupStale(appDataRoot, appDir string) {
+	path := ResolveRunStatePath(appDataRoot)
+	if !s.d.Exists(path) {
+		return
+	}
+	data, err := s.d.ReadFile(path)
+	if err != nil {
+		return
+	}
+	st, ok := ParseRunState(data)
+	if !ok {
+		_ = s.d.RemoveFile(path)
+		return
+	}
+	if st.BackendPid != 0 {
+		s.StopBackend(st.BackendPid)
+	}
+	if st.DbPid != 0 {
+		s.StopDatabase(appDir, st.DbPid)
+	}
+	_ = s.d.RemoveFile(path)
+}
+
+// writeRunState 记录本次拉起的子进程 pid（启动期写、正常收尾时删）。
+func (s *Shell) writeRunState(appDataRoot string, st RunState) {
+	p := ResolveRunStatePath(appDataRoot)
+	if err := s.d.MkdirAll(filepath.Dir(p)); err != nil {
+		return
+	}
+	_ = s.d.WriteFile(p, MarshalRunState(st))
+}
+
+// clearRunState 正常收尾后删除运行态文件。
+func (s *Shell) clearRunState(appDataRoot string) {
+	_ = s.d.RemoveFile(ResolveRunStatePath(appDataRoot))
 }
 
 // —— 纯函数：命令构造 ——
@@ -165,6 +246,9 @@ type Deps struct {
 	Exists       func(path string) bool
 	RemoveAll    func(path string) error
 	MkdirAll     func(path string) error                                      // 建目录（初始化前确保父目录存在）
+	ReadFile     func(path string) (string, error)                            // 读运行态文件（孤儿清理）
+	WriteFile    func(path string, data string) error                         // 写运行态文件（pidfile）
+	RemoveFile   func(path string) error                                      // 删运行态文件
 	Run          func(name string, args ...string) error                      // 一次性命令（mysqld --initialize / mysqladmin）
 	Start        func(name string, env []string, args ...string) (int, error) // 常驻进程
 	Kill         func(pid int)                                                // 强杀兜底
@@ -198,6 +282,20 @@ func DefaultDeps() Deps {
 		RemoveAll: os.RemoveAll,
 		MkdirAll: func(path string) error {
 			return os.MkdirAll(path, 0755)
+		},
+		ReadFile: func(path string) (string, error) {
+			b, err := os.ReadFile(path)
+			return string(b), err
+		},
+		WriteFile: func(path, data string) error {
+			return os.WriteFile(path, []byte(data), 0644)
+		},
+		RemoveFile: func(path string) error {
+			err := os.Remove(path)
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
 		},
 		Run: runQuiet,
 		Start: func(name string, env []string, args ...string) (int, error) {
@@ -348,18 +446,28 @@ func (s *Shell) StopDatabase(appDir string, pid int) {
 
 // Run 完整启停编排：起数据库 → 起 backend → 开窗（阻塞至关闭）→ 停 backend → 停数据库。
 // 任一步失败均按「已启动的逆序」清理，保证不残留进程（§6 崩溃兜底）。
+// 启动前先清理上次遗留（壳被强杀/崩溃时本函数的收尾不会执行）；本次拉起的 pid 写入运行态文件，
+// 正常收尾后删除——下次启动据此判断是否存在孤儿。
 func (s *Shell) Run(appDataRoot, appDir string, openWindow func() error) error {
+	s.CleanupStale(appDataRoot, appDir)
+
 	dbPid, err := s.StartDatabase(appDataRoot, appDir)
 	if err != nil {
 		return err
 	}
+	s.writeRunState(appDataRoot, RunState{DbPid: dbPid})
+
 	backendPid, err := s.StartBackend(appDir)
 	if err != nil {
 		s.StopDatabase(appDir, dbPid)
+		s.clearRunState(appDataRoot)
 		return err
 	}
+	s.writeRunState(appDataRoot, RunState{DbPid: dbPid, BackendPid: backendPid})
+
 	winErr := openWindow()
 	s.StopBackend(backendPid)
 	s.StopDatabase(appDir, dbPid)
+	s.clearRunState(appDataRoot)
 	return winErr
 }

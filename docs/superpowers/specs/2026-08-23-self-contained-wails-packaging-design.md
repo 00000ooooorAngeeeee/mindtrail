@@ -102,7 +102,10 @@ WebView2 → `http://127.0.0.1:17860`（前端，同源）→ `GET /api/v1/...` 
 3. 起 `trailmind-backend.exe`（注入 DB env）→ 轮询 `GET /api/v1/health`（≤60s，Spring Boot 启动）。
 4. WebView2 加载 `http://127.0.0.1:17860`。
 
-关闭：窗口关闭 → kill backend exe（进程组）→ `mysqladmin shutdown` MySQL（兜底 kill）。崩溃兜底：壳失败路径按已启动逆序清理，确保不残留 `mysqld`。
+关闭：窗口关闭 → kill backend exe（进程组）→ `mysqladmin shutdown` MySQL（兜底 kill）。
+**崩溃/强杀兜底（运行态文件）**：壳启动期把本次拉起的 pid 写入 `%APPDATA%\TrailMind\run.json`，正常收尾后删除；
+下次启动时 `Shell.Run` 先读该文件，按「先停后端、再停数据库」清理上次遗留（壳被强杀时进程内的清理路径不会执行），完成后删除文件。
+实机验证：强杀壳后 mysqld/后端残留 → 重新启动 → 新实例完成清理并自行就绪（`node scripts/e2e-shell.mjs` → S2b SHELL ALL PASS）。
 
 ## 7. 数据迁移（既有 MySQL → bundled MySQL）
 
@@ -164,6 +167,26 @@ WebView2 → `http://127.0.0.1:17860`（前端，同源）→ `GET /api/v1/...` 
 1. 双击 release 产物 → 出 TrailMind 窗口、后端自起、mariadb 自起，**无需预装 Java/MySQL**。
 2. 前端 `/api/v1` 同源可达（导图/会话/搜索全功能，搜索 FULLTEXT 正常）。
 3. 改 `branding/icon.ico` 重打包 → 壳与后端 exe 图标均替换。
-4. 关闭窗口 → 无残留 `mariadbd.exe`/`trailmind-backend.exe`/JVM 进程。
-5. 后端 262 + 前端 281 + 脚本 测试全绿；Phase 0 新增同源服务单测；Phase 2/4 新增脚本单测。
+4. 关闭窗口 → 无残留 `mysqld.exe`/`trailmind-backend.exe`/JVM 进程。
+5. 后端 + 前端 + 脚本 测试全绿；Phase 0 新增同源服务单测；Phase 2/4 新增脚本单测；Phase 3 新增 Go 单测（含强杀孤儿清理）。
 6. 既有数据经备份导出→导入恢复完整（M4 任务六往返既有测试覆盖）。
+
+## 13. 端到端验证脚本（本次新增）
+
+两段脚本用于**打包产物**的实机验收（需先 `npm run package:desktop` 或手工备好 `release/` 布局；MySQL 便携目录可放 `release/mysql/`）：
+
+| 脚本 | 作用 | 输出 |
+|---|---|---|
+| `scripts/e2e-packaged.mjs` | 编排等价流程：`mysqld --initialize-insecure` → 起库（13306）→ 起后端 app-image（注入 DB env）→ `/health` → 同源前端 → 幂等建 9 表 → **`WITH PARSER ngram` 建索引** → 保存导图校验 search_text/node_count → **中文全文搜索命中** → 反序清理无残留 | `S2 E2E: ALL PASS（10 项）` |
+| `scripts/e2e-shell.mjs` | 壳 exe 真实编排：壳自初始化数据目录 + 拉库 + 拉后端 → 强杀后确认残留 → **再次启动验证孤儿清理并自行就绪** | `S2b SHELL: ALL PASS（5 项）` |
+
+环境变量：`E2E_APPDATA_ROOT`（隔离数据目录，避免污染真实 `%APPDATA%`）、`E2E_LOG_DIR`、`E2E_DB_PORT`；
+夹具数据库目录通过 `MYSQL_FIXTURE_DIR` 指定（缺省为本机安装的 MySQL 便携副本；正式发布仍用打包脚本下载的官方 zip）。
+
+## 14. 受限环境注意事项（agent 沙箱）
+
+- **Node `spawn`/`spawnSync` 带管道（默认 stdio）会 `EPERM`**：`node --test`（runner 用管道拉起子进程）、`vitest`（esbuild 服务）等在本沙箱直接失败；
+  规避：单测文件用 `node <file>` 直跑；脚本内需捕获输出时用 `spawnSync` + fd 重定向到临时文件（`stdio: ['ignore', fd, fd]`）。
+- **jpackage app-image 必须拿到有效 std 句柄**，否则弹「Failed to launch JVM」（`d1b0b1a` 已修）：壳与脚本都以 NUL/文件句柄替代 NULL。
+- **GUI 自动化脚本**（`verify-m2-gui.mjs` / `perf-regression.mjs`）在本沙箱不可运行（Electron/WebView2 的 mojo 命名管道被拒），需全权限会话或人工执行。
+- 沙箱下 `tasklist`/`Get-CimInstance Win32_Process` 可能 `Access denied`，残留检查改用 PID 探活（`process.kill(pid, 0)`）。

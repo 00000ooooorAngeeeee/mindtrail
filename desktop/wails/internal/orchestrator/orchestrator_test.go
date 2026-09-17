@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,17 +13,44 @@ type stubEnv struct {
 	calls     []string
 	dbUp      bool
 	backendUp bool
+	files     map[string]string // 运行态文件内容（pidfile）
 }
 
 func (s *stubEnv) deps() Deps {
+	if s.files == nil {
+		s.files = map[string]string{}
+	}
 	return Deps{
-		Exists: func(p string) bool { return false },
+		Exists: func(p string) bool {
+			if filepath.Base(p) == RunStateName {
+				_, ok := s.files[p]
+				return ok
+			}
+			return false
+		},
 		RemoveAll: func(p string) error {
 			s.calls = append(s.calls, "remove:"+filepath.Base(p))
 			return nil
 		},
 		MkdirAll: func(p string) error {
 			s.calls = append(s.calls, "mkdir:"+filepath.Base(p))
+			return nil
+		},
+		ReadFile: func(p string) (string, error) {
+			v, ok := s.files[p]
+			if !ok {
+				return "", os.ErrNotExist
+			}
+			return v, nil
+		},
+		WriteFile: func(p, data string) error {
+			s.files[p] = data
+			s.calls = append(s.calls, "write:"+filepath.Base(p))
+			return nil
+		},
+		RemoveFile: func(p string) error {
+			delete(s.files, p)
+			s.calls = append(s.calls, "unlink:"+filepath.Base(p))
 			return nil
 		},
 		Run: func(name string, args ...string) error {
@@ -307,5 +335,70 @@ func TestRunBackendFailStopsDatabase(t *testing.T) {
 	}
 	if strings.Contains(seq, "start:trailmind-backend.exe") {
 		t.Fatalf("端口被占不应拉起 backend：%q", seq)
+	}
+}
+
+// —— 运行态：孤儿进程清理 ——
+
+func TestRunStateRoundTrip(t *testing.T) {
+	in := RunState{DbPid: 11, BackendPid: 22}
+	got, ok := ParseRunState(MarshalRunState(in))
+	if !ok || got != in {
+		t.Fatalf("ParseRunState = %+v, ok=%v", got, ok)
+	}
+	if _, ok := ParseRunState(""); ok {
+		t.Fatal("空内容应视为无记录")
+	}
+	if _, ok := ParseRunState("{ 非法"); ok {
+		t.Fatal("非法 JSON 应视为无记录")
+	}
+	if _, ok := ParseRunState(`{"dbPid":0,"backendPid":0}`); ok {
+		t.Fatal("全 0 pid 应视为无记录")
+	}
+}
+
+func TestCleanupStaleNoFile(t *testing.T) {
+	st := &stubEnv{}
+	fastShell(st.deps()).CleanupStale("C:\\appdata", "D:\\app")
+	if len(st.calls) != 0 {
+		t.Fatalf("无运行态文件不应有任何动作：%q", st.calls)
+	}
+}
+
+// 强杀遗留：上次记录的 db + backend pid 都要被停掉，且运行态文件被删除。
+func TestCleanupStaleStopsRecordedProcesses(t *testing.T) {
+	st := &stubEnv{}
+	d := st.deps()
+	p := ResolveRunStatePath("C:\\appdata")
+	st.files[p] = MarshalRunState(RunState{DbPid: 111, BackendPid: 222})
+	fastShell(d).CleanupStale("C:\\appdata", "D:\\app")
+
+	seq := strings.Join(st.calls, " ")
+	backendShutdown := strings.Index(seq, "shutdown:http://127.0.0.1:17860/api/v1/shutdown")
+	dbShutdown := strings.Index(seq, "run:mysqladmin.exe:-u root --port 13306 shutdown")
+	unlink := strings.Index(seq, "unlink:"+RunStateName)
+	if !(0 <= backendShutdown && backendShutdown < dbShutdown) {
+		t.Fatalf("应先停后端再停数据库：%q", seq)
+	}
+	if unlink < 0 {
+		t.Fatalf("清理后应删除运行态文件：%q", seq)
+	}
+	if _, ok := st.files[p]; ok {
+		t.Fatal("运行态文件应已删除")
+	}
+}
+
+// 正常收尾（关窗）后不留运行态文件——下次启动不会误判为孤儿。
+func TestRunClearsRunStateOnNormalExit(t *testing.T) {
+	st := &stubEnv{}
+	if err := fastShell(st.deps()).Run("C:\\appdata", "D:\\app", func() error { return nil }); err != nil {
+		t.Fatalf("Run = %v", err)
+	}
+	seq := strings.Join(st.calls, " ")
+	if !strings.Contains(seq, "write:"+RunStateName) {
+		t.Fatalf("启动期应写运行态文件：%q", seq)
+	}
+	if _, ok := st.files[ResolveRunStatePath("C:\\appdata")]; ok {
+		t.Fatal("正常收尾后运行态文件应被删除")
 	}
 }
